@@ -1,0 +1,325 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Property Data Extractor</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🏠</text></svg>">
+</head>
+<body class="bg-gradient-to-br from-blue-50 to-indigo-100 min-h-screen">
+    <div class="container mx-auto px-4 py-8 max-w-4xl">
+        <div class="bg-white rounded-xl shadow-xl p-8 backdrop-blur-sm bg-white/95">
+            <div class="text-center mb-8">
+                <h1 class="text-5xl font-bold bg-gradient-to-r from-blue-600 to-purple-600 bg-clip-text text-transparent mb-3">
+                    🏠 Property Data Extractor
+                </h1>
+                <p class="text-gray-600 text-lg">Extract parcel ID and owner information from property addresses</p>
+                <div class="mt-4 flex justify-center space-x-4 text-sm text-gray-500">
+                    <span class="flex items-center"><span class="w-2 h-2 bg-green-400 rounded-full mr-1"></span>Fast</span>
+                    <span class="flex items-center"><span class="w-2 h-2 bg-blue-400 rounded-full mr-1"></span>Accurate</span>
+                    <span class="flex items-center"><span class="w-2 h-2 bg-purple-400 rounded-full mr-1"></span>Reliable</span>
+                </div>
+            </div>
+            
+            <div class="bg-gradient-to-r from-blue-50 to-purple-50 border border-blue-200 rounded-lg p-4 mb-6">
+                <h3 class="font-semibold text-blue-800 mb-2 flex items-center">
+                    ℹ️ How to use:
+                </h3>
+                <ol class="text-blue-700 text-sm space-y-1 ml-4">
+                    <li>1. Enter property addresses (one per line, max 10)</li>
+                    <li>2. Click "Extract Property Data"</li>
+                    <li>3. View parcel ID and owner information</li>
+                </ol>
+            </div>
+            
+            <div class="mb-6">
+                <label for="addresses" class="block text-sm font-medium text-gray-700 mb-2">
+                    📍 Enter Property Addresses:
+                </label>
+                <textarea 
+                    id="addresses" 
+                    rows="6" 
+                    class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200 resize-none"
+                    placeholder="560 Shavano St, Crested Butte, CO 81224, USA&#10;123 Main St, Denver, CO 80202, USA&#10;Enter up to 10 addresses..."
+                ></textarea>
+                <div class="flex justify-between items-center mt-2">
+                    <p class="text-sm text-gray-500">One address per line. Maximum 10 addresses per request.</p>
+                    <button 
+                        onclick="loadSampleData()" 
+                        class="text-sm text-blue-600 hover:text-blue-800 underline"
+                    >
+                        Load Sample Data
+                    </button>
+                </div>
+            </div>
+            
+            <div class="flex justify-between items-center mb-6">
+                <button 
+                    onclick="extractData()" 
+                    id="extractBtn"
+                    class="bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700 text-white font-semibold py-3 px-8 rounded-lg transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed flex items-center shadow-lg"
+                >
+                    <span id="btnText">🔍 Extract Property Data</span>
+                </button>
+                
+                <button 
+                    onclick="clearResults()" 
+                    id="clearBtn"
+                    class="bg-gray-500 hover:bg-gray-600 text-white font-medium py-3 px-6 rounded-lg transition duration-200 shadow-md"
+                >
+                    🗑️ Clear All
+                </button>
+            </div>
+            
+            <div id="results" class="mt-8"></div>
+        </div>
+        
+        <footer class="text-center mt-8 text-gray-500 text-sm">
+            <p class="mb-2">Built with ❤️ using Vercel Serverless Functions & Puppeteer</p>
+            <p class="text-xs">Data sourced from Regrid • For educational and research purposes</p>
+        </footer>
+    </div>
+
+    <script>
+        let requestCount = 0;
+
+        async function extractData() {
+            const addressesText = document.getElementById('addresses').value;
+            const addresses = addressesText.split('\n').filter(addr => addr.trim()).slice(0, 10);
+            const resultsDiv = document.getElementById('results');
+            const button = document.getElementById('extractBtn');
+            const btnText = document.getElementById('btnText');
+            
+            if (addresses.length === 0) {
+                showAlert('Please enter at least one address', 'warning');
+                return;
+            }
+
+            if (addresses.length > 10) {
+                showAlert('Maximum 10 addresses allowed per request', 'warning');
+                return;
+            }
+
+            requestCount++;
+            button.disabled = true;
+            btnText.innerHTML = '⏳ Processing...';
+            
+            const estimatedTime = addresses.length * 3;
+            resultsDiv.innerHTML = `
+                <div class="bg-gradient-to-r from-blue-50 to-purple-50 border border-blue-200 rounded-lg p-6 text-center">
+                    <div class="flex items-center justify-center mb-4">
+                        <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mr-3"></div>
+                        <span class="text-blue-800 font-semibold">Processing ${addresses.length} address(es)...</span>
+                    </div>
+                    <p class="text-blue-600 text-sm">Estimated time: ${estimatedTime}-${estimatedTime + 30} seconds</p>
+                    <div class="mt-4 bg-blue-100 rounded-full h-2">
+                        <div class="bg-blue-600 h-2 rounded-full animate-pulse" style="width: 0%" id="progressBar"></div>
+                    </div>
+                </div>
+            `;
+
+            // Animate progress bar
+            animateProgressBar(estimatedTime * 1000);
+
+            try {
+                const response = await fetch('/api/scrape', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ addresses })
+                });
+
+                const data = await response.json();
+                
+                if (!response.ok) {
+                    throw new Error(data.error || 'Request failed');
+                }
+
+                displayResults(data.data || data);
+                showAlert(`Successfully processed ${addresses.length} address(es)!`, 'success');
+            } catch (error) {
+                resultsDiv.innerHTML = `
+                    <div class="bg-red-50 border border-red-200 rounded-lg p-6 text-center">
+                        <div class="flex items-center justify-center mb-2">
+                            <span class="text-red-600 text-3xl mr-3">❌</span>
+                            <span class="text-red-800 font-semibold">Processing Failed</span>
+                        </div>
+                        <p class="text-red-600">${error.message}</p>
+                        <button onclick="extractData()" class="mt-4 bg-red-600 hover:bg-red-700 text-white px-4 py-2 rounded-md text-sm">
+                            🔄 Try Again
+                        </button>
+                    </div>
+                `;
+            } finally {
+                button.disabled = false;
+                btnText.innerHTML = '🔍 Extract Property Data';
+            }
+        }
+
+        function animateProgressBar(duration) {
+            const progressBar = document.getElementById('progressBar');
+            if (!progressBar) return;
+            
+            let width = 0;
+            const interval = setInterval(() => {
+                width += 100 / (duration / 100);
+                if (width >= 100) {
+                    width = 100;
+                    clearInterval(interval);
+                }
+                progressBar.style.width = width + '%';
+            }, 100);
+        }
+
+        function displayResults(results) {
+            const resultsDiv = document.getElementById('results');
+            
+            const successCount = results.filter(r => !r.error).length;
+            const errorCount = results.length - successCount;
+            
+            let html = `
+                <div class="mb-6">
+                    <h2 class="text-3xl font-bold text-gray-800 mb-2">📊 Results</h2>
+                    <div class="flex space-x-4 text-sm">
+                        <span class="bg-green-100 text-green-800 px-3 py-1 rounded-full">✅ ${successCount} Success</span>
+                        ${errorCount > 0 ? `<span class="bg-red-100 text-red-800 px-3 py-1 rounded-full">❌ ${errorCount} Failed</span>` : ''}
+                    </div>
+                </div>
+            `;
+            
+            results.forEach((result, index) => {
+                const isError = result.error;
+                const cardClass = isError 
+                    ? 'bg-gradient-to-r from-red-50 to-pink-50 border-red-200' 
+                    : 'bg-gradient-to-r from-green-50 to-emerald-50 border-green-200';
+                const icon = isError ? '❌' : '✅';
+                
+                html += `
+                    <div class="${cardClass} border rounded-xl p-6 mb-4 shadow-sm hover:shadow-md transition-shadow duration-200">
+                        <div class="flex items-start">
+                            <span class="text-2xl mr-4 mt-1">${icon}</span>
+                            <div class="flex-1">
+                                <h3 class="font-bold text-gray-800 mb-3 text-lg">📍 ${result.originalAddress}</h3>
+                `;
+                
+                if (isError) {
+                    html += `
+                        <div class="bg-red-100 border border-red-200 rounded-lg p-3">
+                            <p class="text-red-800"><strong>Error:</strong> ${result.error}</p>
+                        </div>
+                    `;
+                } else {
+                    html += `
+                        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                            <div class="bg-white rounded-lg p-3 border border-gray-200">
+                                <div class="flex items-center mb-1">
+                                    <span class="text-blue-600 mr-2">🏷️</span>
+                                    <span class="font-semibold text-gray-600">Parcel ID</span>
+                                </div>
+                                <span class="text-gray-800 font-mono text-sm">${result.parcelId}</span>
+                            </div>
+                            <div class="bg-white rounded-lg p-3 border border-gray-200">
+                                <div class="flex items-center mb-1">
+                                    <span class="text-purple-600 mr-2">👤</span>
+                                    <span class="font-semibold text-gray-600">Owner</span>
+                                </div>
+                                <span class="text-gray-800">${result.ownerName}</span>
+                            </div>
+                            <div class="bg-white rounded-lg p-3 border border-gray-200">
+                                <div class="flex items-center mb-1">
+                                    <span class="text-green-600 mr-2">🏠</span>
+                                    <span class="font-semibold text-gray-600">Address</span>
+                                </div>
+                                <span class="text-gray-800">${result.address}</span>
+                            </div>
+                            <div class="bg-white rounded-lg p-3 border border-gray-200">
+                                <div class="flex items-center mb-1">
+                                    <span class="text-orange-600 mr-2">📍</span>
+                                    <span class="font-semibold text-gray-600">Location</span>
+                                </div>
+                                <span class="text-gray-800">${result.city}, ${result.state}</span>
+                            </div>
+                            <div class="bg-white rounded-lg p-3 border border-gray-200">
+                                <div class="flex items-center mb-1">
+                                    <span class="text-indigo-600 mr-2">🏗️</span>
+                                    <span class="font-semibold text-gray-600">Type</span>
+                                </div>
+                                <span class="text-gray-800">${result.propertyType}</span>
+                            </div>
+                            <div class="bg-white rounded-lg p-3 border border-gray-200">
+                                <div class="flex items-center mb-1">
+                                    <span class="text-yellow-600 mr-2">🎯</span>
+                                    <span class="font-semibold text-gray-600">Match Score</span>
+                                </div>
+                                <span class="text-gray-800">${result.score}</span>
+                            </div>
+                        </div>
+                    `;
+                }
+                
+                html += `
+                            </div>
+                        </div>
+                    </div>
+                `;
+            });
+            
+            resultsDiv.innerHTML = html;
+        }
+
+        function clearResults() {
+            document.getElementById('addresses').value = '';
+            document.getElementById('results').innerHTML = '';
+        }
+
+        function loadSampleData() {
+            document.getElementById('addresses').value = `560 Shavano St, Crested Butte, CO 81224, USA
+123 Main St, Denver, CO 80202, USA
+1600 Amphitheatre Parkway, Mountain View, CA 94043, USA`;
+        }
+
+        function showAlert(message, type) {
+            const alertDiv = document.createElement('div');
+            const bgColor = type === 'success' ? 'bg-green-100 border-green-400 text-green-700' : 'bg-yellow-100 border-yellow-400 text-yellow-700';
+            
+            alertDiv.className = `fixed top-4 right-4 ${bgColor} border px-4 py-3 rounded-lg shadow-lg z-50 transition-all duration-300`;
+            alertDiv.innerHTML = `
+                <div class="flex items-center">
+                    <span class="mr-2">${type === 'success' ? '✅' : '⚠️'}</span>
+                    <span>${message}</span>
+                </div>
+            `;
+            
+            document.body.appendChild(alertDiv);
+            
+            setTimeout(() => {
+                alertDiv.style.opacity = '0';
+                setTimeout(() => alertDiv.remove(), 300);
+            }, 3000);
+        }
+
+        // Auto-resize textarea
+        document.getElementById('addresses').addEventListener('input', function() {
+            this.style.height = 'auto';
+            this.style.height = Math.min(this.scrollHeight, 200) + 'px';
+        });
+
+        // Add some interactive effects
+        document.addEventListener('DOMContentLoaded', function() {
+            // Add floating animation to the title
+            const title = document.querySelector('h1');
+            title.style.animation = 'float 3s ease-in-out infinite';
+            
+            // Add CSS for floating animation
+            const style = document.createElement('style');
+            style.textContent = `
+                @keyframes float {
+                    0%, 100% { transform: translateY(0px); }
+                    50% { transform: translateY(-5px); }
+                }
+            `;
+            document.head.appendChild(style);
+        });
+    </script>
+</body>
+</html>
