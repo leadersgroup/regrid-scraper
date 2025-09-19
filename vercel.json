@@ -2,8 +2,7 @@
   "version": 2,
   "functions": {
     "api/scrape.js": {
-      "maxDuration": 60,
-      "memory": 1024
+      "maxDuration": 60
     }
   },
   "routes": [
