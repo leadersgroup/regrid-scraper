@@ -1,110 +1,160 @@
 const chromium = require('@sparticuz/chromium');
 const puppeteer = require('puppeteer-core');
 
-// Export as default function for Vercel
 module.exports = async function handler(req, res) {
-  console.log('Function invoked:', req.method, req.url);
-
-  // Enable CORS
+  // Set headers first thing
+  res.setHeader('Content-Type', 'application/json');
   res.setHeader('Access-Control-Allow-Credentials', true);
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET,OPTIONS,PATCH,DELETE,POST,PUT');
   res.setHeader('Access-Control-Allow-Headers', 'X-CSRF-Token, X-Requested-With, Accept, Accept-Version, Content-Length, Content-MD5, Content-Type, Date, X-Api-Version');
 
-  if (req.method === 'OPTIONS') {
-    console.log('Handling CORS preflight');
-    res.status(200).end();
-    return;
-  }
+  console.log('=== Function Start ===');
+  console.log('Method:', req.method);
+  console.log('URL:', req.url);
+  console.log('Headers:', JSON.stringify(req.headers, null, 2));
 
-  if (req.method !== 'POST') {
-    console.log('Method not allowed:', req.method);
-    return res.status(405).json({ error: 'Method not allowed. Use POST.' });
-  }
-
-  let browser = null;
-  
   try {
-    const { addresses } = req.body;
-    console.log('Received addresses:', addresses);
+    if (req.method === 'OPTIONS') {
+      console.log('Handling CORS preflight');
+      return res.status(200).json({ message: 'CORS OK' });
+    }
+
+    if (req.method === 'GET') {
+      console.log('GET request - returning test response');
+      return res.status(200).json({ 
+        message: 'API is working', 
+        timestamp: new Date().toISOString(),
+        chromiumPath: await chromium.executablePath(),
+        available: true 
+      });
+    }
+
+    if (req.method !== 'POST') {
+      console.log('Method not allowed:', req.method);
+      return res.status(405).json({ error: `Method ${req.method} not allowed. Use POST.` });
+    }
+
+    // Parse request body
+    let requestBody;
+    try {
+      requestBody = req.body;
+      if (typeof requestBody === 'string') {
+        requestBody = JSON.parse(requestBody);
+      }
+    } catch (parseError) {
+      console.error('Body parse error:', parseError);
+      return res.status(400).json({ error: 'Invalid JSON in request body' });
+    }
+
+    console.log('Request body:', JSON.stringify(requestBody, null, 2));
+
+    const { addresses } = requestBody;
     
     if (!addresses || !Array.isArray(addresses)) {
       return res.status(400).json({ error: 'Addresses array is required' });
+    }
+
+    if (addresses.length === 0) {
+      return res.status(400).json({ error: 'At least one address is required' });
     }
 
     if (addresses.length > 10) {
       return res.status(400).json({ error: 'Maximum 10 addresses per request' });
     }
 
-    console.log('Starting browser...');
-    
-    // Launch browser optimized for Vercel
-    browser = await puppeteer.launch({
-      args: chromium.args,
-      defaultViewport: chromium.defaultViewport,
-      executablePath: await chromium.executablePath(),
-      headless: chromium.headless,
-      ignoreHTTPSErrors: true,
-    });
+    console.log('Processing addresses:', addresses);
 
-    console.log('Browser started successfully');
-    const page = await browser.newPage();
-    
-    // Set realistic user agent
-    await page.setUserAgent('Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36');
-
-    console.log('Establishing session...');
-    
-    // Navigate to Regrid to establish session
-    await page.goto('https://app.regrid.com/us', {
-      waitUntil: 'networkidle2',
-      timeout: 30000
-    });
-
-    await new Promise(resolve => setTimeout(resolve, 3000));
-    console.log('Session established');
-
-    const results = [];
-    
-    for (let i = 0; i < addresses.length; i++) {
-      const address = addresses[i];
-      console.log(`Processing ${i + 1}/${addresses.length}: ${address}`);
+    // Test if we can create a simple browser first
+    let browser = null;
+    try {
+      console.log('Starting browser...');
       
-      try {
-        const result = await searchProperty(page, address);
-        results.push(result);
+      browser = await puppeteer.launch({
+        args: chromium.args,
+        defaultViewport: chromium.defaultViewport,
+        executablePath: await chromium.executablePath(),
+        headless: chromium.headless,
+        ignoreHTTPSErrors: true,
+      });
+
+      console.log('Browser started successfully');
+      const page = await browser.newPage();
+      
+      // Set realistic user agent
+      await page.setUserAgent('Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36');
+
+      console.log('Establishing session...');
+      
+      // Navigate to Regrid to establish session
+      await page.goto('https://app.regrid.com/us', {
+        waitUntil: 'networkidle2',
+        timeout: 30000
+      });
+
+      await new Promise(resolve => setTimeout(resolve, 3000));
+      console.log('Session established');
+
+      const results = [];
+      
+      for (let i = 0; i < addresses.length; i++) {
+        const address = addresses[i];
+        console.log(`Processing ${i + 1}/${addresses.length}: ${address}`);
         
-        // Add delay between requests
-        if (i < addresses.length - 1) {
-          await new Promise(resolve => setTimeout(resolve, 2000));
+        try {
+          const result = await searchProperty(page, address);
+          results.push(result);
+          console.log(`Result for ${address}:`, result);
+          
+          // Add delay between requests
+          if (i < addresses.length - 1) {
+            console.log('Waiting 2 seconds...');
+            await new Promise(resolve => setTimeout(resolve, 2000));
+          }
+        } catch (error) {
+          console.error(`Error processing ${address}:`, error);
+          results.push({
+            originalAddress: address,
+            error: error.message
+          });
         }
-      } catch (error) {
-        console.error(`Error processing ${address}:`, error);
-        results.push({
-          originalAddress: address,
-          error: error.message
-        });
       }
+
+      await browser.close();
+      browser = null;
+
+      console.log('Processing complete, returning results');
+      return res.status(200).json({ success: true, data: results });
+
+    } catch (browserError) {
+      console.error('Browser error:', browserError);
+      
+      if (browser) {
+        try {
+          await browser.close();
+        } catch (closeError) {
+          console.error('Error closing browser:', closeError);
+        }
+      }
+      
+      return res.status(500).json({ 
+        error: 'Browser initialization failed', 
+        details: browserError.message,
+        stack: browserError.stack
+      });
     }
-
-    await browser.close();
-    browser = null;
-
-    console.log('Processing complete, returning results');
-    res.status(200).json({ success: true, data: results });
 
   } catch (error) {
-    console.error('Handler error:', error);
+    console.error('=== HANDLER ERROR ===');
+    console.error('Error:', error);
+    console.error('Stack:', error.stack);
     
-    if (browser) {
-      try {
-        await browser.close();
-      } catch (closeError) {
-        console.error('Error closing browser:', closeError);
-      }
-    }
-    
-    res.status(500).json({ error: error.message, stack: error.stack });
+    return res.status(500).json({ 
+      error: 'Internal server error', 
+      details: error.message,
+      stack: error.stack,
+      timestamp: new Date().toISOString()
+    });
   }
 };
 
@@ -112,6 +162,8 @@ async function searchProperty(page, address) {
   try {
     const encodedAddress = encodeURIComponent(address);
     const searchUrl = `https://app.regrid.com/search.json?query=${encodedAddress}&autocomplete=1&context=false&strict=false`;
+
+    console.log('Searching URL:', searchUrl);
 
     const headers = {
       'Accept': 'application/json, text/javascript, */*; q=0.01',
@@ -136,17 +188,20 @@ async function searchProperty(page, address) {
     }
 
     const responseText = await response.text();
-    let searchResults;
+    console.log('Search response preview:', responseText.substring(0, 200));
     
+    let searchResults;
     try {
       searchResults = JSON.parse(responseText);
     } catch (parseError) {
-      throw new Error('Invalid JSON response from server');
+      console.error('Failed to parse search response:', responseText.substring(0, 500));
+      throw new Error('Invalid JSON response from Regrid API');
     }
 
     return parseSearchResults(searchResults, address);
 
   } catch (error) {
+    console.error(`Search error for ${address}:`, error);
     throw error;
   }
 }
