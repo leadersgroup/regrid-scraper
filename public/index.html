@@ -84,77 +84,100 @@
     <script>
         let requestCount = 0;
 
-        async function extractData() {
-            const addressesText = document.getElementById('addresses').value;
-            const addresses = addressesText.split('\n').filter(addr => addr.trim()).slice(0, 10);
-            const resultsDiv = document.getElementById('results');
-            const button = document.getElementById('extractBtn');
-            const btnText = document.getElementById('btnText');
-            
-            if (addresses.length === 0) {
-                showAlert('Please enter at least one address', 'warning');
-                return;
-            }
+        // Replace the extractData function in your index.html with this debug version:
 
-            if (addresses.length > 10) {
-                showAlert('Maximum 10 addresses allowed per request', 'warning');
-                return;
-            }
+async function extractData() {
+    const addressesText = document.getElementById('addresses').value;
+    const addresses = addressesText.split('\n').filter(addr => addr.trim()).slice(0, 10);
+    const resultsDiv = document.getElementById('results');
+    const button = document.getElementById('extractBtn');
+    const btnText = document.getElementById('btnText');
+    
+    if (addresses.length === 0) {
+        showAlert('Please enter at least one address', 'warning');
+        return;
+    }
 
-            requestCount++;
-            button.disabled = true;
-            btnText.innerHTML = '⏳ Processing...';
-            
-            const estimatedTime = addresses.length * 3;
-            resultsDiv.innerHTML = `
-                <div class="bg-gradient-to-r from-blue-50 to-purple-50 border border-blue-200 rounded-lg p-6 text-center">
-                    <div class="flex items-center justify-center mb-4">
-                        <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mr-3"></div>
-                        <span class="text-blue-800 font-semibold">Processing ${addresses.length} address(es)...</span>
-                    </div>
-                    <p class="text-blue-600 text-sm">Estimated time: ${estimatedTime}-${estimatedTime + 30} seconds</p>
-                    <div class="mt-4 bg-blue-100 rounded-full h-2">
-                        <div class="bg-blue-600 h-2 rounded-full animate-pulse" style="width: 0%" id="progressBar"></div>
-                    </div>
-                </div>
-            `;
+    if (addresses.length > 10) {
+        showAlert('Maximum 10 addresses allowed per request', 'warning');
+        return;
+    }
 
-            // Animate progress bar
-            animateProgressBar(estimatedTime * 1000);
+    button.disabled = true;
+    btnText.innerHTML = '⏳ Processing...';
+    
+    const estimatedTime = addresses.length * 3;
+    resultsDiv.innerHTML = `
+        <div class="bg-gradient-to-r from-blue-50 to-purple-50 border border-blue-200 rounded-lg p-6 text-center">
+            <div class="flex items-center justify-center mb-4">
+                <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mr-3"></div>
+                <span class="text-blue-800 font-semibold">Processing ${addresses.length} address(es)...</span>
+            </div>
+            <p class="text-blue-600 text-sm">Estimated time: ${estimatedTime}-${estimatedTime + 30} seconds</p>
+        </div>
+    `;
 
-            try {
-                const response = await fetch('/api/scrape', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ addresses })
-                });
+    try {
+        console.log('Making request to /api/scrape with addresses:', addresses);
+        
+        const response = await fetch('/api/scrape', {
+            method: 'POST',
+            headers: { 
+                'Content-Type': 'application/json',
+                'Accept': 'application/json'
+            },
+            body: JSON.stringify({ addresses })
+        });
 
-                const data = await response.json();
-                
-                if (!response.ok) {
-                    throw new Error(data.error || 'Request failed');
-                }
-
-                displayResults(data.data || data);
-                showAlert(`Successfully processed ${addresses.length} address(es)!`, 'success');
-            } catch (error) {
-                resultsDiv.innerHTML = `
-                    <div class="bg-red-50 border border-red-200 rounded-lg p-6 text-center">
-                        <div class="flex items-center justify-center mb-2">
-                            <span class="text-red-600 text-3xl mr-3">❌</span>
-                            <span class="text-red-800 font-semibold">Processing Failed</span>
-                        </div>
-                        <p class="text-red-600">${error.message}</p>
-                        <button onclick="extractData()" class="mt-4 bg-red-600 hover:bg-red-700 text-white px-4 py-2 rounded-md text-sm">
-                            🔄 Try Again
-                        </button>
-                    </div>
-                `;
-            } finally {
-                button.disabled = false;
-                btnText.innerHTML = '🔍 Extract Property Data';
-            }
+        console.log('Response status:', response.status);
+        console.log('Response headers:', Object.fromEntries(response.headers.entries()));
+        
+        // Get the raw response text first
+        const responseText = await response.text();
+        console.log('Raw response text:', responseText);
+        
+        // Try to parse as JSON
+        let data;
+        try {
+            data = JSON.parse(responseText);
+        } catch (parseError) {
+            console.error('JSON parse error:', parseError);
+            throw new Error(`Server returned invalid JSON. Status: ${response.status}. Response: ${responseText.substring(0, 200)}...`);
         }
+        
+        if (!response.ok) {
+            throw new Error(data.error || `HTTP ${response.status}: ${response.statusText}`);
+        }
+
+        console.log('Parsed data:', data);
+        displayResults(data.data || data);
+        showAlert(`Successfully processed ${addresses.length} address(es)!`, 'success');
+        
+    } catch (error) {
+        console.error('Request error:', error);
+        resultsDiv.innerHTML = `
+            <div class="bg-red-50 border border-red-200 rounded-lg p-6">
+                <div class="flex items-center justify-center mb-2">
+                    <span class="text-red-600 text-3xl mr-3">❌</span>
+                    <span class="text-red-800 font-semibold">Processing Failed</span>
+                </div>
+                <div class="text-red-600 text-sm space-y-2">
+                    <p><strong>Error:</strong> ${error.message}</p>
+                    <details class="mt-4">
+                        <summary class="cursor-pointer text-red-700 hover:text-red-900">Show Debug Info</summary>
+                        <pre class="mt-2 p-2 bg-red-100 rounded text-xs overflow-auto">${error.stack || 'No stack trace available'}</pre>
+                    </details>
+                </div>
+                <button onclick="extractData()" class="mt-4 bg-red-600 hover:bg-red-700 text-white px-4 py-2 rounded-md text-sm">
+                    🔄 Try Again
+                </button>
+            </div>
+        `;
+    } finally {
+        button.disabled = false;
+        btnText.innerHTML = '🔍 Extract Property Data';
+    }
+}
 
         function animateProgressBar(duration) {
             const progressBar = document.getElementById('progressBar');
