@@ -1,7 +1,10 @@
 const chromium = require('@sparticuz/chromium');
 const puppeteer = require('puppeteer-core');
 
-export default async function handler(req, res) {
+// Export as default function for Vercel
+module.exports = async function handler(req, res) {
+  console.log('Function invoked:', req.method, req.url);
+
   // Enable CORS
   res.setHeader('Access-Control-Allow-Credentials', true);
   res.setHeader('Access-Control-Allow-Origin', '*');
@@ -9,18 +12,21 @@ export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Headers', 'X-CSRF-Token, X-Requested-With, Accept, Accept-Version, Content-Length, Content-MD5, Content-Type, Date, X-Api-Version');
 
   if (req.method === 'OPTIONS') {
+    console.log('Handling CORS preflight');
     res.status(200).end();
     return;
   }
 
   if (req.method !== 'POST') {
-    return res.status(405).json({ error: 'Method not allowed' });
+    console.log('Method not allowed:', req.method);
+    return res.status(405).json({ error: 'Method not allowed. Use POST.' });
   }
 
   let browser = null;
   
   try {
     const { addresses } = req.body;
+    console.log('Received addresses:', addresses);
     
     if (!addresses || !Array.isArray(addresses)) {
       return res.status(400).json({ error: 'Addresses array is required' });
@@ -41,6 +47,7 @@ export default async function handler(req, res) {
       ignoreHTTPSErrors: true,
     });
 
+    console.log('Browser started successfully');
     const page = await browser.newPage();
     
     // Set realistic user agent
@@ -55,6 +62,7 @@ export default async function handler(req, res) {
     });
 
     await new Promise(resolve => setTimeout(resolve, 3000));
+    console.log('Session established');
 
     const results = [];
     
@@ -82,6 +90,7 @@ export default async function handler(req, res) {
     await browser.close();
     browser = null;
 
+    console.log('Processing complete, returning results');
     res.status(200).json({ success: true, data: results });
 
   } catch (error) {
@@ -95,9 +104,9 @@ export default async function handler(req, res) {
       }
     }
     
-    res.status(500).json({ error: error.message });
+    res.status(500).json({ error: error.message, stack: error.stack });
   }
-}
+};
 
 async function searchProperty(page, address) {
   try {
