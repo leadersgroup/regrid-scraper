@@ -36,11 +36,11 @@ RUN wget -q -O - https://dl.google.com/linux/linux_signing_key.pub | apt-key add
 # Set working directory
 WORKDIR /usr/src/app
 
-# Copy package files
+# Copy package files first (for better caching)
 COPY package*.json ./
 
 # Install Node.js dependencies
-RUN npm ci --only=production
+RUN npm install --production
 
 # Copy application code
 COPY . .
