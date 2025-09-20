@@ -24,14 +24,21 @@ app.use((req, res, next) => {
 
 // Health check endpoint
 app.get('/api/health', (req, res) => {
-  res.json({
+  res.status(200).json({
     status: 'healthy',
     message: 'Regrid Scraper API (Railway Docker)',
     timestamp: new Date().toISOString(),
     platform: 'railway-docker',
     nodeVersion: process.version,
-    uptime: process.uptime()
+    uptime: process.uptime(),
+    memory: process.memoryUsage(),
+    pid: process.pid
   });
+});
+
+// Railway health check (they sometimes check root for health)
+app.get('/health', (req, res) => {
+  res.status(200).send('OK');
 });
 
 // Test endpoint
@@ -87,27 +94,45 @@ app.get('*', (req, res) => {
   });
 });
 
-// Start server
-const server = app.listen(PORT, '0.0.0.0', () => {
+// Start server with error handling
+const server = app.listen(PORT, '0.0.0.0', (err) => {
+  if (err) {
+    console.error('❌ Failed to start server:', err);
+    process.exit(1);
+  }
   console.log(`✅ Server running on http://0.0.0.0:${PORT}`);
   console.log(`🔗 Health check: http://0.0.0.0:${PORT}/api/health`);
   console.log(`🧪 Test endpoint: http://0.0.0.0:${PORT}/api/test`);
+  console.log(`❤️ Railway health: http://0.0.0.0:${PORT}/health`);
+});
+
+// Handle server errors
+server.on('error', (err) => {
+  console.error('❌ Server error:', err);
+  if (err.code === 'EADDRINUSE') {
+    console.error(`Port ${PORT} is already in use`);
+    process.exit(1);
+  }
 });
 
 // Graceful shutdown handling
 const gracefulShutdown = (signal) => {
   console.log(`🛑 Received ${signal}, shutting down gracefully...`);
-  
-  server.close(() => {
-    console.log('✅ Server closed');
+
+  server.close((err) => {
+    if (err) {
+      console.error('❌ Error during server shutdown:', err);
+      process.exit(1);
+    }
+    console.log('✅ Server closed successfully');
     process.exit(0);
   });
-  
-  // Force shutdown after 10 seconds
+
+  // Force shutdown after 30 seconds (Railway needs more time)
   setTimeout(() => {
-    console.log('⚠️ Forcing shutdown');
+    console.log('⚠️ Forcing shutdown after timeout');
     process.exit(1);
-  }, 10000);
+  }, 30000);
 };
 
 process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
