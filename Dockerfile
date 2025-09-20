@@ -1,20 +1,20 @@
-# Simple Dockerfile for Render
+# Use official Puppeteer image with Node.js and Chrome pre-installed
 FROM ghcr.io/puppeteer/puppeteer:21.6.1
 
 # Set working directory
 WORKDIR /usr/src/app
 
-# Copy package files
-COPY package*.json ./
+# Copy package.json first
+COPY package.json ./
 
-# Install dependencies
-RUN npm ci --only=production && npm cache clean --force
+# Install dependencies with verbose logging
+RUN npm install --verbose
 
-# Copy app source
+# Copy all source files
 COPY . .
 
-# Expose port
+# Expose port 3000
 EXPOSE 3000
 
-# Start app
+# Start the application
 CMD ["node", "server.js"]
