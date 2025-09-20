@@ -1,28 +1,25 @@
 {
-  "name": "regrid-property-scraper",
+  "name": "regrid-scraper-render",
   "version": "1.0.0",
-  "description": "Property data extractor using Regrid API",
-  "main": "local-test.js",
+  "description": "Regrid property scraper deployed on Render",
+  "main": "server.js",
   "scripts": {
-    "dev": "vercel dev",
+    "start": "node server.js",
+    "dev": "nodemon server.js",
     "local": "node local-test.js",
-    "test": "node local-test.js",
-    "build": "echo 'No build step required'"
+    "test": "node server.js"
   },
   "dependencies": {
-    "@sparticuz/chromium": "^138.0.2",
-    "puppeteer": "^21.6.1",
-    "puppeteer-core": "^24.22.0"
+    "express": "^4.18.2",
+    "puppeteer": "^21.6.1"
+  },
+  "devDependencies": {
+    "nodemon": "^3.0.2"
   },
   "engines": {
-    "node": "22.x"
+    "node": "18.x"
   },
-  "keywords": [
-    "property",
-    "real-estate",
-    "scraping",
-    "vercel"
-  ],
+  "keywords": ["property", "real-estate", "scraping", "render"],
   "author": "Property Scraper",
   "license": "MIT"
 }
