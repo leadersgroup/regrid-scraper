@@ -9,44 +9,53 @@ class RegridScraper {
         this.csrfToken = null;
     }
 
-    async initialize() {
-        console.log('Initializing browser on Render...');
-        
-        // Browser launch optimized for Render.com
-        this.browser = await puppeteer.launch({
-            headless: true, // Always headless in production
-            args: [
-                '--no-sandbox',
-                '--disable-setuid-sandbox',
-                '--disable-dev-shm-usage',
-                '--disable-accelerated-2d-canvas',
-                '--no-first-run',
-                '--no-zygote',
-                '--single-process',
-                '--disable-gpu',
-                '--disable-background-timer-throttling',
-                '--disable-renderer-backgrounding',
-                '--disable-backgrounding-occluded-windows',
-                '--disable-features=TranslateUI',
-                '--disable-ipc-flooding-protection'
-            ]
-        });
+   async initialize() {
+    console.log('Initializing browser on Render...');
+    
+    // Browser launch configuration for Render.com
+    const launchOptions = {
+        headless: true, // Always headless in production
+        args: [
+            '--no-sandbox',
+            '--disable-setuid-sandbox',
+            '--disable-dev-shm-usage',
+            '--disable-accelerated-2d-canvas',
+            '--no-first-run',
+            '--no-zygote',
+            '--single-process',
+            '--disable-gpu',
+            '--disable-background-timer-throttling',
+            '--disable-renderer-backgrounding',
+            '--disable-backgrounding-occluded-windows',
+            '--disable-features=TranslateUI',
+            '--disable-ipc-flooding-protection',
+            '--disable-web-security',
+            '--disable-features=VizDisplayCompositor'
+        ]
+    };
 
-        this.page = await this.browser.newPage();
-
-        // Set realistic viewport and user agent (same as your working version)
-        await this.page.setViewport({ width: 1366, height: 768 });
-        await this.page.setUserAgent('Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36');
-
-        // Set extra headers (same as your working version)
-        await this.page.setExtraHTTPHeaders({
-            'Accept-Language': 'en-US,en;q=0.9,zh-CN;q=0.8,zh;q=0.7',
-            'Accept-Encoding': 'gzip, deflate, br, zstd'
-        });
-
-        console.log('Browser initialized successfully');
+    // Use system Chrome on Render (this is the key fix!)
+    if (process.env.PUPPETEER_EXECUTABLE_PATH) {
+        launchOptions.executablePath = process.env.PUPPETEER_EXECUTABLE_PATH;
+        console.log('Using system Chrome:', process.env.PUPPETEER_EXECUTABLE_PATH);
     }
 
+    this.browser = await puppeteer.launch(launchOptions);
+
+    this.page = await this.browser.newPage();
+
+    // Set realistic viewport and user agent (same as your working version)
+    await this.page.setViewport({ width: 1366, height: 768 });
+    await this.page.setUserAgent('Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36');
+
+    // Set extra headers (same as your working version)
+    await this.page.setExtraHTTPHeaders({
+        'Accept-Language': 'en-US,en;q=0.9,zh-CN;q=0.8,zh;q=0.7',
+        'Accept-Encoding': 'gzip, deflate, br, zstd'
+    });
+
+    console.log('Browser initialized successfully');
+}
     async establishSession() {
         try {
             console.log('Navigating to Regrid to establish session...');
