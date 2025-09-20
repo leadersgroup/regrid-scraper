@@ -1,10 +1,10 @@
-// api/scrape.js - Adapted from your working local RegridScraper
+// api/scrape.js - Timeout-optimized version for Vercel
 
 const chromium = require('@sparticuz/chromium');
 const puppeteer = require('puppeteer-core');
 
 module.exports = async function handler(req, res) {
-  console.log('=== Regrid Property Scraper (Vercel) ===');
+  console.log('=== Regrid Scraper (Timeout Optimized) ===');
   
   res.setHeader('Content-Type', 'application/json');
   res.setHeader('Access-Control-Allow-Origin', '*');
@@ -19,9 +19,8 @@ module.exports = async function handler(req, res) {
     if (req.method === 'GET') {
       return res.status(200).json({
         status: 'ready',
-        message: 'Regrid Property Scraper API',
-        timestamp: new Date().toISOString(),
-        nodeVersion: process.version
+        message: 'Regrid Property Scraper API (Optimized)',
+        timestamp: new Date().toISOString()
       });
     }
 
@@ -29,25 +28,20 @@ module.exports = async function handler(req, res) {
       return res.status(405).json({ error: 'Method not allowed' });
     }
 
-    // Parse request
     const { addresses } = req.body || {};
     
     if (!addresses || !Array.isArray(addresses)) {
       return res.status(400).json({ error: 'Addresses array is required' });
     }
 
-    if (addresses.length === 0) {
-      return res.status(400).json({ error: 'At least one address is required' });
+    if (addresses.length > 5) { // Reduced for faster processing
+      return res.status(400).json({ error: 'Maximum 5 addresses per request' });
     }
 
-    if (addresses.length > 10) {
-      return res.status(400).json({ error: 'Maximum 10 addresses per request' });
-    }
+    console.log(`Processing ${addresses.length} address(es)`);
 
-    console.log(`Processing ${addresses.length} address(es):`, addresses);
-
-    // Initialize scraper (adapted from your working class)
-    const scraper = new VercelRegridScraper();
+    // Initialize with aggressive timeouts
+    const scraper = new FastRegridScraper();
     
     try {
       await scraper.initialize();
@@ -57,16 +51,9 @@ module.exports = async function handler(req, res) {
       
       await scraper.close();
       
-      const successCount = results.filter(r => r && !r.error).length;
-      
       return res.status(200).json({ 
         success: true, 
         data: results,
-        summary: {
-          total: addresses.length,
-          successful: successCount,
-          failed: addresses.length - successCount
-        },
         timestamp: new Date().toISOString()
       });
       
@@ -78,132 +65,93 @@ module.exports = async function handler(req, res) {
   } catch (error) {
     console.error('Handler error:', error);
     return res.status(500).json({ 
-      error: 'Internal server error',
-      message: error.message,
-      timestamp: new Date().toISOString()
+      error: 'Server error',
+      message: error.message
     });
   }
 };
 
-// Adapted RegridScraper class for Vercel serverless environment
-class VercelRegridScraper {
+class FastRegridScraper {
     constructor() {
         this.browser = null;
         this.page = null;
-        this.cookies = null;
         this.csrfToken = null;
     }
 
     async initialize() {
-        console.log('Initializing browser for Vercel...');
+        console.log('Fast browser init...');
         
-        // Launch browser with settings adapted for serverless
+        // Optimized browser launch with minimal args
         this.browser = await puppeteer.launch({
             args: [
                 ...chromium.args,
                 '--no-sandbox',
                 '--disable-setuid-sandbox',
                 '--disable-dev-shm-usage',
-                '--disable-accelerated-2d-canvas',
-                '--no-first-run',
-                '--no-zygote',
+                '--disable-gpu',
                 '--single-process',
-                '--disable-gpu'
+                '--disable-extensions',
+                '--disable-background-timer-throttling',
+                '--disable-renderer-backgrounding',
+                '--disable-backgrounding-occluded-windows'
             ],
-            defaultViewport: chromium.defaultViewport,
+            defaultViewport: { width: 1280, height: 720 },
             executablePath: await chromium.executablePath(),
             headless: chromium.headless,
             ignoreHTTPSErrors: true
         });
 
         this.page = await this.browser.newPage();
-
-        // Set realistic viewport and user agent (same as your working version)
-        await this.page.setViewport({ width: 1366, height: 768 });
-        await this.page.setUserAgent('Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36');
-
-        // Set extra headers (same as your working version)
-        await this.page.setExtraHTTPHeaders({
-            'Accept-Language': 'en-US,en;q=0.9,zh-CN;q=0.8,zh;q=0.7',
-            'Accept-Encoding': 'gzip, deflate, br, zstd'
-        });
-
-        console.log('Browser initialized successfully');
+        
+        // Minimal setup
+        await this.page.setUserAgent('Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
+        
+        console.log('Browser ready');
     }
 
     async establishSession() {
         try {
-            console.log('Navigating to Regrid to establish session...');
+            console.log('Quick session setup...');
             
-            // Navigate to the main page first (exactly like your working version)
+            // Faster navigation with reduced timeout
             await this.page.goto('https://app.regrid.com/us', {
-                waitUntil: 'networkidle2',
-                timeout: 30000
+                waitUntil: 'domcontentloaded', // Faster than networkidle2
+                timeout: 15000 // Reduced timeout
             });
 
-            // Wait a bit for the page to fully load
-            await new Promise(resolve => setTimeout(resolve, 3000));
+            // Shorter wait
+            await new Promise(resolve => setTimeout(resolve, 1500));
 
-            // Extract cookies and CSRF token from the page (same logic as your working version)
-            this.cookies = await this.page.cookies();
-            
-            // Try to find CSRF token in meta tags or page content
+            // Quick CSRF token extraction
             try {
                 this.csrfToken = await this.page.evaluate(() => {
                     const metaTag = document.querySelector('meta[name="csrf-token"]');
-                    if (metaTag) {
-                        return metaTag.getAttribute('content');
-                    }
-                    
-                    // Alternative: look for it in script tags or other locations
-                    const scriptTags = Array.from(document.querySelectorAll('script'));
-                    for (const script of scriptTags) {
-                        const text = script.textContent || script.innerText;
-                        const match = text.match(/csrf[_-]?token["']?\s*[:=]\s*["']([^"']+)["']/i);
-                        if (match) {
-                            return match[1];
-                        }
-                    }
-                    
-                    return null;
+                    return metaTag ? metaTag.getAttribute('content') : null;
                 });
             } catch (error) {
-                console.log('Could not extract CSRF token from page');
+                console.log('No CSRF token found');
             }
 
-            console.log('Session established successfully');
-            console.log(`Found ${this.cookies.length} cookies`);
-            if (this.csrfToken) {
-                console.log('CSRF token extracted');
-            }
+            console.log('Session ready');
 
         } catch (error) {
-            console.error('Error establishing session:', error);
+            console.error('Session error:', error);
             throw error;
         }
     }
 
     async searchProperty(address) {
         try {
-            console.log(`Searching for property: ${address}`);
+            console.log(`Searching: ${address}`);
 
-            // Prepare the search URL (exactly like your working version)
             const encodedAddress = encodeURIComponent(address);
             const searchUrl = `https://app.regrid.com/search.json?query=${encodedAddress}&autocomplete=1&context=false&strict=false`;
 
-            console.log('Making API request to:', searchUrl);
-
-            // Set extra headers for the request (exactly like your working version)
+            // Essential headers only
             const headers = {
-                'Accept': 'application/json, text/javascript, */*; q=0.01',
-                'Accept-Language': 'en-US,en;q=0.9,zh-CN;q=0.8,zh;q=0.7',
-                'Accept-Encoding': 'gzip, deflate, br, zstd',
+                'Accept': 'application/json',
                 'X-Requested-With': 'XMLHttpRequest',
-                'Referer': 'https://app.regrid.com/us',
-                'Sec-Fetch-Dest': 'empty',
-                'Sec-Fetch-Mode': 'cors',
-                'Sec-Fetch-Site': 'same-origin',
-                'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36'
+                'Referer': 'https://app.regrid.com/us'
             };
 
             if (this.csrfToken) {
@@ -212,97 +160,58 @@ class VercelRegridScraper {
 
             await this.page.setExtraHTTPHeaders(headers);
 
-            // Navigate to the search URL
+            // Faster navigation
             const response = await this.page.goto(searchUrl, {
-                waitUntil: 'networkidle2',
-                timeout: 30000
+                waitUntil: 'domcontentloaded',
+                timeout: 15000
             });
 
-            if (!response) {
-                throw new Error('No response received from server');
+            if (!response || !response.ok()) {
+                throw new Error(`HTTP ${response?.status()}: ${response?.statusText()}`);
             }
 
-            if (!response.ok()) {
-                throw new Error(`HTTP ${response.status()}: ${response.statusText()}`);
-            }
-
-            // Get the response text and parse as JSON (exactly like your working version)
             const responseText = await response.text();
             let searchResults;
             
             try {
                 searchResults = JSON.parse(responseText);
-                console.log('Search results received');
             } catch (parseError) {
-                console.log('Response text:', responseText.substring(0, 200) + '...');
-                throw new Error('Invalid JSON response from server');
+                throw new Error('Invalid JSON response');
             }
 
-            return this.parseSearchResults(searchResults, address);
+            return this.parseResults(searchResults, address);
 
         } catch (error) {
-            console.error('Error searching property:', error);
+            console.error(`Search error for ${address}:`, error.message);
             throw error;
         }
     }
 
-    parseSearchResults(results, originalAddress) {
+    parseResults(results, originalAddress) {
         try {
-            // Handle both array and object response formats (exactly like your working version)
-            let resultsArray;
-            if (Array.isArray(results)) {
-                resultsArray = results;
-            } else if (results && results.results && Array.isArray(results.results)) {
-                resultsArray = results.results;
-            } else {
-                console.log('No results found or invalid format');
-                return {
-                    originalAddress: originalAddress,
-                    error: 'No results found'
-                };
-            }
+            let resultsArray = Array.isArray(results) ? results : (results?.results || []);
 
             if (resultsArray.length === 0) {
-                console.log('No results found');
                 return {
                     originalAddress: originalAddress,
                     error: 'No results found'
                 };
             }
 
-            console.log(`Found ${resultsArray.length} result(s)`);
-
-            // Take the first result (most relevant)
             const property = resultsArray[0];
             
-            if (!property) {
-                console.log('No property data in results');
-                return {
-                    originalAddress: originalAddress,
-                    error: 'No property data found'
-                };
-            }
-
-            // Extract parcel ID and owner information (exactly like your working version)
-            const parcelData = {
+            return {
                 originalAddress: originalAddress,
-                parcelId: property.parcelnumb || property.ll_uuid || property.parcel_id || property.id || 'Not found',
-                ownerName: property.owner || this.extractOwnerName(property),
-                address: property.headline || property.address || property.formatted_address || 'Not found',
-                city: this.extractCityFromContext(property.context) || property.city || 'Not found',
-                state: this.extractStateFromContext(property.context) || property.state || 'Not found',
-                zipCode: property.zip || property.postal_code || 'Not found',
-                county: property.county || 'Not found',
-                propertyType: property.type || property.property_type || 'Not found',
-                score: property.score || 'Not found',
-                path: property.path || 'Not found',
-                centroid: property.centroid || 'Not found'
+                parcelId: property.parcelnumb || property.id || 'Not found',
+                ownerName: property.owner || 'Not found',
+                address: property.headline || property.address || 'Not found',
+                city: this.extractCity(property.context) || 'Not found',
+                state: this.extractState(property.context) || 'Not found',
+                propertyType: property.type || 'Not found',
+                score: property.score || 'Not found'
             };
 
-            return parcelData;
-
         } catch (error) {
-            console.error('Error parsing search results:', error);
             return {
                 originalAddress: originalAddress,
                 error: error.message
@@ -310,41 +219,14 @@ class VercelRegridScraper {
         }
     }
 
-    extractOwnerName(property) {
-        // Try different possible fields for owner name (exactly like your working version)
-        const ownerFields = [
-            'owner',
-            'owner_name',
-            'owner_1',
-            'owner_full_name',
-            'property_owner',
-            'owner_display_name'
-        ];
-
-        for (const field of ownerFields) {
-            if (property[field]) {
-                return property[field];
-            }
-        }
-
-        // If no direct owner field, check nested objects
-        if (property.owner_info) {
-            return property.owner_info.name || property.owner_info.full_name || 'Owner info found but name unclear';
-        }
-
-        return 'Not found';
-    }
-
-    extractCityFromContext(context) {
+    extractCity(context) {
         if (!context) return null;
-        // Context format appears to be "City, State"
         const parts = context.split(',');
         return parts[0] ? parts[0].trim() : null;
     }
 
-    extractStateFromContext(context) {
+    extractState(context) {
         if (!context) return null;
-        // Context format appears to be "City, State"
         const parts = context.split(',');
         return parts[1] ? parts[1].trim() : null;
     }
@@ -354,19 +236,17 @@ class VercelRegridScraper {
         
         for (let i = 0; i < addresses.length; i++) {
             const address = addresses[i];
-            console.log(`\n--- Processing ${i + 1}/${addresses.length}: ${address} ---`);
+            console.log(`Processing ${i + 1}/${addresses.length}: ${address}`);
             
             try {
                 const result = await this.searchProperty(address);
                 results.push(result);
                 
-                // Add delay between requests to avoid rate limiting (same as your working version)
+                // Shorter delay
                 if (i < addresses.length - 1) {
-                    console.log('Waiting 2 seconds before next request...');
-                    await new Promise(resolve => setTimeout(resolve, 2000));
+                    await new Promise(resolve => setTimeout(resolve, 1000));
                 }
             } catch (error) {
-                console.error(`Error processing ${address}:`, error);
                 results.push({
                     originalAddress: address,
                     error: error.message
@@ -379,8 +259,12 @@ class VercelRegridScraper {
 
     async close() {
         if (this.browser) {
-            await this.browser.close();
-            console.log('Browser closed');
+            try {
+                await this.browser.close();
+                console.log('Browser closed');
+            } catch (error) {
+                console.error('Error closing browser:', error);
+            }
         }
     }
 }
