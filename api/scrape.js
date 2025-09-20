@@ -1,7 +1,7 @@
 // api/scrape.js - Vercel serverless function
 const RegridScraper = require('../regrid-scraper-vercel');
 
-export default async function handler(req, res) {
+module.exports = async function handler(req, res) {
     // Set CORS headers
     res.setHeader('Access-Control-Allow-Origin', '*');
     res.setHeader('Access-Control-Allow-Methods', 'GET,POST,OPTIONS');
@@ -12,7 +12,7 @@ export default async function handler(req, res) {
     }
 
     if (req.method === 'GET') {
-        return res.json({
+        return res.status(200).json({
             status: 'ready',
             message: 'Regrid Property Scraper API (Vercel)',
             timestamp: new Date().toISOString(),
@@ -53,7 +53,7 @@ export default async function handler(req, res) {
             
             console.log(`Completed: ${successCount}/${addresses.length} successful`);
             
-            res.json({
+            return res.status(200).json({
                 success: true,
                 data: results,
                 summary: {
@@ -66,16 +66,18 @@ export default async function handler(req, res) {
             });
 
         } catch (error) {
-            await scraper.close();
+            if (scraper) {
+                await scraper.close();
+            }
             throw error;
         }
 
     } catch (error) {
         console.error('Scraping error:', error);
-        res.status(500).json({
+        return res.status(500).json({
             error: 'Scraping failed',
             message: error.message,
             timestamp: new Date().toISOString()
         });
     }
-}
+};

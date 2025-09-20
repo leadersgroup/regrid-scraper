@@ -40,6 +40,7 @@
             font-size: 14px;
             resize: vertical;
             min-height: 100px;
+            box-sizing: border-box;
         }
         button {
             background: #0070f3;
@@ -50,6 +51,7 @@
             cursor: pointer;
             font-size: 16px;
             transition: background 0.3s;
+            margin-right: 10px;
         }
         button:hover {
             background: #0051cc;
@@ -57,6 +59,12 @@
         button:disabled {
             background: #ccc;
             cursor: not-allowed;
+        }
+        .test-btn {
+            background: #28a745;
+        }
+        .test-btn:hover {
+            background: #218838;
         }
         .results {
             margin-top: 30px;
@@ -96,6 +104,13 @@
             border-radius: 5px;
             margin: 10px 0;
         }
+        .success {
+            color: #27ae60;
+            background: #eafaf1;
+            padding: 10px;
+            border-radius: 5px;
+            margin: 10px 0;
+        }
         .loading {
             text-align: center;
             color: #666;
@@ -109,11 +124,30 @@
             font-size: 12px;
             margin-left: 10px;
         }
+        .debug {
+            background: #f8f9fa;
+            border: 1px solid #dee2e6;
+            padding: 10px;
+            border-radius: 5px;
+            margin: 10px 0;
+            font-family: monospace;
+            font-size: 12px;
+            white-space: pre-wrap;
+        }
     </style>
 </head>
 <body>
     <div class="container">
         <h1>🏠 Regrid Property Scraper <span class="badge">Vercel</span></h1>
+        
+        <div style="margin-bottom: 20px;">
+            <button onclick="testAPI()" id="testBtn" class="test-btn">
+                🧪 Test API
+            </button>
+            <button onclick="scrapeProperties()" id="scrapeBtn">
+                🔍 Search Properties
+            </button>
+        </div>
         
         <div class="form-group">
             <label for="addresses">Enter addresses (one per line, max 5):</label>
@@ -123,14 +157,63 @@
             ></textarea>
         </div>
         
-        <button onclick="scrapeProperties()" id="scrapeBtn">
-            🔍 Search Properties
-        </button>
-        
         <div id="results"></div>
     </div>
 
     <script>
+        async function testAPI() {
+            const button = document.getElementById('testBtn');
+            const results = document.getElementById('results');
+            
+            button.disabled = true;
+            button.textContent = '🔄 Testing...';
+            
+            results.innerHTML = '<div class="loading">Testing API connection...</div>';
+            
+            try {
+                const response = await fetch('/api/test', {
+                    method: 'GET',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    }
+                });
+                
+                console.log('Response status:', response.status);
+                console.log('Response headers:', response.headers);
+                
+                const text = await response.text();
+                console.log('Response text:', text);
+                
+                let data;
+                try {
+                    data = JSON.parse(text);
+                } catch (parseError) {
+                    throw new Error(`Invalid JSON response: ${text.substring(0, 200)}...`);
+                }
+                
+                if (response.ok) {
+                    results.innerHTML = `
+                        <div class="success">✅ API Test Successful!</div>
+                        <div class="debug">${JSON.stringify(data, null, 2)}</div>
+                    `;
+                } else {
+                    results.innerHTML = `
+                        <div class="error">❌ API Test Failed: ${data.message || 'Unknown error'}</div>
+                        <div class="debug">${JSON.stringify(data, null, 2)}</div>
+                    `;
+                }
+            } catch (error) {
+                console.error('Test error:', error);
+                results.innerHTML = `
+                    <div class="error">❌ Test Failed: ${error.message}</div>
+                    <div class="debug">Check browser console for more details.</div>
+                `;
+            } finally {
+                button.disabled = false;
+                button.textContent = '🧪 Test API';
+            }
+        }
+        
         async function scrapeProperties() {
             const addresses = document.getElementById('addresses').value
                 .split('\n')
@@ -164,15 +247,30 @@
                     body: JSON.stringify({ addresses })
                 });
                 
-                const data = await response.json();
+                const text = await response.text();
+                console.log('Response text:', text);
+                
+                let data;
+                try {
+                    data = JSON.parse(text);
+                } catch (parseError) {
+                    throw new Error(`Invalid JSON response: ${text.substring(0, 200)}...`);
+                }
                 
                 if (data.success) {
                     displayResults(data);
                 } else {
-                    results.innerHTML = `<div class="error">Error: ${data.message}</div>`;
+                    results.innerHTML = `
+                        <div class="error">Error: ${data.message}</div>
+                        <div class="debug">${JSON.stringify(data, null, 2)}</div>
+                    `;
                 }
             } catch (error) {
-                results.innerHTML = `<div class="error">Network error: ${error.message}</div>`;
+                console.error('Scraping error:', error);
+                results.innerHTML = `
+                    <div class="error">Network error: ${error.message}</div>
+                    <div class="debug">Check browser console for more details.</div>
+                `;
             } finally {
                 button.disabled = false;
                 button.textContent = '🔍 Search Properties';
