@@ -1,54 +1,115 @@
-// api/scrape.js - Updated for Node.js 22 and latest dependencies
-
-const chromium = require('@sparticuz/chromium');
-const puppeteer = require('puppeteer-core');
+// api/scrape.js - Progressive testing to isolate 503 error
 
 module.exports = async function handler(req, res) {
-  console.log('=== Function Start ===');
-  console.log('Node version:', process.version);
-  console.log('Method:', req.method);
+  console.log('=== Function Started ===');
   
-  // Set headers
+  // Set headers immediately
   res.setHeader('Content-Type', 'application/json');
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET,POST,OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Accept');
 
-  if (req.method === 'OPTIONS') {
-    console.log('CORS preflight request');
-    return res.status(200).json({ message: 'CORS OK' });
-  }
+  try {
+    console.log('Method:', req.method);
+    console.log('Node version:', process.version);
+    console.log('Environment:', process.env.NODE_ENV);
 
-  if (req.method === 'GET') {
-    console.log('GET request - health check');
-    try {
-      const chromiumPath = await chromium.executablePath();
-      return res.status(200).json({ 
-        message: 'API is working',
+    if (req.method === 'OPTIONS') {
+      console.log('CORS preflight');
+      return res.status(200).json({ message: 'CORS OK' });
+    }
+
+    if (req.method === 'GET') {
+      console.log('GET request - running diagnostics');
+      
+      // Test 1: Basic function works
+      const basicTest = {
+        status: 'Function is running',
         timestamp: new Date().toISOString(),
         nodeVersion: process.version,
-        chromiumPath: chromiumPath ? 'Available' : 'Not found',
-        method: 'GET'
-      });
-    } catch (error) {
+        platform: process.platform,
+        arch: process.arch,
+        memory: process.memoryUsage()
+      };
+
+      // Test 2: Can we import dependencies?
+      let dependencyTest = {};
+      try {
+        console.log('Testing dependency imports...');
+        
+        // Test Chromium import
+        const chromium = require('@sparticuz/chromium');
+        dependencyTest.chromium = 'Import successful';
+        
+        // Test Puppeteer import
+        const puppeteer = require('puppeteer-core');
+        dependencyTest.puppeteer = 'Import successful';
+        
+        // Test Chromium executable path
+        const executablePath = await chromium.executablePath();
+        dependencyTest.chromiumPath = executablePath ? 'Available' : 'Not found';
+        
+        console.log('Dependencies loaded successfully');
+        
+      } catch (depError) {
+        console.error('Dependency error:', depError);
+        dependencyTest.error = depError.message;
+        dependencyTest.stack = depError.stack;
+      }
+
+      // Test 3: Can we start browser? (Only if dependencies work)
+      let browserTest = {};
+      if (!dependencyTest.error) {
+        try {
+          console.log('Testing browser launch...');
+          
+          const chromium = require('@sparticuz/chromium');
+          const puppeteer = require('puppeteer-core');
+          
+          const browser = await puppeteer.launch({
+            args: chromium.args,
+            defaultViewport: chromium.defaultViewport,
+            executablePath: await chromium.executablePath(),
+            headless: chromium.headless,
+            ignoreHTTPSErrors: true,
+          });
+          
+          browserTest.launch = 'Success';
+          console.log('Browser launched successfully');
+          
+          // Quick test
+          const page = await browser.newPage();
+          await page.goto('https://example.com', { timeout: 10000 });
+          browserTest.navigation = 'Success';
+          
+          await browser.close();
+          console.log('Browser test completed');
+          
+        } catch (browserError) {
+          console.error('Browser error:', browserError);
+          browserTest.error = browserError.message;
+          browserTest.stack = browserError.stack?.substring(0, 500); // Truncate stack
+        }
+      } else {
+        browserTest.skipped = 'Dependencies failed';
+      }
+
       return res.status(200).json({
-        message: 'API is working but Chromium check failed',
-        timestamp: new Date().toISOString(),
-        nodeVersion: process.version,
-        chromiumError: error.message,
-        method: 'GET'
+        message: 'Diagnostic complete',
+        tests: {
+          basic: basicTest,
+          dependencies: dependencyTest,
+          browser: browserTest
+        }
       });
     }
-  }
 
-  if (req.method !== 'POST') {
-    return res.status(405).json({ error: 'Method not allowed' });
-  }
+    if (req.method !== 'POST') {
+      return res.status(405).json({ error: 'Method not allowed' });
+    }
 
-  let browser = null;
-  
-  try {
-    console.log('Processing POST request');
+    // POST request - simplified processing
+    console.log('POST request received');
     
     const { addresses } = req.body || {};
     
@@ -56,201 +117,44 @@ module.exports = async function handler(req, res) {
       return res.status(400).json({ error: 'Addresses array is required' });
     }
 
-    if (addresses.length > 10) {
-      return res.status(400).json({ error: 'Maximum 10 addresses per request' });
+    if (addresses.length > 5) { // Reduced limit for testing
+      return res.status(400).json({ error: 'Maximum 5 addresses per request for testing' });
     }
 
-    console.log('Addresses to process:', addresses.length);
+    console.log('Processing addresses:', addresses);
 
-    // Initialize browser with updated settings for Node.js 22
-    console.log('Starting Puppeteer...');
-    
-    browser = await puppeteer.launch({
-      args: [
-        ...chromium.args,
-        '--no-sandbox',
-        '--disable-setuid-sandbox',
-        '--disable-dev-shm-usage',
-        '--disable-accelerated-2d-canvas',
-        '--disable-gpu',
-        '--single-process',
-        '--no-zygote'
-      ],
-      defaultViewport: chromium.defaultViewport,
-      executablePath: await chromium.executablePath(),
-      headless: chromium.headless,
-      ignoreHTTPSErrors: true,
+    // For now, return mock data to test the pipeline
+    const mockResults = addresses.map(address => ({
+      originalAddress: address,
+      parcelId: 'MOCK-123456',
+      ownerName: 'MOCK OWNER NAME',
+      address: 'Mock Address',
+      city: 'Mock City',
+      state: 'MC',
+      zipCode: '12345',
+      county: 'Mock County',
+      propertyType: 'Mock Property',
+      score: 95,
+      note: 'This is mock data - real scraping temporarily disabled for testing'
+    }));
+
+    console.log('Returning mock results');
+    return res.status(200).json({ 
+      success: true, 
+      data: mockResults,
+      mode: 'mock'
     });
-
-    console.log('Browser launched successfully');
-    const page = await browser.newPage();
-    
-    // Set user agent
-    await page.setUserAgent('Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
-
-    console.log('Establishing session with Regrid...');
-    
-    // Navigate to Regrid
-    await page.goto('https://app.regrid.com/us', {
-      waitUntil: 'networkidle2',
-      timeout: 25000 // Reduced timeout for Vercel
-    });
-
-    // Wait for page to settle
-    await new Promise(resolve => setTimeout(resolve, 2000));
-    console.log('Session established');
-
-    const results = [];
-    
-    for (let i = 0; i < addresses.length; i++) {
-      const address = addresses[i];
-      console.log(`Processing ${i + 1}/${addresses.length}: ${address}`);
-      
-      try {
-        const result = await searchProperty(page, address);
-        results.push(result);
-        console.log(`Result: ${result.error ? 'Error' : 'Success'}`);
-        
-        // Add delay between requests
-        if (i < addresses.length - 1) {
-          await new Promise(resolve => setTimeout(resolve, 1500));
-        }
-      } catch (error) {
-        console.error(`Error processing ${address}:`, error.message);
-        results.push({
-          originalAddress: address,
-          error: error.message
-        });
-      }
-    }
-
-    await browser.close();
-    browser = null;
-
-    console.log('Processing complete');
-    return res.status(200).json({ success: true, data: results });
 
   } catch (error) {
-    console.error('=== Handler Error ===');
-    console.error('Error:', error.message);
-    console.error('Stack:', error.stack);
-    
-    if (browser) {
-      try {
-        await browser.close();
-      } catch (closeError) {
-        console.error('Error closing browser:', closeError.message);
-      }
-    }
+    console.error('=== CRITICAL ERROR ===');
+    console.error('Error message:', error.message);
+    console.error('Error stack:', error.stack);
     
     return res.status(500).json({ 
-      error: 'Internal server error',
+      error: 'Function error',
       message: error.message,
-      timestamp: new Date().toISOString()
+      timestamp: new Date().toISOString(),
+      stack: process.env.NODE_ENV === 'development' ? error.stack : undefined
     });
   }
 };
-
-async function searchProperty(page, address) {
-  try {
-    const encodedAddress = encodeURIComponent(address);
-    const searchUrl = `https://app.regrid.com/search.json?query=${encodedAddress}&autocomplete=1&context=false&strict=false`;
-
-    console.log(`Searching: ${searchUrl}`);
-
-    const headers = {
-      'Accept': 'application/json, text/javascript, */*; q=0.01',
-      'Accept-Language': 'en-US,en;q=0.9',
-      'X-Requested-With': 'XMLHttpRequest',
-      'Referer': 'https://app.regrid.com/us',
-      'Sec-Fetch-Dest': 'empty',
-      'Sec-Fetch-Mode': 'cors',
-      'Sec-Fetch-Site': 'same-origin'
-    };
-
-    await page.setExtraHTTPHeaders(headers);
-
-    const response = await page.goto(searchUrl, {
-      waitUntil: 'networkidle2',
-      timeout: 20000
-    });
-
-    if (!response || !response.ok()) {
-      throw new Error(`HTTP ${response?.status()}: ${response?.statusText()}`);
-    }
-
-    const responseText = await response.text();
-    console.log(`Response length: ${responseText.length}`);
-    
-    let searchResults;
-    try {
-      searchResults = JSON.parse(responseText);
-    } catch (parseError) {
-      throw new Error('Invalid JSON response from Regrid');
-    }
-
-    return parseSearchResults(searchResults, address);
-
-  } catch (error) {
-    throw error;
-  }
-}
-
-function parseSearchResults(results, originalAddress) {
-  try {
-    let resultsArray;
-    if (Array.isArray(results)) {
-      resultsArray = results;
-    } else if (results && results.results && Array.isArray(results.results)) {
-      resultsArray = results.results;
-    } else {
-      return {
-        originalAddress: originalAddress,
-        error: 'No results found'
-      };
-    }
-
-    if (resultsArray.length === 0) {
-      return {
-        originalAddress: originalAddress,
-        error: 'No results found'
-      };
-    }
-
-    const property = resultsArray[0];
-    
-    const parcelData = {
-      originalAddress: originalAddress,
-      parcelId: property.parcelnumb || property.ll_uuid || property.parcel_id || property.id || 'Not found',
-      ownerName: property.owner || 'Not found',
-      address: property.headline || property.address || property.formatted_address || 'Not found',
-      city: extractCityFromContext(property.context) || property.city || 'Not found',
-      state: extractStateFromContext(property.context) || property.state || 'Not found',
-      zipCode: property.zip || property.postal_code || 'Not found',
-      county: property.county || 'Not found',
-      propertyType: property.type || property.property_type || 'Not found',
-      score: property.score || 'Not found',
-      path: property.path || 'Not found'
-    };
-
-    return parcelData;
-
-  } catch (error) {
-    return {
-      originalAddress: originalAddress,
-      error: error.message
-    };
-  }
-}
-
-function extractCityFromContext(context) {
-  if (!context) return null;
-  const parts = context.split(',');
-  return parts[0] ? parts[0].trim() : null;
-}
-
-function extractStateFromContext(context) {
-  if (!context) return null;
-  const parts = context.split(',');
-  return parts[1] ? parts[1].trim() : null;
-}
