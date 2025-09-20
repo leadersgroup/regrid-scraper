@@ -1,6 +1,7 @@
-// server.js - Express server for Render deployment
+// server.js - Express server for Railway
 const express = require('express');
 const path = require('path');
+const RegridScraper = require('./regrid-scraper-railway');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -20,16 +21,13 @@ app.use((req, res, next) => {
   next();
 });
 
-// Import your RegridScraper class
-const RegridScraper = require('./regrid-scraper-render');
-
 // Health check endpoint
 app.get('/api/health', (req, res) => {
   res.json({
     status: 'healthy',
-    message: 'Regrid Scraper API (Render)',
+    message: 'Regrid Scraper API (Railway)',
     timestamp: new Date().toISOString(),
-    platform: process.platform,
+    platform: 'railway',
     nodeVersion: process.version
   });
 });
@@ -38,8 +36,9 @@ app.get('/api/health', (req, res) => {
 app.get('/api/test', (req, res) => {
   res.json({
     status: 'working',
-    message: 'Render deployment successful',
-    timestamp: new Date().toISOString()
+    message: 'Railway deployment successful',
+    timestamp: new Date().toISOString(),
+    platform: 'railway'
   });
 });
 
@@ -47,15 +46,15 @@ app.get('/api/test', (req, res) => {
 app.get('/api/scrape', (req, res) => {
   res.json({
     status: 'ready',
-    message: 'Regrid Property Scraper API (Render)',
+    message: 'Regrid Property Scraper API (Railway)',
     timestamp: new Date().toISOString(),
-    platform: process.platform
+    platform: 'railway'
   });
 });
 
 // Main scraping endpoint
 app.post('/api/scrape', async (req, res) => {
-  console.log('=== Scraping Request (Render) ===');
+  console.log('=== Scraping Request (Railway) ===');
   
   try {
     const { addresses } = req.body;
@@ -70,7 +69,6 @@ app.post('/api/scrape', async (req, res) => {
 
     console.log(`Processing ${addresses.length} addresses:`, addresses);
 
-    // Use your proven RegridScraper logic
     const scraper = new RegridScraper();
     
     try {
@@ -94,7 +92,7 @@ app.post('/api/scrape', async (req, res) => {
           failed: addresses.length - successCount
         },
         timestamp: new Date().toISOString(),
-        platform: 'render'
+        platform: 'railway'
       });
 
     } catch (error) {
@@ -121,55 +119,8 @@ app.listen(PORT, () => {
   console.log(`🚀 Regrid Scraper running on port ${PORT}`);
   console.log(`📱 Frontend: http://localhost:${PORT}`);
   console.log(`🔗 API: http://localhost:${PORT}/api/scrape`);
-  console.log(`💚 Platform: ${process.platform}`);
+  console.log(`🚂 Platform: Railway`);
   console.log(`📦 Node: ${process.version}`);
-});
-
-
-// Add this debug endpoint to your server.js
-app.get('/api/test-connection', async (req, res) => {
-  const RegridScraper = require('./regrid-scraper-render');
-  const scraper = new RegridScraper();
-  
-  try {
-    console.log('Testing connection to Regrid...');
-    
-    await scraper.initialize();
-    console.log('✓ Browser initialized');
-    
-    // Test basic navigation with minimal requirements
-    console.log('Attempting navigation...');
-    const startTime = Date.now();
-    
-    const response = await scraper.page.goto('https://app.regrid.com/us', {
-      waitUntil: 'domcontentloaded',
-      timeout: 60000
-    });
-    
-    const loadTime = Date.now() - startTime;
-    console.log(`✓ Page loaded in ${loadTime}ms`);
-    
-    await scraper.close();
-    
-    res.json({
-      success: true,
-      message: 'Successfully connected to Regrid',
-      loadTime: `${loadTime}ms`,
-      status: response.status(),
-      timestamp: new Date().toISOString()
-    });
-    
-  } catch (error) {
-    console.error('Connection test failed:', error);
-    
-    await scraper.close();
-    
-    res.status(500).json({
-      success: false,
-      error: error.message,
-      timestamp: new Date().toISOString()
-    });
-  }
 });
 
 module.exports = app;

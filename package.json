@@ -1,24 +1,23 @@
 {
-  "name": "regrid-scraper-vercel",
+  "name": "regrid-scraper-railway",
   "version": "1.0.0",
-  "description": "Regrid property scraper deployed on Vercel",
-  "main": "api/scrape.js",
+  "description": "Regrid property scraper deployed on Railway",
+  "main": "server.js",
   "scripts": {
-    "dev": "vercel dev",
-    "build": "echo 'No build step needed'",
-    "start": "vercel dev"
+    "start": "node server.js",
+    "dev": "nodemon server.js"
   },
   "dependencies": {
-    "puppeteer-core": "^24.5.1",
-    "@sparticuz/chromium": "^121.0.0"
+    "express": "^4.18.2",
+    "puppeteer": "^21.6.1"
   },
   "devDependencies": {
-    "puppeteer": "^24.5.1"
+    "nodemon": "^3.0.2"
   },
   "engines": {
     "node": ">=18.0.0"
   },
-  "keywords": ["property", "real-estate", "scraping", "vercel"],
+  "keywords": ["property", "real-estate", "scraping", "railway"],
   "author": "Property Scraper",
   "license": "MIT"
 }
