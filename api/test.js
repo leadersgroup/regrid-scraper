@@ -1,4 +1,4 @@
-// api/test.js - Simple test endpoint
+// api/test.js - Simple test endpoint lee shen
 module.exports = async function handler(req, res) {
     res.setHeader('Access-Control-Allow-Origin', '*');
     res.setHeader('Content-Type', 'application/json');
