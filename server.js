@@ -125,4 +125,51 @@ app.listen(PORT, () => {
   console.log(`📦 Node: ${process.version}`);
 });
 
+
+// Add this debug endpoint to your server.js
+app.get('/api/test-connection', async (req, res) => {
+  const RegridScraper = require('./regrid-scraper-render');
+  const scraper = new RegridScraper();
+  
+  try {
+    console.log('Testing connection to Regrid...');
+    
+    await scraper.initialize();
+    console.log('✓ Browser initialized');
+    
+    // Test basic navigation with minimal requirements
+    console.log('Attempting navigation...');
+    const startTime = Date.now();
+    
+    const response = await scraper.page.goto('https://app.regrid.com/us', {
+      waitUntil: 'domcontentloaded',
+      timeout: 60000
+    });
+    
+    const loadTime = Date.now() - startTime;
+    console.log(`✓ Page loaded in ${loadTime}ms`);
+    
+    await scraper.close();
+    
+    res.json({
+      success: true,
+      message: 'Successfully connected to Regrid',
+      loadTime: `${loadTime}ms`,
+      status: response.status(),
+      timestamp: new Date().toISOString()
+    });
+    
+  } catch (error) {
+    console.error('Connection test failed:', error);
+    
+    await scraper.close();
+    
+    res.status(500).json({
+      success: false,
+      error: error.message,
+      timestamp: new Date().toISOString()
+    });
+  }
+});
+
 module.exports = app;

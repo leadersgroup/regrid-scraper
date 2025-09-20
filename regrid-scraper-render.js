@@ -1,5 +1,5 @@
-// regrid-scraper-render.js - Optimized for Render.com deployment
-const puppeteer = require('puppeteer-core');
+// regrid-scraper-render.js - Optimized for Docker deployment with better error handling
+const puppeteer = require('puppeteer');
 
 class RegridScraper {
     constructor() {
@@ -9,143 +9,84 @@ class RegridScraper {
         this.csrfToken = null;
     }
 
+   
     async initialize() {
-        console.log('Initializing browser on Render...');
-        
-        // Browser launch configuration for Render.com using puppeteer-core
-        const launchOptions = {
-            headless: true,
-            args: [
-                '--no-sandbox',
-                '--disable-setuid-sandbox',
-                '--disable-dev-shm-usage',
-                '--disable-accelerated-2d-canvas',
-                '--no-first-run',
-                '--no-zygote',
-                '--single-process',
-                '--disable-gpu',
-                '--disable-background-timer-throttling',
-                '--disable-renderer-backgrounding',
-                '--disable-backgrounding-occluded-windows',
-                '--disable-features=TranslateUI',
-                '--disable-ipc-flooding-protection',
-                '--disable-web-security',
-                '--disable-features=VizDisplayCompositor',
-                '--disable-extensions',
-                '--disable-default-apps'
-            ]
-        };
+    console.log('Initializing browser in Docker...');
+    
+    // Minimal browser launch for Docker environment
+    const launchOptions = {
+        headless: true,
+        args: [
+            '--no-sandbox',
+            '--disable-setuid-sandbox',
+            '--disable-dev-shm-usage',
+            '--disable-gpu',
+            '--single-process',
+            '--no-zygote'
+        ]
+    };
 
-        // For Render, try these Chrome paths in order
-        const chromePaths = [
-            process.env.GOOGLE_CHROME_BIN,
-            process.env.CHROME_BIN,
-            process.env.PUPPETEER_EXECUTABLE_PATH,
-            '/usr/bin/google-chrome-stable',
-            '/usr/bin/google-chrome',
-            '/usr/bin/chromium-browser',
-            '/usr/bin/chromium',
-            '/snap/bin/chromium',
-            '/opt/google/chrome/chrome',
-            '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome'
-        ].filter(Boolean);
-
-        let browserLaunched = false;
-        let lastError = null;
-
-        // Try each Chrome path
-        for (const chromePath of chromePaths) {
-            try {
-                console.log(`Trying Chrome at: ${chromePath}`);
-                
-                // Check if file exists before trying to launch
-                const fs = require('fs');
-                if (fs.existsSync(chromePath)) {
-                    launchOptions.executablePath = chromePath;
-                    this.browser = await puppeteer.launch(launchOptions);
-                    console.log(`✓ Successfully launched Chrome from: ${chromePath}`);
-                    browserLaunched = true;
-                    break;
-                } else {
-                    console.log(`✗ Chrome not found at: ${chromePath}`);
-                }
-            } catch (error) {
-                console.log(`✗ Failed to launch Chrome from ${chromePath}:`, error.message);
-                lastError = error;
-            }
-        }
-
-        // If no Chrome found, try to use channel (Puppeteer's auto-detection)
-        if (!browserLaunched) {
-            try {
-                console.log('Trying Chrome with channel auto-detection...');
-                delete launchOptions.executablePath;
-                launchOptions.channel = 'chrome'; // Use Chrome channel
-                this.browser = await puppeteer.launch(launchOptions);
-                console.log('✓ Successfully launched Chrome using channel detection');
-                browserLaunched = true;
-            } catch (error) {
-                console.log('✗ Failed to launch Chrome with channel detection:', error.message);
-                lastError = error;
-            }
-        }
-
-        // Final fallback: try to install and use Chrome
-        if (!browserLaunched) {
-            try {
-                console.log('Final attempt: trying to use any available browser...');
-                
-                // Reset options for final attempt
-                const fallbackOptions = {
-                    headless: true,
-                    args: ['--no-sandbox', '--disable-setuid-sandbox'],
-                    channel: 'chrome'
-                };
-                
-                this.browser = await puppeteer.launch(fallbackOptions);
-                console.log('✓ Successfully launched browser with minimal config');
-                browserLaunched = true;
-            } catch (error) {
-                console.log('✗ Final fallback failed:', error.message);
-                lastError = error;
-            }
-        }
-
-        if (!browserLaunched) {
-            const errorMessage = `Could not launch Chrome on Render. Tried ${chromePaths.length} paths. Last error: ${lastError?.message}`;
-            console.error(errorMessage);
-            throw new Error(errorMessage);
-        }
-
-        this.page = await this.browser.newPage();
-
-        // Set realistic viewport and user agent (same as your working version)
-        await this.page.setViewport({ width: 1366, height: 768 });
-        await this.page.setUserAgent('Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36');
-
-        // Set extra headers (same as your working version)
-        await this.page.setExtraHTTPHeaders({
-            'Accept-Language': 'en-US,en;q=0.9,zh-CN;q=0.8,zh;q=0.7',
-            'Accept-Encoding': 'gzip, deflate, br, zstd'
-        });
-
-        console.log('Browser initialized successfully');
+    try {
+        this.browser = await puppeteer.launch(launchOptions);
+        console.log('✓ Browser launched successfully');
+    } catch (error) {
+        console.error('Failed to launch browser:', error);
+        throw error;
     }
 
-    async establishSession() {
+    this.page = await this.browser.newPage();
+
+    // Set very generous timeouts
+    this.page.setDefaultNavigationTimeout(120000); // 2 minutes
+    this.page.setDefaultTimeout(120000);
+
+    // Minimal setup
+    await this.page.setViewport({ width: 1280, height: 720 });
+    await this.page.setUserAgent('Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36');
+
+    console.log('Browser initialized successfully');
+}
+
+
+
+async establishSession() {
+    const maxRetries = 3;
+    let attempt = 0;
+
+    while (attempt < maxRetries) {
         try {
-            console.log('Navigating to Regrid to establish session...');
+            attempt++;
+            console.log(`Establishing session (attempt ${attempt}/${maxRetries})...`);
             
-            // Navigate to the main page first (exactly like your working version)
-            await this.page.goto('https://app.regrid.com/us', {
-                waitUntil: 'networkidle2',
-                timeout: 30000
+            // Navigate to the main page with more generous timeout
+            console.log('Navigating to Regrid...');
+            
+            // Start with a simple request to test connectivity
+            const response = await this.page.goto('https://app.regrid.com/us', {
+                waitUntil: 'domcontentloaded', // Most lenient wait condition
+                timeout: 90000 // 90 seconds - very generous
             });
 
-            // Wait a bit for the page to fully load
+            console.log(`Page response status: ${response.status()}`);
+            
+            if (!response.ok()) {
+                throw new Error(`HTTP ${response.status()}: ${response.statusText()}`);
+            }
+
+            console.log('Page loaded successfully, waiting for stability...');
+            
+            // Wait for page to be ready - with timeout
+            try {
+                await this.page.waitForSelector('body', { timeout: 15000 });
+                console.log('Body element found');
+            } catch (error) {
+                console.log('Body selector timeout, but continuing...');
+            }
+            
+            // Shorter wait for dynamic content
             await new Promise(resolve => setTimeout(resolve, 3000));
 
-            // Extract cookies and CSRF token from the page (same logic as your working version)
+            // Extract cookies and CSRF token from the page
             this.cookies = await this.page.cookies();
             
             // Try to find CSRF token in meta tags or page content
@@ -172,84 +113,111 @@ class RegridScraper {
                 console.log('Could not extract CSRF token from page');
             }
 
-            console.log('Session established successfully');
+            console.log('✓ Session established successfully');
             console.log(`Found ${this.cookies.length} cookies`);
             if (this.csrfToken) {
                 console.log('CSRF token extracted');
             }
 
+            return; // Success, exit retry loop
+
         } catch (error) {
-            console.error('Error establishing session:', error);
-            throw error;
+            console.error(`Attempt ${attempt} failed:`, error.message);
+            
+            if (attempt === maxRetries) {
+                throw new Error(`Failed to establish session after ${maxRetries} attempts. Last error: ${error.message}`);
+            }
+            
+            // Wait before retry
+            console.log('Waiting 10 seconds before retry...');
+            await new Promise(resolve => setTimeout(resolve, 10000));
         }
     }
+}
 
     async searchProperty(address) {
-        try {
-            console.log(`Searching for property: ${address}`);
+        const maxRetries = 2;
+        let attempt = 0;
 
-            // Prepare the search URL (exactly like your working version)
-            const encodedAddress = encodeURIComponent(address);
-            const searchUrl = `https://app.regrid.com/search.json?query=${encodedAddress}&autocomplete=1&context=false&strict=false`;
-
-            console.log('Making API request to:', searchUrl);
-
-            // Set extra headers for the request (exactly like your working version)
-            const headers = {
-                'Accept': 'application/json, text/javascript, */*; q=0.01',
-                'Accept-Language': 'en-US,en;q=0.9,zh-CN;q=0.8,zh;q=0.7',
-                'Accept-Encoding': 'gzip, deflate, br, zstd',
-                'X-Requested-With': 'XMLHttpRequest',
-                'Referer': 'https://app.regrid.com/us',
-                'Sec-Fetch-Dest': 'empty',
-                'Sec-Fetch-Mode': 'cors',
-                'Sec-Fetch-Site': 'same-origin',
-                'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36'
-            };
-
-            if (this.csrfToken) {
-                headers['X-CSRF-Token'] = this.csrfToken;
-            }
-
-            await this.page.setExtraHTTPHeaders(headers);
-
-            // Navigate to the search URL
-            const response = await this.page.goto(searchUrl, {
-                waitUntil: 'networkidle2',
-                timeout: 30000
-            });
-
-            if (!response) {
-                throw new Error('No response received from server');
-            }
-
-            if (!response.ok()) {
-                throw new Error(`HTTP ${response.status()}: ${response.statusText()}`);
-            }
-
-            // Get the response text and parse as JSON (exactly like your working version)
-            const responseText = await response.text();
-            let searchResults;
-            
+        while (attempt < maxRetries) {
             try {
-                searchResults = JSON.parse(responseText);
-                console.log('Search results received');
-            } catch (parseError) {
-                console.log('Response text:', responseText.substring(0, 200) + '...');
-                throw new Error('Invalid JSON response from server');
+                attempt++;
+                console.log(`Searching for property: ${address} (attempt ${attempt}/${maxRetries})`);
+
+                // Prepare the search URL
+                const encodedAddress = encodeURIComponent(address);
+                const searchUrl = `https://app.regrid.com/search.json?query=${encodedAddress}&autocomplete=1&context=false&strict=false`;
+
+                console.log('Making API request to:', searchUrl);
+
+                // Set extra headers for the request
+                const headers = {
+                    'Accept': 'application/json, text/javascript, */*; q=0.01',
+                    'Accept-Language': 'en-US,en;q=0.9',
+                    'Accept-Encoding': 'gzip, deflate, br',
+                    'X-Requested-With': 'XMLHttpRequest',
+                    'Referer': 'https://app.regrid.com/us',
+                    'Sec-Fetch-Dest': 'empty',
+                    'Sec-Fetch-Mode': 'cors',
+                    'Sec-Fetch-Site': 'same-origin',
+                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36'
+                };
+
+                if (this.csrfToken) {
+                    headers['X-CSRF-Token'] = this.csrfToken;
+                }
+
+                await this.page.setExtraHTTPHeaders(headers);
+
+                // Navigate to the search URL with timeout
+                const response = await this.page.goto(searchUrl, {
+                    waitUntil: 'domcontentloaded',
+                    timeout: 30000
+                });
+
+                if (!response) {
+                    throw new Error('No response received from server');
+                }
+
+                if (!response.ok()) {
+                    throw new Error(`HTTP ${response.status()}: ${response.statusText()}`);
+                }
+
+                // Get the response text and parse as JSON
+                const responseText = await response.text();
+                let searchResults;
+                
+                try {
+                    searchResults = JSON.parse(responseText);
+                    console.log('✓ Search results received');
+                } catch (parseError) {
+                    console.log('Response text:', responseText.substring(0, 200) + '...');
+                    throw new Error('Invalid JSON response from server');
+                }
+
+                return this.parseSearchResults(searchResults, address);
+
+            } catch (error) {
+                console.error(`Search attempt ${attempt} failed:`, error.message);
+                
+                if (attempt === maxRetries) {
+                    console.error('All search attempts failed');
+                    return {
+                        originalAddress: address,
+                        error: `Search failed after ${maxRetries} attempts: ${error.message}`
+                    };
+                }
+                
+                // Wait before retry
+                console.log('Waiting 3 seconds before retry...');
+                await new Promise(resolve => setTimeout(resolve, 3000));
             }
-
-            return this.parseSearchResults(searchResults, address);
-
-        } catch (error) {
-            console.error('Error searching property:', error);
-            throw error;
         }
     }
 
     parseSearchResults(results, originalAddress) {
         try {
-            // Handle both array and object response formats (exactly like your working version)
+            // Handle both array and object response formats
             let resultsArray;
             if (Array.isArray(results)) {
                 resultsArray = results;
@@ -284,7 +252,7 @@ class RegridScraper {
                 };
             }
 
-            // Extract parcel ID and owner information (exactly like your working version)
+            // Extract parcel ID and owner information
             const parcelData = {
                 originalAddress: originalAddress,
                 parcelId: property.parcelnumb || property.ll_uuid || property.parcel_id || property.id || 'Not found',
@@ -312,7 +280,7 @@ class RegridScraper {
     }
 
     extractOwnerName(property) {
-        // Try different possible fields for owner name (exactly like your working version)
+        // Try different possible fields for owner name
         const ownerFields = [
             'owner',
             'owner_name',
@@ -361,10 +329,10 @@ class RegridScraper {
                 const result = await this.searchProperty(address);
                 results.push(result);
                 
-                // Add delay between requests to avoid rate limiting (same as your working version)
+                // Add delay between requests to avoid rate limiting
                 if (i < addresses.length - 1) {
-                    console.log('Waiting 2 seconds before next request...');
-                    await new Promise(resolve => setTimeout(resolve, 2000));
+                    console.log('Waiting 3 seconds before next request...');
+                    await new Promise(resolve => setTimeout(resolve, 3000));
                 }
             } catch (error) {
                 console.error(`Error processing ${address}:`, error);
