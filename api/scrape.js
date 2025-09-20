@@ -1,5 +1,4 @@
-// api/scrape.js - Self-contained Vercel serverless function
-// All RegridScraper code is included directly in this file
+// api/scrape.js - Fixed Vercel serverless function with better Chrome handling
 
 class RegridScraper {
     constructor() {
@@ -13,6 +12,8 @@ class RegridScraper {
         console.log('Initializing browser for Vercel...');
         
         const isVercel = !!process.env.VERCEL_ENV;
+        console.log('Is Vercel environment:', isVercel);
+        
         let puppeteer, launchOptions = {
             headless: true,
             args: [
@@ -23,35 +24,69 @@ class RegridScraper {
                 '--no-first-run',
                 '--no-zygote',
                 '--disable-gpu',
-                '--single-process'
+                '--single-process',
+                '--disable-background-timer-throttling',
+                '--disable-renderer-backgrounding',
+                '--disable-backgrounding-occluded-windows',
+                '--disable-web-security',
+                '--disable-features=VizDisplayCompositor'
             ]
         };
 
         if (isVercel) {
-            // Use Vercel-optimized packages
-            const chromium = (await import('@sparticuz/chromium')).default;
-            puppeteer = await import('puppeteer-core');
-            
-            launchOptions = {
-                ...launchOptions,
-                args: [
-                    ...chromium.args,
-                    '--hide-scrollbars',
-                    '--disable-web-security'
-                ],
-                executablePath: await chromium.executablePath(),
-            };
+            try {
+                // Use Vercel-optimized packages
+                console.log('Loading Chromium for Vercel...');
+                const chromium = (await import('@sparticuz/chromium')).default;
+                puppeteer = await import('puppeteer-core');
+                
+                // Set font loading to false to avoid missing font issues
+                await chromium.font('https://raw.githack.com/googlei18n/noto-emoji/master/fonts/NotoColorEmoji.ttf');
+                
+                launchOptions = {
+                    ...launchOptions,
+                    args: [
+                        ...chromium.args,
+                        '--hide-scrollbars',
+                        '--disable-web-security',
+                        '--disable-features=VizDisplayCompositor',
+                        '--disable-background-timer-throttling',
+                        '--disable-renderer-backgrounding',
+                        '--disable-backgrounding-occluded-windows',
+                        '--disable-dev-shm-usage',
+                        '--disable-extensions',
+                        '--disable-plugins',
+                        '--disable-sync',
+                        '--disable-translate',
+                        '--disable-default-apps',
+                        '--no-first-run',
+                        '--no-default-browser-check',
+                        '--disable-gpu-sandbox',
+                        '--disable-software-rasterizer'
+                    ],
+                    executablePath: await chromium.executablePath(),
+                    headless: chromium.headless,
+                };
+                
+                console.log('Chromium executable path:', await chromium.executablePath());
+                
+            } catch (chromiumError) {
+                console.error('Error loading Chromium:', chromiumError);
+                throw new Error(`Failed to load Chromium: ${chromiumError.message}`);
+            }
         } else {
             // Use regular puppeteer for local development
+            console.log('Loading regular Puppeteer for local development...');
             puppeteer = await import('puppeteer');
         }
 
         try {
+            console.log('Launching browser with options:', JSON.stringify(launchOptions, null, 2));
             this.browser = await puppeteer.launch(launchOptions);
             console.log('✓ Browser launched successfully');
         } catch (error) {
             console.error('Failed to launch browser:', error);
-            throw error;
+            throw new Error(`Browser launch failed: ${error.message}`);
         }
 
         this.page = await this.browser.newPage();
@@ -62,7 +97,7 @@ class RegridScraper {
 
         // Set realistic viewport and user agent
         await this.page.setViewport({ width: 1366, height: 768 });
-        await this.page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36');
+        await this.page.setUserAgent('Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36');
 
         // Set extra headers
         await this.page.setExtraHTTPHeaders({
@@ -135,7 +170,7 @@ class RegridScraper {
                 'Sec-Fetch-Dest': 'empty',
                 'Sec-Fetch-Mode': 'cors',
                 'Sec-Fetch-Site': 'same-origin',
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36'
+                'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36'
             };
 
             if (this.csrfToken) {
@@ -313,7 +348,9 @@ module.exports = async function handler(req, res) {
             status: 'ready',
             message: 'Regrid Property Scraper API (Vercel)',
             timestamp: new Date().toISOString(),
-            platform: 'vercel'
+            platform: 'vercel',
+            nodeVersion: process.version,
+            environment: process.env.VERCEL_ENV || 'local'
         });
     }
 
@@ -322,6 +359,8 @@ module.exports = async function handler(req, res) {
     }
 
     console.log('=== Scraping Request (Vercel) ===');
+    console.log('Environment:', process.env.VERCEL_ENV);
+    console.log('Node version:', process.version);
     
     let scraper = null;
     
@@ -332,8 +371,8 @@ module.exports = async function handler(req, res) {
             return res.status(400).json({ error: 'Addresses array is required' });
         }
 
-        if (addresses.length > 3) {
-            return res.status(400).json({ error: 'Maximum 3 addresses per request on Vercel' });
+        if (addresses.length > 2) {
+            return res.status(400).json({ error: 'Maximum 2 addresses per request on Vercel' });
         }
 
         console.log(`Processing ${addresses.length} addresses:`, addresses);
@@ -358,7 +397,8 @@ module.exports = async function handler(req, res) {
                 failed: addresses.length - successCount
             },
             timestamp: new Date().toISOString(),
-            platform: 'vercel'
+            platform: 'vercel',
+            environment: process.env.VERCEL_ENV || 'local'
         });
 
     } catch (error) {
@@ -367,7 +407,8 @@ module.exports = async function handler(req, res) {
             error: 'Scraping failed',
             message: error.message,
             stack: process.env.NODE_ENV === 'development' ? error.stack : undefined,
-            timestamp: new Date().toISOString()
+            timestamp: new Date().toISOString(),
+            environment: process.env.VERCEL_ENV || 'local'
         });
     } finally {
         if (scraper) {
