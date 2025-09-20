@@ -1,7 +1,10 @@
-// api/scrape.js - Final working version with full scraping capability
+// api/scrape.js - Adapted from your working local RegridScraper
+
+const chromium = require('@sparticuz/chromium');
+const puppeteer = require('puppeteer-core');
 
 module.exports = async function handler(req, res) {
-  console.log('=== Regrid Property Scraper ===');
+  console.log('=== Regrid Property Scraper (Vercel) ===');
   
   res.setHeader('Content-Type', 'application/json');
   res.setHeader('Access-Control-Allow-Origin', '*');
@@ -14,37 +17,19 @@ module.exports = async function handler(req, res) {
     }
 
     if (req.method === 'GET') {
-      // Health check with full diagnostic
-      console.log('Health check requested');
-      
-      try {
-        const chromium = require('@sparticuz/chromium');
-        const puppeteer = require('puppeteer-core');
-        
-        return res.status(200).json({
-          status: 'healthy',
-          message: 'Property scraper is ready',
-          timestamp: new Date().toISOString(),
-          nodeVersion: process.version,
-          dependencies: {
-            chromium: 'Available',
-            puppeteer: 'Available'
-          },
-          ready: true
-        });
-      } catch (error) {
-        return res.status(500).json({
-          status: 'unhealthy',
-          error: error.message
-        });
-      }
+      return res.status(200).json({
+        status: 'ready',
+        message: 'Regrid Property Scraper API',
+        timestamp: new Date().toISOString(),
+        nodeVersion: process.version
+      });
     }
 
     if (req.method !== 'POST') {
       return res.status(405).json({ error: 'Method not allowed' });
     }
 
-    // Main scraping functionality
+    // Parse request
     const { addresses } = req.body || {};
     
     if (!addresses || !Array.isArray(addresses)) {
@@ -61,69 +46,19 @@ module.exports = async function handler(req, res) {
 
     console.log(`Processing ${addresses.length} address(es):`, addresses);
 
-    // Initialize scraping
-    let browser = null;
+    // Initialize scraper (adapted from your working class)
+    const scraper = new VercelRegridScraper();
+    
     try {
-      const chromium = require('@sparticuz/chromium');
-      const puppeteer = require('puppeteer-core');
+      await scraper.initialize();
+      await scraper.establishSession();
       
-      console.log('Launching browser...');
-      browser = await puppeteer.launch({
-        args: chromium.args,
-        defaultViewport: chromium.defaultViewport,
-        executablePath: await chromium.executablePath(),
-        headless: chromium.headless,
-        ignoreHTTPSErrors: true,
-      });
-
-      const page = await browser.newPage();
+      const results = await scraper.searchMultipleProperties(addresses);
       
-      // Set realistic user agent and headers
-      await page.setUserAgent('Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
+      await scraper.close();
       
-      console.log('Establishing session with Regrid...');
-      await page.goto('https://app.regrid.com/us', {
-        waitUntil: 'networkidle2',
-        timeout: 25000
-      });
-
-      // Wait for page to settle
-      await new Promise(resolve => setTimeout(resolve, 2000));
-      console.log('Session established successfully');
-
-      // Process each address
-      const results = [];
-      for (let i = 0; i < addresses.length; i++) {
-        const address = addresses[i];
-        console.log(`Processing ${i + 1}/${addresses.length}: ${address}`);
-        
-        try {
-          const result = await scrapeProperty(page, address);
-          results.push(result);
-          
-          console.log(`Result for ${address}:`, result.error ? `Error: ${result.error}` : 'Success');
-          
-          // Rate limiting - delay between requests
-          if (i < addresses.length - 1) {
-            console.log('Waiting before next request...');
-            await new Promise(resolve => setTimeout(resolve, 2000));
-          }
-        } catch (error) {
-          console.error(`Error processing ${address}:`, error.message);
-          results.push({
-            originalAddress: address,
-            error: error.message
-          });
-        }
-      }
-
-      await browser.close();
-      browser = null;
-
-      console.log('Processing completed successfully');
+      const successCount = results.filter(r => r && !r.error).length;
       
-      // Return results
-      const successCount = results.filter(r => !r.error).length;
       return res.status(200).json({ 
         success: true, 
         data: results,
@@ -134,23 +69,10 @@ module.exports = async function handler(req, res) {
         },
         timestamp: new Date().toISOString()
       });
-
+      
     } catch (error) {
-      console.error('Scraping error:', error);
-      
-      if (browser) {
-        try {
-          await browser.close();
-        } catch (closeError) {
-          console.error('Error closing browser:', closeError.message);
-        }
-      }
-      
-      return res.status(500).json({ 
-        error: 'Scraping failed',
-        message: error.message,
-        timestamp: new Date().toISOString()
-      });
+      await scraper.close();
+      throw error;
     }
 
   } catch (error) {
@@ -163,124 +85,302 @@ module.exports = async function handler(req, res) {
   }
 };
 
-async function scrapeProperty(page, address) {
-  try {
-    const encodedAddress = encodeURIComponent(address);
-    const searchUrl = `https://app.regrid.com/search.json?query=${encodedAddress}&autocomplete=1&context=false&strict=false`;
-
-    console.log(`Searching: ${searchUrl}`);
-
-    // Set headers for the API request
-    const headers = {
-      'Accept': 'application/json, text/javascript, */*; q=0.01',
-      'Accept-Language': 'en-US,en;q=0.9',
-      'Accept-Encoding': 'gzip, deflate, br',
-      'X-Requested-With': 'XMLHttpRequest',
-      'Referer': 'https://app.regrid.com/us',
-      'Sec-Fetch-Dest': 'empty',
-      'Sec-Fetch-Mode': 'cors',
-      'Sec-Fetch-Site': 'same-origin'
-    };
-
-    await page.setExtraHTTPHeaders(headers);
-
-    // Make the API request
-    const response = await page.goto(searchUrl, {
-      waitUntil: 'networkidle2',
-      timeout: 20000
-    });
-
-    if (!response.ok()) {
-      throw new Error(`HTTP ${response.status()}: ${response.statusText()}`);
+// Adapted RegridScraper class for Vercel serverless environment
+class VercelRegridScraper {
+    constructor() {
+        this.browser = null;
+        this.page = null;
+        this.cookies = null;
+        this.csrfToken = null;
     }
 
-    const responseText = await response.text();
-    console.log(`Response received, length: ${responseText.length}`);
-    
-    let searchResults;
-    try {
-      searchResults = JSON.parse(responseText);
-    } catch (parseError) {
-      console.error('JSON parse error:', parseError.message);
-      console.error('Response preview:', responseText.substring(0, 200));
-      throw new Error('Invalid JSON response from Regrid API');
+    async initialize() {
+        console.log('Initializing browser for Vercel...');
+        
+        // Launch browser with settings adapted for serverless
+        this.browser = await puppeteer.launch({
+            args: [
+                ...chromium.args,
+                '--no-sandbox',
+                '--disable-setuid-sandbox',
+                '--disable-dev-shm-usage',
+                '--disable-accelerated-2d-canvas',
+                '--no-first-run',
+                '--no-zygote',
+                '--single-process',
+                '--disable-gpu'
+            ],
+            defaultViewport: chromium.defaultViewport,
+            executablePath: await chromium.executablePath(),
+            headless: chromium.headless,
+            ignoreHTTPSErrors: true
+        });
+
+        this.page = await this.browser.newPage();
+
+        // Set realistic viewport and user agent (same as your working version)
+        await this.page.setViewport({ width: 1366, height: 768 });
+        await this.page.setUserAgent('Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36');
+
+        // Set extra headers (same as your working version)
+        await this.page.setExtraHTTPHeaders({
+            'Accept-Language': 'en-US,en;q=0.9,zh-CN;q=0.8,zh;q=0.7',
+            'Accept-Encoding': 'gzip, deflate, br, zstd'
+        });
+
+        console.log('Browser initialized successfully');
     }
 
-    return parsePropertyData(searchResults, address);
+    async establishSession() {
+        try {
+            console.log('Navigating to Regrid to establish session...');
+            
+            // Navigate to the main page first (exactly like your working version)
+            await this.page.goto('https://app.regrid.com/us', {
+                waitUntil: 'networkidle2',
+                timeout: 30000
+            });
 
-  } catch (error) {
-    console.error(`Scraping error for ${address}:`, error.message);
-    throw error;
-  }
-}
+            // Wait a bit for the page to fully load
+            await new Promise(resolve => setTimeout(resolve, 3000));
 
-function parsePropertyData(results, originalAddress) {
-  try {
-    // Handle both array and object response formats
-    let resultsArray;
-    if (Array.isArray(results)) {
-      resultsArray = results;
-    } else if (results && results.results && Array.isArray(results.results)) {
-      resultsArray = results.results;
-    } else {
-      return {
-        originalAddress: originalAddress,
-        error: 'No results found for this address'
-      };
+            // Extract cookies and CSRF token from the page (same logic as your working version)
+            this.cookies = await this.page.cookies();
+            
+            // Try to find CSRF token in meta tags or page content
+            try {
+                this.csrfToken = await this.page.evaluate(() => {
+                    const metaTag = document.querySelector('meta[name="csrf-token"]');
+                    if (metaTag) {
+                        return metaTag.getAttribute('content');
+                    }
+                    
+                    // Alternative: look for it in script tags or other locations
+                    const scriptTags = Array.from(document.querySelectorAll('script'));
+                    for (const script of scriptTags) {
+                        const text = script.textContent || script.innerText;
+                        const match = text.match(/csrf[_-]?token["']?\s*[:=]\s*["']([^"']+)["']/i);
+                        if (match) {
+                            return match[1];
+                        }
+                    }
+                    
+                    return null;
+                });
+            } catch (error) {
+                console.log('Could not extract CSRF token from page');
+            }
+
+            console.log('Session established successfully');
+            console.log(`Found ${this.cookies.length} cookies`);
+            if (this.csrfToken) {
+                console.log('CSRF token extracted');
+            }
+
+        } catch (error) {
+            console.error('Error establishing session:', error);
+            throw error;
+        }
     }
 
-    if (resultsArray.length === 0) {
-      return {
-        originalAddress: originalAddress,
-        error: 'No properties found matching this address'
-      };
+    async searchProperty(address) {
+        try {
+            console.log(`Searching for property: ${address}`);
+
+            // Prepare the search URL (exactly like your working version)
+            const encodedAddress = encodeURIComponent(address);
+            const searchUrl = `https://app.regrid.com/search.json?query=${encodedAddress}&autocomplete=1&context=false&strict=false`;
+
+            console.log('Making API request to:', searchUrl);
+
+            // Set extra headers for the request (exactly like your working version)
+            const headers = {
+                'Accept': 'application/json, text/javascript, */*; q=0.01',
+                'Accept-Language': 'en-US,en;q=0.9,zh-CN;q=0.8,zh;q=0.7',
+                'Accept-Encoding': 'gzip, deflate, br, zstd',
+                'X-Requested-With': 'XMLHttpRequest',
+                'Referer': 'https://app.regrid.com/us',
+                'Sec-Fetch-Dest': 'empty',
+                'Sec-Fetch-Mode': 'cors',
+                'Sec-Fetch-Site': 'same-origin',
+                'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36'
+            };
+
+            if (this.csrfToken) {
+                headers['X-CSRF-Token'] = this.csrfToken;
+            }
+
+            await this.page.setExtraHTTPHeaders(headers);
+
+            // Navigate to the search URL
+            const response = await this.page.goto(searchUrl, {
+                waitUntil: 'networkidle2',
+                timeout: 30000
+            });
+
+            if (!response) {
+                throw new Error('No response received from server');
+            }
+
+            if (!response.ok()) {
+                throw new Error(`HTTP ${response.status()}: ${response.statusText()}`);
+            }
+
+            // Get the response text and parse as JSON (exactly like your working version)
+            const responseText = await response.text();
+            let searchResults;
+            
+            try {
+                searchResults = JSON.parse(responseText);
+                console.log('Search results received');
+            } catch (parseError) {
+                console.log('Response text:', responseText.substring(0, 200) + '...');
+                throw new Error('Invalid JSON response from server');
+            }
+
+            return this.parseSearchResults(searchResults, address);
+
+        } catch (error) {
+            console.error('Error searching property:', error);
+            throw error;
+        }
     }
 
-    console.log(`Found ${resultsArray.length} result(s) for ${originalAddress}`);
+    parseSearchResults(results, originalAddress) {
+        try {
+            // Handle both array and object response formats (exactly like your working version)
+            let resultsArray;
+            if (Array.isArray(results)) {
+                resultsArray = results;
+            } else if (results && results.results && Array.isArray(results.results)) {
+                resultsArray = results.results;
+            } else {
+                console.log('No results found or invalid format');
+                return {
+                    originalAddress: originalAddress,
+                    error: 'No results found'
+                };
+            }
 
-    // Take the first (most relevant) result
-    const property = resultsArray[0];
-    
-    // Extract property data
-    const propertyData = {
-      originalAddress: originalAddress,
-      parcelId: property.parcelnumb || property.ll_uuid || property.parcel_id || property.id || 'Not found',
-      ownerName: property.owner || 'Not found',
-      address: property.headline || property.address || property.formatted_address || 'Not found',
-      city: extractCityFromContext(property.context) || property.city || 'Not found',
-      state: extractStateFromContext(property.context) || property.state || 'Not found',
-      zipCode: property.zip || property.postal_code || 'Not found',
-      county: property.county || 'Not found',
-      propertyType: property.type || property.property_type || 'Not found',
-      score: property.score || 'Not found',
-      path: property.path || 'Not found'
-    };
+            if (resultsArray.length === 0) {
+                console.log('No results found');
+                return {
+                    originalAddress: originalAddress,
+                    error: 'No results found'
+                };
+            }
 
-    console.log(`Extracted data for ${originalAddress}:`, {
-      parcelId: propertyData.parcelId,
-      owner: propertyData.ownerName,
-      score: propertyData.score
-    });
+            console.log(`Found ${resultsArray.length} result(s)`);
 
-    return propertyData;
+            // Take the first result (most relevant)
+            const property = resultsArray[0];
+            
+            if (!property) {
+                console.log('No property data in results');
+                return {
+                    originalAddress: originalAddress,
+                    error: 'No property data found'
+                };
+            }
 
-  } catch (error) {
-    console.error(`Parse error for ${originalAddress}:`, error.message);
-    return {
-      originalAddress: originalAddress,
-      error: `Data parsing failed: ${error.message}`
-    };
-  }
-}
+            // Extract parcel ID and owner information (exactly like your working version)
+            const parcelData = {
+                originalAddress: originalAddress,
+                parcelId: property.parcelnumb || property.ll_uuid || property.parcel_id || property.id || 'Not found',
+                ownerName: property.owner || this.extractOwnerName(property),
+                address: property.headline || property.address || property.formatted_address || 'Not found',
+                city: this.extractCityFromContext(property.context) || property.city || 'Not found',
+                state: this.extractStateFromContext(property.context) || property.state || 'Not found',
+                zipCode: property.zip || property.postal_code || 'Not found',
+                county: property.county || 'Not found',
+                propertyType: property.type || property.property_type || 'Not found',
+                score: property.score || 'Not found',
+                path: property.path || 'Not found',
+                centroid: property.centroid || 'Not found'
+            };
 
-function extractCityFromContext(context) {
-  if (!context || typeof context !== 'string') return null;
-  const parts = context.split(',');
-  return parts[0] ? parts[0].trim() : null;
-}
+            return parcelData;
 
-function extractStateFromContext(context) {
-  if (!context || typeof context !== 'string') return null;
-  const parts = context.split(',');
-  return parts[1] ? parts[1].trim() : null;
+        } catch (error) {
+            console.error('Error parsing search results:', error);
+            return {
+                originalAddress: originalAddress,
+                error: error.message
+            };
+        }
+    }
+
+    extractOwnerName(property) {
+        // Try different possible fields for owner name (exactly like your working version)
+        const ownerFields = [
+            'owner',
+            'owner_name',
+            'owner_1',
+            'owner_full_name',
+            'property_owner',
+            'owner_display_name'
+        ];
+
+        for (const field of ownerFields) {
+            if (property[field]) {
+                return property[field];
+            }
+        }
+
+        // If no direct owner field, check nested objects
+        if (property.owner_info) {
+            return property.owner_info.name || property.owner_info.full_name || 'Owner info found but name unclear';
+        }
+
+        return 'Not found';
+    }
+
+    extractCityFromContext(context) {
+        if (!context) return null;
+        // Context format appears to be "City, State"
+        const parts = context.split(',');
+        return parts[0] ? parts[0].trim() : null;
+    }
+
+    extractStateFromContext(context) {
+        if (!context) return null;
+        // Context format appears to be "City, State"
+        const parts = context.split(',');
+        return parts[1] ? parts[1].trim() : null;
+    }
+
+    async searchMultipleProperties(addresses) {
+        const results = [];
+        
+        for (let i = 0; i < addresses.length; i++) {
+            const address = addresses[i];
+            console.log(`\n--- Processing ${i + 1}/${addresses.length}: ${address} ---`);
+            
+            try {
+                const result = await this.searchProperty(address);
+                results.push(result);
+                
+                // Add delay between requests to avoid rate limiting (same as your working version)
+                if (i < addresses.length - 1) {
+                    console.log('Waiting 2 seconds before next request...');
+                    await new Promise(resolve => setTimeout(resolve, 2000));
+                }
+            } catch (error) {
+                console.error(`Error processing ${address}:`, error);
+                results.push({
+                    originalAddress: address,
+                    error: error.message
+                });
+            }
+        }
+
+        return results;
+    }
+
+    async close() {
+        if (this.browser) {
+            await this.browser.close();
+            console.log('Browser closed');
+        }
+    }
 }
