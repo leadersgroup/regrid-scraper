@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Regrid Property Scraper (Vercel)</title>
+    <title>Regrid Property Scraper (Railway)</title>
     <style>
         body {
             font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
@@ -43,7 +43,7 @@
             box-sizing: border-box;
         }
         button {
-            background: #0070f3;
+            background: #7c3aed;
             color: white;
             border: none;
             padding: 12px 30px;
@@ -54,24 +54,24 @@
             margin-right: 10px;
         }
         button:hover {
-            background: #0051cc;
+            background: #6d28d9;
         }
         button:disabled {
             background: #ccc;
             cursor: not-allowed;
         }
         .test-btn {
-            background: #28a745;
+            background: #059669;
         }
         .test-btn:hover {
-            background: #218838;
+            background: #047857;
         }
         .results {
             margin-top: 30px;
             padding: 20px;
             background: #f9f9f9;
             border-radius: 5px;
-            border-left: 4px solid #0070f3;
+            border-left: 4px solid #7c3aed;
         }
         .property {
             background: white;
@@ -98,15 +98,15 @@
             color: #666;
         }
         .error {
-            color: #e74c3c;
-            background: #ffeaea;
+            color: #dc2626;
+            background: #fef2f2;
             padding: 10px;
             border-radius: 5px;
             margin: 10px 0;
         }
         .success {
-            color: #27ae60;
-            background: #eafaf1;
+            color: #059669;
+            background: #ecfdf5;
             padding: 10px;
             border-radius: 5px;
             margin: 10px 0;
@@ -117,7 +117,7 @@
             padding: 20px;
         }
         .badge {
-            background: #0070f3;
+            background: #7c3aed;
             color: white;
             padding: 2px 8px;
             border-radius: 12px;
@@ -138,7 +138,7 @@
 </head>
 <body>
     <div class="container">
-        <h1>🏠 Regrid Property Scraper <span class="badge">Vercel</span></h1>
+        <h1>🏠 Regrid Property Scraper <span class="badge">Railway</span></h1>
         
         <div style="margin-bottom: 20px;">
             <button onclick="testAPI()" id="testBtn" class="test-btn">
@@ -150,7 +150,7 @@
         </div>
         
         <div class="form-group">
-            <label for="addresses">Enter addresses (one per line, max 5):</label>
+            <label for="addresses">Enter addresses (one per line, max 10):</label>
             <textarea 
                 id="addresses" 
                 placeholder="123 Main St, New York, NY&#10;456 Oak Ave, Los Angeles, CA&#10;789 Pine Rd, Chicago, IL"
@@ -178,18 +178,7 @@
                     }
                 });
                 
-                console.log('Response status:', response.status);
-                console.log('Response headers:', response.headers);
-                
-                const text = await response.text();
-                console.log('Response text:', text);
-                
-                let data;
-                try {
-                    data = JSON.parse(text);
-                } catch (parseError) {
-                    throw new Error(`Invalid JSON response: ${text.substring(0, 200)}...`);
-                }
+                const data = await response.json();
                 
                 if (response.ok) {
                     results.innerHTML = `
@@ -225,8 +214,8 @@
                 return;
             }
             
-            if (addresses.length > 5) {
-                alert('Maximum 5 addresses allowed on Vercel');
+            if (addresses.length > 10) {
+                alert('Maximum 10 addresses allowed');
                 return;
             }
             
@@ -236,7 +225,7 @@
             button.disabled = true;
             button.textContent = '🔄 Searching...';
             
-            results.innerHTML = '<div class="loading">Searching properties... This may take up to 30 seconds.</div>';
+            results.innerHTML = '<div class="loading">Searching properties... This may take a few minutes.</div>';
             
             try {
                 const response = await fetch('/api/scrape', {
@@ -247,15 +236,7 @@
                     body: JSON.stringify({ addresses })
                 });
                 
-                const text = await response.text();
-                console.log('Response text:', text);
-                
-                let data;
-                try {
-                    data = JSON.parse(text);
-                } catch (parseError) {
-                    throw new Error(`Invalid JSON response: ${text.substring(0, 200)}...`);
-                }
+                const data = await response.json();
                 
                 if (data.success) {
                     displayResults(data);

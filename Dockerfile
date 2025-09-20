@@ -1,4 +1,4 @@
-# Railway Dockerfile
+# Railway Dockerfile - Fixed
 FROM node:18-slim
 
 # Install Chrome dependencies
@@ -58,10 +58,17 @@ RUN wget -q -O - https://dl.google.com/linux/linux_signing_key.pub | apt-key add
 
 WORKDIR /app
 
-COPY package*.json ./
-RUN npm ci --only=production
+# Copy package.json
+COPY package.json ./
 
+# Install dependencies using npm install (not npm ci)
+RUN npm install --production
+
+# Copy all application files
 COPY . .
+
+# Create public directory if it doesn't exist
+RUN mkdir -p public
 
 EXPOSE 3000
 

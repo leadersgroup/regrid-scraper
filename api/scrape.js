@@ -1,4 +1,4 @@
-// api/scrape.js - Fixed Vercel serverless function with better Chrome handling
+// api/scrape.js - Vercel serverless function using Playwright
 
 class RegridScraper {
     constructor() {
@@ -9,25 +9,18 @@ class RegridScraper {
     }
 
     async initialize() {
-        console.log('Initializing browser for Vercel...');
+        console.log('Initializing browser with Playwright...');
         
         const isVercel = !!process.env.VERCEL_ENV;
         console.log('Is Vercel environment:', isVercel);
         
-        let puppeteer, launchOptions = {
+        let playwright;
+        let launchOptions = {
             headless: true,
             args: [
                 '--no-sandbox',
                 '--disable-setuid-sandbox',
                 '--disable-dev-shm-usage',
-                '--disable-accelerated-2d-canvas',
-                '--no-first-run',
-                '--no-zygote',
-                '--disable-gpu',
-                '--single-process',
-                '--disable-background-timer-throttling',
-                '--disable-renderer-backgrounding',
-                '--disable-backgrounding-occluded-windows',
                 '--disable-web-security',
                 '--disable-features=VizDisplayCompositor'
             ]
@@ -35,58 +28,42 @@ class RegridScraper {
 
         if (isVercel) {
             try {
-                // Use Vercel-optimized packages
-                console.log('Loading Chromium for Vercel...');
-                const chromium = (await import('@sparticuz/chromium')).default;
-                puppeteer = await import('puppeteer-core');
+                // Use Playwright AWS Lambda for Vercel
+                console.log('Loading Playwright for Vercel...');
+                const playwrightAWS = await import('playwright-aws-lambda');
                 
-                // Set font loading to false to avoid missing font issues
-                await chromium.font('https://raw.githack.com/googlei18n/noto-emoji/master/fonts/NotoColorEmoji.ttf');
-                
-                launchOptions = {
-                    ...launchOptions,
+                this.browser = await playwrightAWS.launchChromium({
+                    headless: true,
                     args: [
-                        ...chromium.args,
-                        '--hide-scrollbars',
+                        '--no-sandbox',
+                        '--disable-setuid-sandbox',
+                        '--disable-dev-shm-usage',
                         '--disable-web-security',
                         '--disable-features=VizDisplayCompositor',
                         '--disable-background-timer-throttling',
                         '--disable-renderer-backgrounding',
                         '--disable-backgrounding-occluded-windows',
-                        '--disable-dev-shm-usage',
                         '--disable-extensions',
                         '--disable-plugins',
                         '--disable-sync',
                         '--disable-translate',
                         '--disable-default-apps',
                         '--no-first-run',
-                        '--no-default-browser-check',
-                        '--disable-gpu-sandbox',
-                        '--disable-software-rasterizer'
-                    ],
-                    executablePath: await chromium.executablePath(),
-                    headless: chromium.headless,
-                };
+                        '--no-default-browser-check'
+                    ]
+                });
                 
-                console.log('Chromium executable path:', await chromium.executablePath());
+                console.log('✓ Playwright browser launched successfully');
                 
-            } catch (chromiumError) {
-                console.error('Error loading Chromium:', chromiumError);
-                throw new Error(`Failed to load Chromium: ${chromiumError.message}`);
+            } catch (playwrightError) {
+                console.error('Error loading Playwright AWS:', playwrightError);
+                throw new Error(`Failed to load Playwright: ${playwrightError.message}`);
             }
         } else {
-            // Use regular puppeteer for local development
-            console.log('Loading regular Puppeteer for local development...');
-            puppeteer = await import('puppeteer');
-        }
-
-        try {
-            console.log('Launching browser with options:', JSON.stringify(launchOptions, null, 2));
-            this.browser = await puppeteer.launch(launchOptions);
-            console.log('✓ Browser launched successfully');
-        } catch (error) {
-            console.error('Failed to launch browser:', error);
-            throw new Error(`Browser launch failed: ${error.message}`);
+            // Use regular Playwright for local development
+            console.log('Loading regular Playwright for local development...');
+            const { chromium } = await import('playwright');
+            this.browser = await chromium.launch(launchOptions);
         }
 
         this.page = await this.browser.newPage();
@@ -96,7 +73,7 @@ class RegridScraper {
         this.page.setDefaultTimeout(25000);
 
         // Set realistic viewport and user agent
-        await this.page.setViewport({ width: 1366, height: 768 });
+        await this.page.setViewportSize({ width: 1366, height: 768 });
         await this.page.setUserAgent('Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36');
 
         // Set extra headers
@@ -119,9 +96,11 @@ class RegridScraper {
             });
 
             await this.page.waitForSelector('body', { timeout: 5000 });
-            await new Promise(resolve => setTimeout(resolve, 2000));
+            await this.page.waitForTimeout(2000);
 
-            this.cookies = await this.page.cookies();
+            // Get cookies
+            const cookies = await this.page.context().cookies();
+            this.cookies = cookies;
             
             try {
                 this.csrfToken = await this.page.evaluate(() => {
@@ -312,7 +291,7 @@ class RegridScraper {
             
             // Small delay between requests
             if (i < addresses.length - 1) {
-                await new Promise(resolve => setTimeout(resolve, 1000));
+                await this.page.waitForTimeout(1000);
             }
         }
 
@@ -346,9 +325,10 @@ module.exports = async function handler(req, res) {
     if (req.method === 'GET') {
         return res.status(200).json({
             status: 'ready',
-            message: 'Regrid Property Scraper API (Vercel)',
+            message: 'Regrid Property Scraper API (Vercel + Playwright)',
             timestamp: new Date().toISOString(),
             platform: 'vercel',
+            engine: 'playwright',
             nodeVersion: process.version,
             environment: process.env.VERCEL_ENV || 'local'
         });
@@ -358,7 +338,7 @@ module.exports = async function handler(req, res) {
         return res.status(405).json({ error: 'Method not allowed' });
     }
 
-    console.log('=== Scraping Request (Vercel) ===');
+    console.log('=== Scraping Request (Vercel + Playwright) ===');
     console.log('Environment:', process.env.VERCEL_ENV);
     console.log('Node version:', process.version);
     
@@ -398,6 +378,7 @@ module.exports = async function handler(req, res) {
             },
             timestamp: new Date().toISOString(),
             platform: 'vercel',
+            engine: 'playwright',
             environment: process.env.VERCEL_ENV || 'local'
         });
 
@@ -408,6 +389,8 @@ module.exports = async function handler(req, res) {
             message: error.message,
             stack: process.env.NODE_ENV === 'development' ? error.stack : undefined,
             timestamp: new Date().toISOString(),
+            platform: 'vercel',
+            engine: 'playwright',
             environment: process.env.VERCEL_ENV || 'local'
         });
     } finally {
