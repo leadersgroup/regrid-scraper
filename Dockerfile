@@ -1,4 +1,4 @@
-# Railway Dockerfile - Fixed
+# Railway Dockerfile - Fixed for SIGTERM
 FROM node:18-slim
 
 # Install Chrome dependencies
@@ -46,7 +46,6 @@ RUN apt-get update && apt-get install -y \
     libnss3 \
     lsb-release \
     xdg-utils \
-    wget \
     --no-install-recommends
 
 # Install Chrome
@@ -56,20 +55,28 @@ RUN wget -q -O - https://dl.google.com/linux/linux_signing_key.pub | apt-key add
     && apt-get install -y google-chrome-stable \
     && rm -rf /var/lib/apt/lists/*
 
+# Create non-root user first
+RUN groupadd -r railway && useradd -r -g railway -s /bin/bash railway
+
 WORKDIR /app
 
-# Copy package.json
+# Copy package.json first
 COPY package.json ./
 
-# Install dependencies using npm install (not npm ci)
+# Install dependencies
 RUN npm install --production
 
-# Copy all application files
+# Copy application files
 COPY . .
 
-# Create public directory if it doesn't exist
-RUN mkdir -p public
+# Change ownership to non-root user
+RUN chown -R railway:railway /app
 
+# Switch to non-root user
+USER railway
+
+# Expose port
 EXPOSE 3000
 
-CMD ["npm", "start"]
+# Use exec form and add signal handling
+CMD ["node", "server.js"]
