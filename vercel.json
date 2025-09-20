@@ -2,7 +2,9 @@
   "functions": {
     "api/scrape.js": {
       "maxDuration": 30
+    },
+    "api/test.js": {
+      "maxDuration": 10
     }
-  },
-  "regions": ["iad1"]
+  }
 }
