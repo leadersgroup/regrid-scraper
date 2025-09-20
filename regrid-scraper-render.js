@@ -10,92 +10,127 @@ class RegridScraper {
     }
 
     async initialize() {
-    console.log('Initializing browser on Render...');
-    
-    // Browser launch configuration for Render.com using puppeteer-core
-    const launchOptions = {
-        headless: true,
-        args: [
-            '--no-sandbox',
-            '--disable-setuid-sandbox',
-            '--disable-dev-shm-usage',
-            '--disable-accelerated-2d-canvas',
-            '--no-first-run',
-            '--no-zygote',
-            '--single-process',
-            '--disable-gpu',
-            '--disable-background-timer-throttling',
-            '--disable-renderer-backgrounding',
-            '--disable-backgrounding-occluded-windows',
-            '--disable-features=TranslateUI',
-            '--disable-ipc-flooding-protection',
-            '--disable-web-security',
-            '--disable-features=VizDisplayCompositor'
-        ]
-    };
+        console.log('Initializing browser on Render...');
+        
+        // Browser launch configuration for Render.com using puppeteer-core
+        const launchOptions = {
+            headless: true,
+            args: [
+                '--no-sandbox',
+                '--disable-setuid-sandbox',
+                '--disable-dev-shm-usage',
+                '--disable-accelerated-2d-canvas',
+                '--no-first-run',
+                '--no-zygote',
+                '--single-process',
+                '--disable-gpu',
+                '--disable-background-timer-throttling',
+                '--disable-renderer-backgrounding',
+                '--disable-backgrounding-occluded-windows',
+                '--disable-features=TranslateUI',
+                '--disable-ipc-flooding-protection',
+                '--disable-web-security',
+                '--disable-features=VizDisplayCompositor',
+                '--disable-extensions',
+                '--disable-default-apps'
+            ]
+        };
 
-    // For Render, try these Chrome paths in order
-    const chromePaths = [
-        process.env.GOOGLE_CHROME_BIN,
-        process.env.CHROME_BIN,
-        '/usr/bin/google-chrome-stable',
-        '/usr/bin/google-chrome',
-        '/usr/bin/chromium-browser',
-        '/usr/bin/chromium'
-    ].filter(Boolean);
+        // For Render, try these Chrome paths in order
+        const chromePaths = [
+            process.env.GOOGLE_CHROME_BIN,
+            process.env.CHROME_BIN,
+            process.env.PUPPETEER_EXECUTABLE_PATH,
+            '/usr/bin/google-chrome-stable',
+            '/usr/bin/google-chrome',
+            '/usr/bin/chromium-browser',
+            '/usr/bin/chromium',
+            '/snap/bin/chromium',
+            '/opt/google/chrome/chrome',
+            '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome'
+        ].filter(Boolean);
 
-    let browserLaunched = false;
-    let lastError = null;
+        let browserLaunched = false;
+        let lastError = null;
 
-    // Try each Chrome path
-    for (const chromePath of chromePaths) {
-        try {
-            console.log(`Trying Chrome at: ${chromePath}`);
-            launchOptions.executablePath = chromePath;
-            this.browser = await puppeteer.launch(launchOptions);
-            console.log(`Successfully launched Chrome from: ${chromePath}`);
-            browserLaunched = true;
-            break;
-        } catch (error) {
-            console.log(`Failed to launch Chrome from ${chromePath}:`, error.message);
-            lastError = error;
+        // Try each Chrome path
+        for (const chromePath of chromePaths) {
+            try {
+                console.log(`Trying Chrome at: ${chromePath}`);
+                
+                // Check if file exists before trying to launch
+                const fs = require('fs');
+                if (fs.existsSync(chromePath)) {
+                    launchOptions.executablePath = chromePath;
+                    this.browser = await puppeteer.launch(launchOptions);
+                    console.log(`✓ Successfully launched Chrome from: ${chromePath}`);
+                    browserLaunched = true;
+                    break;
+                } else {
+                    console.log(`✗ Chrome not found at: ${chromePath}`);
+                }
+            } catch (error) {
+                console.log(`✗ Failed to launch Chrome from ${chromePath}:`, error.message);
+                lastError = error;
+            }
         }
-    }
 
-    // If no specific path worked, try without executablePath
-    if (!browserLaunched) {
-        try {
-            console.log('Trying to launch Chrome without specific path...');
-            delete launchOptions.executablePath;
-            this.browser = await puppeteer.launch(launchOptions);
-            console.log('Successfully launched Chrome using system default');
-            browserLaunched = true;
-        } catch (error) {
-            console.log('Failed to launch Chrome with system default:', error.message);
-            lastError = error;
+        // If no Chrome found, try to use channel (Puppeteer's auto-detection)
+        if (!browserLaunched) {
+            try {
+                console.log('Trying Chrome with channel auto-detection...');
+                delete launchOptions.executablePath;
+                launchOptions.channel = 'chrome'; // Use Chrome channel
+                this.browser = await puppeteer.launch(launchOptions);
+                console.log('✓ Successfully launched Chrome using channel detection');
+                browserLaunched = true;
+            } catch (error) {
+                console.log('✗ Failed to launch Chrome with channel detection:', error.message);
+                lastError = error;
+            }
         }
+
+        // Final fallback: try to install and use Chrome
+        if (!browserLaunched) {
+            try {
+                console.log('Final attempt: trying to use any available browser...');
+                
+                // Reset options for final attempt
+                const fallbackOptions = {
+                    headless: true,
+                    args: ['--no-sandbox', '--disable-setuid-sandbox'],
+                    channel: 'chrome'
+                };
+                
+                this.browser = await puppeteer.launch(fallbackOptions);
+                console.log('✓ Successfully launched browser with minimal config');
+                browserLaunched = true;
+            } catch (error) {
+                console.log('✗ Final fallback failed:', error.message);
+                lastError = error;
+            }
+        }
+
+        if (!browserLaunched) {
+            const errorMessage = `Could not launch Chrome on Render. Tried ${chromePaths.length} paths. Last error: ${lastError?.message}`;
+            console.error(errorMessage);
+            throw new Error(errorMessage);
+        }
+
+        this.page = await this.browser.newPage();
+
+        // Set realistic viewport and user agent (same as your working version)
+        await this.page.setViewport({ width: 1366, height: 768 });
+        await this.page.setUserAgent('Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36');
+
+        // Set extra headers (same as your working version)
+        await this.page.setExtraHTTPHeaders({
+            'Accept-Language': 'en-US,en;q=0.9,zh-CN;q=0.8,zh;q=0.7',
+            'Accept-Encoding': 'gzip, deflate, br, zstd'
+        });
+
+        console.log('Browser initialized successfully');
     }
-
-    if (!browserLaunched) {
-        throw new Error(`Could not launch Chrome. Last error: ${lastError?.message}`);
-    }
-
-    this.page = await this.browser.newPage();
-
-    // Set realistic viewport and user agent (same as your working version)
-    await this.page.setViewport({ width: 1366, height: 768 });
-    await this.page.setUserAgent('Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36');
-
-    // Set extra headers (same as your working version)
-    await this.page.setExtraHTTPHeaders({
-        'Accept-Language': 'en-US,en;q=0.9,zh-CN;q=0.8,zh;q=0.7',
-        'Accept-Encoding': 'gzip, deflate, br, zstd'
-    });
-
-    console.log('Browser initialized successfully');
-}
-
-
 
     async establishSession() {
         try {
