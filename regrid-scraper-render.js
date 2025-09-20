@@ -9,12 +9,38 @@ class RegridScraper {
         this.csrfToken = null;
     }
 
-   async initialize() {
+ async initialize() {
     console.log('Initializing browser on Render...');
     
+    // Try multiple Chrome paths for Render
+    const possibleChromePaths = [
+        '/opt/render/project/.render/chrome/opt/google/chrome/google-chrome',
+        '/usr/bin/google-chrome-stable',
+        '/usr/bin/google-chrome',
+        '/usr/bin/chromium-browser',
+        '/usr/bin/chromium',
+        process.env.PUPPETEER_EXECUTABLE_PATH
+    ].filter(Boolean);
+
+    let chromePath = null;
+    
+    // Try to find a working Chrome installation
+    for (const path of possibleChromePaths) {
+        try {
+            const fs = require('fs');
+            if (fs.existsSync(path)) {
+                chromePath = path;
+                console.log('Found Chrome at:', chromePath);
+                break;
+            }
+        } catch (error) {
+            // Continue to next path
+        }
+    }
+
     // Browser launch configuration for Render.com
     const launchOptions = {
-        headless: true, // Always headless in production
+        headless: true,
         args: [
             '--no-sandbox',
             '--disable-setuid-sandbox',
@@ -30,25 +56,39 @@ class RegridScraper {
             '--disable-features=TranslateUI',
             '--disable-ipc-flooding-protection',
             '--disable-web-security',
-            '--disable-features=VizDisplayCompositor'
+            '--disable-features=VizDisplayCompositor',
+            '--memory-pressure-off',
+            '--max_old_space_size=4096'
         ]
     };
 
-    // Use system Chrome on Render (this is the key fix!)
-    if (process.env.PUPPETEER_EXECUTABLE_PATH) {
-        launchOptions.executablePath = process.env.PUPPETEER_EXECUTABLE_PATH;
-        console.log('Using system Chrome:', process.env.PUPPETEER_EXECUTABLE_PATH);
+    // Use found Chrome path or let Puppeteer try to find it
+    if (chromePath) {
+        launchOptions.executablePath = chromePath;
+        console.log('Using Chrome at:', chromePath);
+    } else {
+        console.log('No Chrome path found, letting Puppeteer auto-detect...');
     }
 
-    this.browser = await puppeteer.launch(launchOptions);
+    try {
+        this.browser = await puppeteer.launch(launchOptions);
+        console.log('Browser launched successfully');
+    } catch (error) {
+        console.error('Failed to launch browser with custom path. Trying fallback...');
+        
+        // Fallback: try without specifying executablePath
+        delete launchOptions.executablePath;
+        this.browser = await puppeteer.launch(launchOptions);
+        console.log('Browser launched with fallback method');
+    }
 
     this.page = await this.browser.newPage();
 
-    // Set realistic viewport and user agent (same as your working version)
+    // Set realistic viewport and user agent
     await this.page.setViewport({ width: 1366, height: 768 });
     await this.page.setUserAgent('Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36');
 
-    // Set extra headers (same as your working version)
+    // Set extra headers
     await this.page.setExtraHTTPHeaders({
         'Accept-Language': 'en-US,en;q=0.9,zh-CN;q=0.8,zh;q=0.7',
         'Accept-Encoding': 'gzip, deflate, br, zstd'
@@ -56,6 +96,8 @@ class RegridScraper {
 
     console.log('Browser initialized successfully');
 }
+
+
     async establishSession() {
         try {
             console.log('Navigating to Regrid to establish session...');
