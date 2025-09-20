@@ -3,351 +3,225 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Property Data Extractor</title>
-    <script src="https://cdn.tailwindcss.com"></script>
-    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🏠</text></svg>">
+    <title>Regrid Property Scraper (Vercel)</title>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+            background: #f5f5f5;
+        }
+        .container {
+            background: white;
+            padding: 30px;
+            border-radius: 10px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        h1 {
+            color: #333;
+            text-align: center;
+            margin-bottom: 30px;
+        }
+        .form-group {
+            margin-bottom: 20px;
+        }
+        label {
+            display: block;
+            margin-bottom: 5px;
+            font-weight: bold;
+            color: #555;
+        }
+        textarea {
+            width: 100%;
+            padding: 10px;
+            border: 2px solid #ddd;
+            border-radius: 5px;
+            font-size: 14px;
+            resize: vertical;
+            min-height: 100px;
+        }
+        button {
+            background: #0070f3;
+            color: white;
+            border: none;
+            padding: 12px 30px;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 16px;
+            transition: background 0.3s;
+        }
+        button:hover {
+            background: #0051cc;
+        }
+        button:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+        }
+        .results {
+            margin-top: 30px;
+            padding: 20px;
+            background: #f9f9f9;
+            border-radius: 5px;
+            border-left: 4px solid #0070f3;
+        }
+        .property {
+            background: white;
+            margin: 10px 0;
+            padding: 15px;
+            border-radius: 5px;
+            border: 1px solid #eee;
+        }
+        .property h3 {
+            margin: 0 0 10px 0;
+            color: #333;
+        }
+        .property-info {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 10px;
+            font-size: 14px;
+        }
+        .info-item {
+            padding: 5px 0;
+        }
+        .label {
+            font-weight: bold;
+            color: #666;
+        }
+        .error {
+            color: #e74c3c;
+            background: #ffeaea;
+            padding: 10px;
+            border-radius: 5px;
+            margin: 10px 0;
+        }
+        .loading {
+            text-align: center;
+            color: #666;
+            padding: 20px;
+        }
+        .badge {
+            background: #0070f3;
+            color: white;
+            padding: 2px 8px;
+            border-radius: 12px;
+            font-size: 12px;
+            margin-left: 10px;
+        }
+    </style>
 </head>
-<body class="bg-gradient-to-br from-blue-50 to-indigo-100 min-h-screen">
-    <div class="container mx-auto px-4 py-8 max-w-4xl">
-        <div class="bg-white rounded-xl shadow-xl p-8 backdrop-blur-sm bg-white/95">
-            <div class="text-center mb-8">
-                <h1 class="text-5xl font-bold bg-gradient-to-r from-blue-600 to-purple-600 bg-clip-text text-transparent mb-3">
-                    🏠 Property Data Extractor
-                </h1>
-                <p class="text-gray-600 text-lg">Extract parcel ID and owner information from property addresses</p>
-                <div class="mt-4 flex justify-center space-x-4 text-sm text-gray-500">
-                    <span class="flex items-center"><span class="w-2 h-2 bg-green-400 rounded-full mr-1"></span>Fast</span>
-                    <span class="flex items-center"><span class="w-2 h-2 bg-blue-400 rounded-full mr-1"></span>Accurate</span>
-                    <span class="flex items-center"><span class="w-2 h-2 bg-purple-400 rounded-full mr-1"></span>Reliable</span>
-                </div>
-            </div>
-            
-            <div class="bg-gradient-to-r from-blue-50 to-purple-50 border border-blue-200 rounded-lg p-4 mb-6">
-                <h3 class="font-semibold text-blue-800 mb-2 flex items-center">
-                    ℹ️ How to use:
-                </h3>
-                <ol class="text-blue-700 text-sm space-y-1 ml-4">
-                    <li>1. Enter property addresses (one per line, max 10)</li>
-                    <li>2. Click "Extract Property Data"</li>
-                    <li>3. View parcel ID and owner information</li>
-                </ol>
-            </div>
-            
-            <div class="mb-6">
-                <label for="addresses" class="block text-sm font-medium text-gray-700 mb-2">
-                    📍 Enter Property Addresses:
-                </label>
-                <textarea 
-                    id="addresses" 
-                    rows="6" 
-                    class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200 resize-none"
-                    placeholder="560 Shavano St, Crested Butte, CO 81224, USA&#10;123 Main St, Denver, CO 80202, USA&#10;Enter up to 10 addresses..."
-                ></textarea>
-                <div class="flex justify-between items-center mt-2">
-                    <p class="text-sm text-gray-500">One address per line. Maximum 10 addresses per request.</p>
-                    <button 
-                        onclick="loadSampleData()" 
-                        class="text-sm text-blue-600 hover:text-blue-800 underline"
-                    >
-                        Load Sample Data
-                    </button>
-                </div>
-            </div>
-            
-            <div class="flex justify-between items-center mb-6">
-                <button 
-                    onclick="extractData()" 
-                    id="extractBtn"
-                    class="bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700 text-white font-semibold py-3 px-8 rounded-lg transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed flex items-center shadow-lg"
-                >
-                    <span id="btnText">🔍 Extract Property Data</span>
-                </button>
-                
-                <button 
-                    onclick="clearResults()" 
-                    id="clearBtn"
-                    class="bg-gray-500 hover:bg-gray-600 text-white font-medium py-3 px-6 rounded-lg transition duration-200 shadow-md"
-                >
-                    🗑️ Clear All
-                </button>
-            </div>
-            
-            <div id="results" class="mt-8"></div>
+<body>
+    <div class="container">
+        <h1>🏠 Regrid Property Scraper <span class="badge">Vercel</span></h1>
+        
+        <div class="form-group">
+            <label for="addresses">Enter addresses (one per line, max 5):</label>
+            <textarea 
+                id="addresses" 
+                placeholder="123 Main St, New York, NY&#10;456 Oak Ave, Los Angeles, CA&#10;789 Pine Rd, Chicago, IL"
+            ></textarea>
         </div>
         
-        <footer class="text-center mt-8 text-gray-500 text-sm">
-            <p class="mb-2">Built with ❤️ using Vercel Serverless Functions & Puppeteer</p>
-            <p class="text-xs">Data sourced from Regrid • For educational and research purposes</p>
-        </footer>
+        <button onclick="scrapeProperties()" id="scrapeBtn">
+            🔍 Search Properties
+        </button>
+        
+        <div id="results"></div>
     </div>
 
-   <!-- Replace the extractData function in your public/index.html with this improved version -->
-
-<!-- Replace the ENTIRE script section in your index.html with this lee shen 11 test -->
-
-<script>
-async function extractData() {
-    const addressesText = document.getElementById('addresses').value;
-    const addresses = addressesText.split('\n').filter(addr => addr.trim()).slice(0, 10);
-    const resultsDiv = document.getElementById('results');
-    const button = document.getElementById('extractBtn');
-    const btnText = document.getElementById('btnText');
-    
-    if (addresses.length === 0) {
-        alert('Please enter at least one address');
-        return;
-    }
-
-    if (addresses.length > 10) {
-        alert('Maximum 10 addresses allowed per request');
-        return;
-    }
-
-    button.disabled = true;
-    btnText.innerHTML = '⏳ Processing...';
-    
-    resultsDiv.innerHTML = `
-        <div class="bg-blue-50 border border-blue-200 rounded-lg p-6 text-center">
-            <div class="flex items-center justify-center mb-4">
-                <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mr-3"></div>
-                <span class="text-blue-800 font-semibold">Processing ${addresses.length} address(es)...</span>
-            </div>
-            <p class="text-blue-600 text-sm">This may take 30-60 seconds...</p>
-        </div>
-    `;
-
-    try {
-        console.log('=== DEBUG INFO ===');
-        console.log('Making request to:', '/api/scrape');
-        console.log('Addresses:', addresses);
-        
-        const response = await fetch('/api/scrape', {
-            method: 'POST',
-            headers: { 
-                'Content-Type': 'application/json',
-                'Accept': 'application/json'
-            },
-            body: JSON.stringify({ addresses })
-        });
-
-        console.log('Response status:', response.status);
-        console.log('Response headers:', Object.fromEntries(response.headers.entries()));
-        
-        const responseText = await response.text();
-        console.log('Raw response text (first 500 chars):', responseText.substring(0, 500));
-        
-        if (!response.ok) {
-            throw new Error(`HTTP ${response.status}: ${response.statusText}. Response: ${responseText.substring(0, 200)}`);
-        }
-
-        let data;
-        try {
-            data = JSON.parse(responseText);
-        } catch (parseError) {
-            throw new Error(`Invalid JSON response. Parse error: ${parseError.message}. Response: ${responseText.substring(0, 200)}`);
-        }
-
-        console.log('Parsed data:', data);
-        displayResults(data.data || data);
-        
-    } catch (error) {
-        console.error('=== ERROR DEBUG ===');
-        console.error('Error object:', error);
-        console.error('Error constructor:', error.constructor.name);
-        console.error('Error keys:', Object.keys(error));
-        
-        // Super safe error message extraction
-        let errorText = 'Unknown error';
-        try {
-            if (error.message) {
-                errorText = String(error.message);
-            } else if (error.toString) {
-                errorText = error.toString();
-            } else {
-                errorText = JSON.stringify(error);
+    <script>
+        async function scrapeProperties() {
+            const addresses = document.getElementById('addresses').value
+                .split('\n')
+                .map(addr => addr.trim())
+                .filter(addr => addr.length > 0);
+            
+            if (addresses.length === 0) {
+                alert('Please enter at least one address');
+                return;
             }
-        } catch (stringifyError) {
-            errorText = 'Error occurred but could not extract message';
+            
+            if (addresses.length > 5) {
+                alert('Maximum 5 addresses allowed on Vercel');
+                return;
+            }
+            
+            const button = document.getElementById('scrapeBtn');
+            const results = document.getElementById('results');
+            
+            button.disabled = true;
+            button.textContent = '🔄 Searching...';
+            
+            results.innerHTML = '<div class="loading">Searching properties... This may take up to 30 seconds.</div>';
+            
+            try {
+                const response = await fetch('/api/scrape', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({ addresses })
+                });
+                
+                const data = await response.json();
+                
+                if (data.success) {
+                    displayResults(data);
+                } else {
+                    results.innerHTML = `<div class="error">Error: ${data.message}</div>`;
+                }
+            } catch (error) {
+                results.innerHTML = `<div class="error">Network error: ${error.message}</div>`;
+            } finally {
+                button.disabled = false;
+                button.textContent = '🔍 Search Properties';
+            }
         }
         
-        console.log('Final error text:', errorText);
-        
-        resultsDiv.innerHTML = `
-            <div class="bg-red-50 border border-red-200 rounded-lg p-6">
-                <h3 class="text-red-800 font-bold mb-4">❌ Error Occurred</h3>
-                <div class="bg-red-100 p-3 rounded mb-4">
-                    <p class="text-red-800 font-semibold">Error Message:</p>
-                    <p class="text-red-700 text-sm break-all">${errorText}</p>
-                </div>
-                <div class="space-y-2">
-                    <button onclick="extractData()" class="bg-red-600 hover:bg-red-700 text-white px-4 py-2 rounded text-sm mr-2">
-                        🔄 Try Again
-                    </button>
-                    <button onclick="testAPI()" class="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded text-sm mr-2">
-                        🧪 Test API
-                    </button>
-                    <button onclick="showDebugInfo()" class="bg-gray-600 hover:bg-gray-700 text-white px-4 py-2 rounded text-sm">
-                        🔍 Show Debug
-                    </button>
-                </div>
-            </div>
-        `;
-    } finally {
-        button.disabled = false;
-        btnText.innerHTML = '🔍 Extract Property Data';
-    }
-}
-
-async function testAPI() {
-    const resultsDiv = document.getElementById('results');
-    
-    resultsDiv.innerHTML = `
-        <div class="bg-blue-50 border border-blue-200 rounded-lg p-4">
-            <span class="text-blue-800">Testing API...</span>
-        </div>
-    `;
-
-    try {
-        console.log('Testing API with GET request...');
-        
-        const response = await fetch('/api/scrape', {
-            method: 'GET',
-            headers: { 'Accept': 'application/json' }
-        });
-
-        const responseText = await response.text();
-        console.log('API Test Response:', responseText);
-
-        if (response.ok) {
-            resultsDiv.innerHTML = `
-                <div class="bg-green-50 border border-green-200 rounded-lg p-4">
-                    <h3 class="text-green-800 font-bold mb-2">✅ API Test Successful</h3>
-                    <pre class="text-xs bg-green-100 p-2 rounded overflow-auto">${responseText}</pre>
+        function displayResults(data) {
+            const results = document.getElementById('results');
+            const { summary, data: properties } = data;
+            
+            let html = `
+                <div class="results">
+                    <h2>📊 Results Summary</h2>
+                    <p><strong>Total:</strong> ${summary.total} | 
+                       <strong>Successful:</strong> ${summary.successful} | 
+                       <strong>Failed:</strong> ${summary.failed}</p>
+                    <small>Platform: ${data.platform} | Time: ${new Date(data.timestamp).toLocaleString()}</small>
                 </div>
             `;
-        } else {
-            throw new Error(`API test failed: ${response.status} - ${responseText}`);
+            
+            properties.forEach((property, index) => {
+                if (property.error) {
+                    html += `
+                        <div class="property">
+                            <h3>❌ ${property.originalAddress}</h3>
+                            <div class="error">Error: ${property.error}</div>
+                        </div>
+                    `;
+                } else {
+                    html += `
+                        <div class="property">
+                            <h3>✅ ${property.originalAddress}</h3>
+                            <div class="property-info">
+                                <div class="info-item"><span class="label">Parcel ID:</span> ${property.parcelId}</div>
+                                <div class="info-item"><span class="label">Owner:</span> ${property.ownerName}</div>
+                                <div class="info-item"><span class="label">Address:</span> ${property.address}</div>
+                                <div class="info-item"><span class="label">City:</span> ${property.city}</div>
+                                <div class="info-item"><span class="label">State:</span> ${property.state}</div>
+                                <div class="info-item"><span class="label">ZIP:</span> ${property.zipCode}</div>
+                                <div class="info-item"><span class="label">County:</span> ${property.county}</div>
+                                <div class="info-item"><span class="label">Type:</span> ${property.propertyType}</div>
+                            </div>
+                        </div>
+                    `;
+                }
+            });
+            
+            results.innerHTML = html;
         }
-    } catch (error) {
-        resultsDiv.innerHTML = `
-            <div class="bg-red-50 border border-red-200 rounded-lg p-4">
-                <h3 class="text-red-800 font-bold mb-2">❌ API Test Failed</h3>
-                <p class="text-red-600 text-sm">${error.message}</p>
-            </div>
-        `;
-    }
-}
-
-function showDebugInfo() {
-    const debugInfo = {
-        userAgent: navigator.userAgent,
-        currentURL: window.location.href,
-        timestamp: new Date().toISOString(),
-        cookiesEnabled: navigator.cookieEnabled,
-        onlineStatus: navigator.onLine
-    };
-    
-    document.getElementById('results').innerHTML = `
-        <div class="bg-gray-50 border border-gray-200 rounded-lg p-4">
-            <h3 class="text-gray-800 font-bold mb-2">🔍 Debug Information</h3>
-            <pre class="text-xs bg-gray-100 p-2 rounded overflow-auto">${JSON.stringify(debugInfo, null, 2)}</pre>
-            <div class="mt-4">
-                <p class="text-sm text-gray-600 mb-2">Check the browser console (F12) for more detailed logs.</p>
-                <button onclick="clearResults()" class="bg-gray-600 text-white px-3 py-1 rounded text-sm">
-                    Clear Debug Info
-                </button>
-            </div>
-        </div>
-    `;
-}
-
-function displayResults(results) {
-    const resultsDiv = document.getElementById('results');
-    
-    if (!results || !Array.isArray(results)) {
-        resultsDiv.innerHTML = `
-            <div class="bg-yellow-50 border border-yellow-200 rounded-lg p-4">
-                <p class="text-yellow-800">No valid results received</p>
-            </div>
-        `;
-        return;
-    }
-    
-    const successCount = results.filter(r => !r.error).length;
-    const errorCount = results.length - successCount;
-    
-    let html = `
-        <div class="mb-6">
-            <h2 class="text-2xl font-bold text-gray-800 mb-2">📊 Results</h2>
-            <div class="flex space-x-4 text-sm">
-                <span class="bg-green-100 text-green-800 px-3 py-1 rounded-full">✅ ${successCount} Success</span>
-                ${errorCount > 0 ? `<span class="bg-red-100 text-red-800 px-3 py-1 rounded-full">❌ ${errorCount} Failed</span>` : ''}
-            </div>
-        </div>
-    `;
-    
-    results.forEach((result, index) => {
-        const isError = result.error;
-        const cardClass = isError 
-            ? 'bg-red-50 border-red-200' 
-            : 'bg-green-50 border-green-200';
-        const icon = isError ? '❌' : '✅';
-        
-        html += `
-            <div class="${cardClass} border rounded-lg p-4 mb-4">
-                <div class="flex items-start">
-                    <span class="text-xl mr-3 mt-1">${icon}</span>
-                    <div class="flex-1">
-                        <h3 class="font-bold text-gray-800 mb-2">📍 ${result.originalAddress}</h3>
-        `;
-        
-        if (isError) {
-            html += `
-                <div class="bg-red-100 border border-red-200 rounded p-3">
-                    <p class="text-red-800"><strong>Error:</strong> ${result.error}</p>
-                </div>
-            `;
-        } else {
-            html += `
-                <div class="grid grid-cols-1 md:grid-cols-2 gap-3 text-sm">
-                    <div><strong>🏷️ Parcel ID:</strong> ${result.parcelId}</div>
-                    <div><strong>👤 Owner:</strong> ${result.ownerName}</div>
-                    <div><strong>🏠 Address:</strong> ${result.address}</div>
-                    <div><strong>📍 Location:</strong> ${result.city}, ${result.state}</div>
-                    <div><strong>🏗️ Type:</strong> ${result.propertyType}</div>
-                    <div><strong>🎯 Score:</strong> ${result.score}</div>
-                </div>
-            `;
-        }
-        
-        html += `
-                    </div>
-                </div>
-            </div>
-        `;
-    });
-    
-    resultsDiv.innerHTML = html;
-}
-
-function clearResults() {
-    document.getElementById('addresses').value = '';
-    document.getElementById('results').innerHTML = '';
-}
-
-function loadSampleData() {
-    document.getElementById('addresses').value = `560 Shavano St, Crested Butte, CO 81224, USA
-123 Main St, Denver, CO 80202, USA`;
-}
-
-// Auto-resize textarea
-document.addEventListener('DOMContentLoaded', function() {
-    const textarea = document.getElementById('addresses');
-    if (textarea) {
-        textarea.addEventListener('input', function() {
-            this.style.height = 'auto';
-            this.style.height = Math.min(this.scrollHeight, 200) + 'px';
-        });
-    }
-});
-</script>
+    </script>
+</body>
+</html>

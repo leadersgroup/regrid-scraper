@@ -1,25 +1,24 @@
 {
-  "name": "regrid-scraper-render",
+  "name": "regrid-scraper-vercel",
   "version": "1.0.0",
-  "description": "Regrid property scraper deployed on Render",
-  "main": "server.js",
+  "description": "Regrid property scraper deployed on Vercel",
+  "main": "api/scrape.js",
   "scripts": {
-    "start": "node server.js",
-    "dev": "nodemon server.js",
-    "local": "node local-test.js",
-    "test": "node server.js"
+    "dev": "vercel dev",
+    "build": "echo 'No build step needed'",
+    "start": "vercel dev"
   },
   "dependencies": {
-    "express": "^4.18.2",
-    "puppeteer-core": "^21.6.1"
+    "puppeteer-core": "^21.6.1",
+    "@sparticuz/chromium": "^119.0.2"
   },
   "devDependencies": {
-    "nodemon": "^3.0.2"
+    "puppeteer": "^21.6.1"
   },
   "engines": {
-    "node": ">=20.0.0"
+    "node": ">=18.0.0"
   },
-  "keywords": ["property", "real-estate", "scraping", "render"],
+  "keywords": ["property", "real-estate", "scraping", "vercel"],
   "author": "Property Scraper",
   "license": "MIT"
 }
