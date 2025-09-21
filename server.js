@@ -171,6 +171,10 @@ app.post('/api/scrape', async (req, res) => {
     for (const address of addresses) {
       console.log(`🏠 Processing: ${address}`);
 
+      // Clean address for Regrid search - remove commas and periods that cause search failures
+      const cleanAddress = address.replace(/[,.]/g, '').trim();
+      console.log(`🧹 Cleaned address: ${cleanAddress}`);
+
       try {
         // Navigate to Regrid with human-like behavior
         console.log(`🌐 Navigating to Regrid for: ${address}`);
@@ -234,7 +238,7 @@ app.post('/api/scrape', async (req, res) => {
         }
 
         // Human-like interaction with search input
-        console.log(`⌨️ Typing address: ${address}`);
+        console.log(`⌨️ Typing cleaned address: ${cleanAddress}`);
 
         // Move mouse to search input and click
         const searchElement = await page.$(searchInput);
@@ -256,8 +260,8 @@ app.post('/api/scrape', async (req, res) => {
         await page.keyboard.up('Control');
         await new Promise(resolve => setTimeout(resolve, 50));
 
-        // Type address with human-like delays
-        for (const char of address) {
+        // Type cleaned address with human-like delays
+        for (const char of cleanAddress) {
           await page.keyboard.type(char);
           await new Promise(resolve => setTimeout(resolve, 50 + Math.random() * 100));
         }
