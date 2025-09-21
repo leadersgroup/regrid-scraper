@@ -9,6 +9,7 @@
     "build": "echo 'No build step required'"
   },
   "dependencies": {
+    "axios": "^1.12.2",
     "express": "^4.18.2",
     "puppeteer": "^24.6.1"
   },
@@ -18,7 +19,12 @@
   "engines": {
     "node": ">=18.0.0"
   },
-  "keywords": ["property", "real-estate", "scraping", "railway"],
+  "keywords": [
+    "property",
+    "real-estate",
+    "scraping",
+    "railway"
+  ],
   "author": "Property Scraper",
   "license": "MIT"
 }

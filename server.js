@@ -199,7 +199,14 @@ app.post('/api/scrape', async (req, res) => {
 
         // Wait longer for results to load and avoid detection
         console.log(`⏳ Waiting for search results...`);
-        await new Promise(resolve => setTimeout(resolve, 5000));
+        await new Promise(resolve => setTimeout(resolve, 8000));
+
+        // Check if search is still loading
+        const isLoading = await page.$('.loading, .spinner, [class*="loading"]');
+        if (isLoading) {
+          console.log(`⏳ Still loading, waiting more...`);
+          await new Promise(resolve => setTimeout(resolve, 5000));
+        }
 
         // Extract property data
         const propertyData = await page.evaluate(() => {
