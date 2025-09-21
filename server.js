@@ -79,8 +79,11 @@ app.post('/api/scrape', async (req, res) => {
     console.log(`🔍 Starting scrape for ${addresses.length} addresses...`);
 
     // Launch Puppeteer browser
+    const isRailway = process.env.RAILWAY_ENVIRONMENT_NAME || process.env.RAILWAY_PROJECT_NAME;
+
     browser = await puppeteer.launch({
       headless: true,
+      executablePath: isRailway ? '/usr/bin/google-chrome-stable' : undefined,
       args: [
         '--no-sandbox',
         '--disable-setuid-sandbox',
@@ -89,7 +92,10 @@ app.post('/api/scrape', async (req, res) => {
         '--no-first-run',
         '--no-zygote',
         '--single-process',
-        '--disable-gpu'
+        '--disable-gpu',
+        '--disable-background-timer-throttling',
+        '--disable-backgrounding-occluded-windows',
+        '--disable-renderer-backgrounding'
       ]
     });
 
