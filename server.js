@@ -113,7 +113,22 @@ app.post('/api/scrape', async (req, res) => {
     });
 
     const page = await browser.newPage();
+
+    // Set a realistic user agent to avoid detection
+    await page.setUserAgent('Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
+
+    // Set realistic viewport
     await page.setViewport({ width: 1280, height: 720 });
+
+    // Add extra headers to appear more human-like
+    await page.setExtraHTTPHeaders({
+      'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+      'Accept-Language': 'en-US,en;q=0.5',
+      'Accept-Encoding': 'gzip, deflate',
+      'DNT': '1',
+      'Connection': 'keep-alive',
+      'Upgrade-Insecure-Requests': '1'
+    });
 
     const results = [];
 
@@ -121,14 +136,25 @@ app.post('/api/scrape', async (req, res) => {
       console.log(`🏠 Processing: ${address}`);
 
       try {
-        // Navigate to Regrid
+        // Navigate to Regrid with longer delay
+        console.log(`🌐 Navigating to Regrid for: ${address}`);
         await page.goto('https://app.regrid.com/us', {
           waitUntil: 'networkidle2',
           timeout: 30000
         });
 
+        // Wait longer to avoid rate limiting
+        await new Promise(resolve => setTimeout(resolve, 2000));
+
+        // Check for rate limiting error
+        const pageContent = await page.content();
+        if (pageContent.includes('Error 429') || pageContent.includes('too many requests')) {
+          throw new Error('Rate limited by Regrid. Please wait before trying again.');
+        }
+
         // Wait for search input and enter address
-        await page.waitForSelector('input[placeholder*="search"], input[name*="search"], .search-input', { timeout: 10000 });
+        console.log(`🔍 Looking for search input...`);
+        await page.waitForSelector('input[placeholder*="search"], input[name*="search"], .search-input', { timeout: 15000 });
 
         // Clear any existing text and type the address
         await page.evaluate(() => {
@@ -144,8 +170,9 @@ app.post('/api/scrape', async (req, res) => {
         // Press Enter to search
         await page.keyboard.press('Enter');
 
-        // Wait for results to load
-        await new Promise(resolve => setTimeout(resolve, 3000));
+        // Wait longer for results to load and avoid detection
+        console.log(`⏳ Waiting for search results...`);
+        await new Promise(resolve => setTimeout(resolve, 5000));
 
         // Extract property data
         const propertyData = await page.evaluate(() => {
@@ -253,9 +280,10 @@ app.post('/api/scrape', async (req, res) => {
         });
       }
 
-      // Add delay between requests to be respectful
+      // Add longer delay between requests to avoid rate limiting
       if (addresses.indexOf(address) < addresses.length - 1) {
-        await new Promise(resolve => setTimeout(resolve, 1000));
+        console.log(`⏸️ Waiting before next address...`);
+        await new Promise(resolve => setTimeout(resolve, 5000));
       }
     }
 
