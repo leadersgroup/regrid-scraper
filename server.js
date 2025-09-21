@@ -452,8 +452,8 @@ app.post('/api/scrape', async (req, res) => {
             patternMatches.push(`Regrid parcel ID found: ${parcelId}`);
           }
 
-          // Additional check for long numeric parcel IDs (Florida format)
-          if (!parcelId || parcelId.includes('Ave') || parcelId.includes('St')) {
+          // Additional check for long numeric parcel IDs (Florida format) or if address was incorrectly selected
+          if (!parcelId || parcelId.includes('Ave') || parcelId.includes('St') || parcelId.includes('Drive') || parcelId.includes('Road')) {
             const longNumericMatch = allVisibleText.match(/\b(\d{10,20})\b/);
             if (longNumericMatch) {
               parcelId = longNumericMatch[1];
