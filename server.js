@@ -308,24 +308,20 @@ app.post('/api/scrape', async (req, res) => {
 
           // Look for parcel ID and owner name in search results or property details
           const parcelIdSelectors = [
-            // Common patterns for parcel IDs
-            '*[class*="parcel"]:not([class*="style"])',
-            '*[id*="parcel"]',
-            '.property-id',
-            '.parcel-number',
-            '.apn',
-            '*[class*="apn"]',
-            // General selectors for property info
-            '.property-info',
-            '.property-details',
-            // Search result selectors
-            '.search-result',
-            '.property-details',
-            '.result-item',
-            // Sidebar or info panel selectors
-            '.sidebar *',
-            '.info-panel *',
-            '.property-info *'
+            // Search result specific selectors (avoid styling elements)
+            '.search-result .property-id',
+            '.search-result .parcel-number',
+            '.search-result .apn',
+            '.result-item .property-id',
+            '.result-item .parcel-number',
+            // Sidebar or info panel selectors (be more specific)
+            '.sidebar .property-id',
+            '.sidebar .parcel-number',
+            '.info-panel .property-id',
+            '.info-panel .parcel-number',
+            // General property info (avoid styling)
+            '.property-info .id',
+            '.property-details .id'
           ];
 
           const ownerNameSelectors = [
@@ -352,14 +348,27 @@ app.post('/api/scrape', async (req, res) => {
           let ownerName = null;
           let foundElements = [];
 
-          // Try to find parcel ID
+          // Try to find parcel ID (skip styling elements and addresses)
           for (const selector of parcelIdSelectors) {
             try {
               const element = document.querySelector(selector);
               if (element && element.textContent.trim()) {
-                parcelId = element.textContent.trim();
-                foundElements.push(`Parcel found with ${selector}: ${parcelId}`);
-                break;
+                const text = element.textContent.trim();
+                // Skip CSS styling elements, addresses, and other non-parcel content
+                if (!text.includes('Base Parcel') &&
+                    !text.includes('Style') &&
+                    !text.includes('Color') &&
+                    !text.includes('#') &&
+                    !text.includes('Hovered') &&
+                    !text.includes('Selected') &&
+                    !text.includes('Reset') &&
+                    !text.includes('Default') &&
+                    !text.match(/\b(street|st|avenue|ave|road|rd|drive|dr|lane|ln|boulevard|blvd)\b/i) &&
+                    text.length < 100) { // Reasonable length for a parcel ID
+                  parcelId = text;
+                  foundElements.push(`Parcel found with ${selector}: ${parcelId}`);
+                  break;
+                }
               }
             } catch (e) {}
           }
@@ -432,9 +441,10 @@ app.post('/api/scrape', async (req, res) => {
             regridParcelMatch = allVisibleText.match(pattern);
             if (regridParcelMatch) break;
           }
-          if (regridParcelMatch && !parcelId) {
+          if (regridParcelMatch) {
+            // Override CSS selector result if we found a pattern match (more reliable)
             parcelId = regridParcelMatch[1];
-            patternMatches.push(`Regrid parcel ID found: ${parcelId}`);
+            patternMatches.push(`Regrid parcel ID found via pattern: ${parcelId}`);
           }
 
           // Additional check for long numeric parcel IDs (Florida format) or if address was incorrectly selected
