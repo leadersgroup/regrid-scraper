@@ -149,13 +149,24 @@ app.post('/api/scrape', async (req, res) => {
 
         // Extract property data
         const propertyData = await page.evaluate(() => {
+          // Get page title and URL for debugging
+          const pageInfo = {
+            title: document.title,
+            url: window.location.href,
+            bodyText: document.body ? document.body.innerText.substring(0, 500) : 'No body'
+          };
+
           // Look for parcel ID and owner name in various possible selectors
           const parcelIdSelectors = [
             '[data-testid*="parcel"]',
             '.parcel-id',
             '.property-id',
             '.parcel',
-            '.apn'
+            '.apn',
+            '*[class*="parcel"]',
+            '*[class*="apn"]',
+            '*[id*="parcel"]',
+            '*[id*="apn"]'
           ];
 
           const ownerNameSelectors = [
@@ -163,11 +174,14 @@ app.post('/api/scrape', async (req, res) => {
             '.owner-name',
             '.property-owner',
             '.owner-info',
-            '.owner'
+            '.owner',
+            '*[class*="owner"]',
+            '*[id*="owner"]'
           ];
 
           let parcelId = null;
           let ownerName = null;
+          let foundElements = [];
 
           // Try to find parcel ID
           for (const selector of parcelIdSelectors) {
@@ -175,6 +189,7 @@ app.post('/api/scrape', async (req, res) => {
               const element = document.querySelector(selector);
               if (element && element.textContent.trim()) {
                 parcelId = element.textContent.trim();
+                foundElements.push(`Parcel found with ${selector}: ${parcelId}`);
                 break;
               }
             } catch (e) {}
@@ -186,22 +201,46 @@ app.post('/api/scrape', async (req, res) => {
               const element = document.querySelector(selector);
               if (element && element.textContent.trim()) {
                 ownerName = element.textContent.trim();
+                foundElements.push(`Owner found with ${selector}: ${ownerName}`);
                 break;
               }
             } catch (e) {}
           }
 
-          return { parcelId, ownerName };
+          // Look for any text that might contain parcel or owner info
+          const textNodes = Array.from(document.querySelectorAll('*')).filter(el => {
+            const text = el.textContent?.toLowerCase() || '';
+            return (text.includes('parcel') || text.includes('owner') || text.includes('apn')) &&
+                   text.length < 200 && el.children.length === 0;
+          }).map(el => el.textContent?.trim()).filter(Boolean).slice(0, 10);
+
+          return {
+            parcelId,
+            ownerName,
+            pageInfo,
+            foundElements,
+            relevantText: textNodes
+          };
         });
 
         results.push({
           originalAddress: address,
           parcelId: propertyData.parcelId || 'Not found',
           ownerName: propertyData.ownerName || 'Not found',
-          status: 'success'
+          status: 'success',
+          debug: {
+            pageTitle: propertyData.pageInfo?.title,
+            pageUrl: propertyData.pageInfo?.url,
+            bodyPreview: propertyData.pageInfo?.bodyText,
+            foundElements: propertyData.foundElements || [],
+            relevantText: propertyData.relevantText || []
+          }
         });
 
         console.log(`✅ Completed: ${address} - Parcel: ${propertyData.parcelId || 'N/A'}`);
+        console.log(`📄 Page: ${propertyData.pageInfo?.title || 'Unknown'}`);
+        console.log(`🔍 Found elements: ${propertyData.foundElements?.length || 0}`);
+        console.log(`📝 Relevant text: ${propertyData.relevantText?.length || 0} items`);
 
       } catch (error) {
         console.error(`❌ Error processing ${address}:`, error.message);
