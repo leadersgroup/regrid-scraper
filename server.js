@@ -447,9 +447,18 @@ app.post('/api/scrape', async (req, res) => {
             regridParcelMatch = allVisibleText.match(pattern);
             if (regridParcelMatch) break;
           }
-          if (regridParcelMatch) {
+          if (regridParcelMatch && !parcelId) {
             parcelId = regridParcelMatch[1];
             patternMatches.push(`Regrid parcel ID found: ${parcelId}`);
+          }
+
+          // Additional check for long numeric parcel IDs (Florida format)
+          if (!parcelId || parcelId.includes('Ave') || parcelId.includes('St')) {
+            const longNumericMatch = allVisibleText.match(/\b(\d{10,20})\b/);
+            if (longNumericMatch) {
+              parcelId = longNumericMatch[1];
+              patternMatches.push(`Long numeric parcel ID found: ${parcelId}`);
+            }
           }
 
           return {
