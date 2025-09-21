@@ -78,7 +78,7 @@ app.post('/api/scrape', async (req, res) => {
 
     console.log(`🔍 Starting scrape for ${addresses.length} addresses...`);
 
-    // Launch Puppeteer browser
+    // Launch Puppeteer browser with anti-detection measures
     const isRailway = process.env.RAILWAY_ENVIRONMENT_NAME || process.env.RAILWAY_PROJECT_NAME;
 
     browser = await puppeteer.launch({
@@ -108,26 +108,62 @@ app.post('/api/scrape', async (req, res) => {
         '--no-pings',
         '--password-store=basic',
         '--use-mock-keychain',
-        '--disable-features=TranslateUI,VizDisplayCompositor'
+        '--disable-features=TranslateUI,VizDisplayCompositor',
+        // Additional anti-detection flags
+        '--disable-blink-features=AutomationControlled',
+        '--disable-web-security',
+        '--disable-features=VizDisplayCompositor'
       ]
     });
 
     const page = await browser.newPage();
 
+    // Enhanced anti-detection measures
+    await page.evaluateOnNewDocument(() => {
+      // Remove webdriver property
+      Object.defineProperty(navigator, 'webdriver', {
+        get: () => undefined,
+      });
+
+      // Mock chrome runtime
+      window.chrome = {
+        runtime: {},
+      };
+
+      // Mock permissions
+      const originalQuery = window.navigator.permissions.query;
+      window.navigator.permissions.query = (parameters) => (
+        parameters.name === 'notifications' ?
+          Promise.resolve({ state: 'denied' }) :
+          originalQuery(parameters)
+      );
+    });
+
     // Set a realistic user agent to avoid detection
     await page.setUserAgent('Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
 
-    // Set realistic viewport
-    await page.setViewport({ width: 1280, height: 720 });
+    // Set realistic viewport with some randomization
+    const viewports = [
+      { width: 1366, height: 768 },
+      { width: 1920, height: 1080 },
+      { width: 1280, height: 720 },
+      { width: 1440, height: 900 }
+    ];
+    const randomViewport = viewports[Math.floor(Math.random() * viewports.length)];
+    await page.setViewport(randomViewport);
 
     // Add extra headers to appear more human-like
     await page.setExtraHTTPHeaders({
-      'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
-      'Accept-Language': 'en-US,en;q=0.5',
-      'Accept-Encoding': 'gzip, deflate',
+      'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.9',
+      'Accept-Language': 'en-US,en;q=0.9',
+      'Accept-Encoding': 'gzip, deflate, br',
       'DNT': '1',
       'Connection': 'keep-alive',
-      'Upgrade-Insecure-Requests': '1'
+      'Upgrade-Insecure-Requests': '1',
+      'Sec-Fetch-Dest': 'document',
+      'Sec-Fetch-Mode': 'navigate',
+      'Sec-Fetch-Site': 'none',
+      'Cache-Control': 'max-age=0'
     });
 
     const results = [];
@@ -136,15 +172,27 @@ app.post('/api/scrape', async (req, res) => {
       console.log(`🏠 Processing: ${address}`);
 
       try {
-        // Navigate to Regrid with longer delay
+        // Navigate to Regrid with human-like behavior
         console.log(`🌐 Navigating to Regrid for: ${address}`);
         await page.goto('https://app.regrid.com/us', {
           waitUntil: 'networkidle2',
           timeout: 30000
         });
 
-        // Wait longer to avoid rate limiting
-        await new Promise(resolve => setTimeout(resolve, 2000));
+        // Simulate human behavior - random wait and scroll
+        const randomWait = Math.random() * 3000 + 2000; // 2-5 seconds
+        await new Promise(resolve => setTimeout(resolve, randomWait));
+
+        // Simulate reading the page by scrolling a bit
+        await page.evaluate(() => {
+          window.scrollTo(0, 100);
+        });
+        await new Promise(resolve => setTimeout(resolve, 500));
+
+        await page.evaluate(() => {
+          window.scrollTo(0, 0);
+        });
+        await new Promise(resolve => setTimeout(resolve, 300));
 
         // Check for rate limiting error
         const pageContent = await page.content();
@@ -185,28 +233,84 @@ app.post('/api/scrape', async (req, res) => {
           throw new Error('Could not find search input on Regrid page');
         }
 
-        // Clear any existing text and type the address
+        // Human-like interaction with search input
         console.log(`⌨️ Typing address: ${address}`);
+
+        // Move mouse to search input and click
+        const searchElement = await page.$(searchInput);
+        const box = await searchElement.boundingBox();
+        if (box) {
+          // Move mouse to a random point within the element
+          const x = box.x + Math.random() * box.width;
+          const y = box.y + Math.random() * box.height;
+          await page.mouse.move(x, y);
+          await new Promise(resolve => setTimeout(resolve, 100 + Math.random() * 200));
+        }
+
         await page.click(searchInput);
+        await new Promise(resolve => setTimeout(resolve, 100 + Math.random() * 300));
+
+        // Clear any existing text
         await page.keyboard.down('Control');
         await page.keyboard.press('a');
         await page.keyboard.up('Control');
-        await page.type(searchInput, address);
+        await new Promise(resolve => setTimeout(resolve, 50));
+
+        // Type address with human-like delays
+        for (const char of address) {
+          await page.keyboard.type(char);
+          await new Promise(resolve => setTimeout(resolve, 50 + Math.random() * 100));
+        }
+
+        // Wait before pressing enter
+        await new Promise(resolve => setTimeout(resolve, 500 + Math.random() * 1000));
 
         // Press Enter to search
         console.log(`🔍 Submitting search...`);
         await page.keyboard.press('Enter');
 
-        // Wait longer for results to load and avoid detection
+        // Wait for results with more sophisticated loading detection
         console.log(`⏳ Waiting for search results...`);
-        await new Promise(resolve => setTimeout(resolve, 8000));
 
-        // Check if search is still loading
-        const isLoading = await page.$('.loading, .spinner, [class*="loading"]');
-        if (isLoading) {
-          console.log(`⏳ Still loading, waiting more...`);
-          await new Promise(resolve => setTimeout(resolve, 5000));
+        // Progressive waiting with multiple checks
+        let totalWait = 0;
+        const maxWait = 20000; // 20 seconds max
+
+        while (totalWait < maxWait) {
+          await new Promise(resolve => setTimeout(resolve, 2000));
+          totalWait += 2000;
+
+          // Check for various loading indicators
+          const isLoading = await page.evaluate(() => {
+            const loadingSelectors = [
+              '.loading', '.spinner', '[class*="loading"]', '[class*="spinner"]',
+              '.fa-spinner', '.loading-animation', '[aria-label*="loading"]',
+              '.mapboxgl-ctrl-geocoder--loading'
+            ];
+
+            for (const selector of loadingSelectors) {
+              if (document.querySelector(selector)) return true;
+            }
+
+            // Check if there's meaningful content loaded
+            const bodyText = document.body.innerText || '';
+            if (bodyText.includes('Base Parcel Styles') || bodyText.length < 100) {
+              return true; // Still loading
+            }
+
+            return false;
+          });
+
+          if (!isLoading) {
+            console.log(`✅ Page appears loaded after ${totalWait}ms`);
+            break;
+          }
+
+          console.log(`⏳ Still loading... (${totalWait}ms elapsed)`);
         }
+
+        // Additional wait to ensure content is stable
+        await new Promise(resolve => setTimeout(resolve, 3000));
 
         // Extract property data
         const propertyData = await page.evaluate(() => {
