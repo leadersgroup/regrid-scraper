@@ -7,6 +7,7 @@ console.log('🚀 Starting Regrid Scraper server...');
 console.log('Port:', PORT);
 console.log('Node version:', process.version);
 console.log('Environment:', process.env.NODE_ENV || 'development');
+console.log('Current time:', new Date().toISOString());
 
 // Middleware
 app.use(express.json({ limit: '10mb' }));
@@ -104,6 +105,9 @@ const server = app.listen(PORT, '0.0.0.0', (err) => {
   console.log(`🔗 Health check: http://0.0.0.0:${PORT}/api/health`);
   console.log(`🧪 Test endpoint: http://0.0.0.0:${PORT}/api/test`);
   console.log(`❤️ Railway health: http://0.0.0.0:${PORT}/health`);
+
+  // Signal to Railway that we're ready
+  console.log('🎯 Server is ready to accept connections');
 });
 
 // Handle server errors
