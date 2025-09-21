@@ -323,8 +323,19 @@ app.post('/api/scrape', async (req, res) => {
             }
           }
 
-          // Final check: Look for Regrid-specific parcel ID format like "17 0036 LL0847"
-          const regridParcelMatch = allVisibleText.match(/\b(\d{2}\s+\d{4}\s+[A-Z0-9]{6})\b/);
+          // Final check: Look for Regrid-specific parcel ID formats
+          const regridParcelPatterns = [
+            /\b(\d{2}\s+\d{4}\s+[A-Z0-9]{6})\b/,     // Format: "17 0036 LL0847"
+            /\b(\d{2}\s+\d{3}\s+\d{2}\s+\d{3})\b/,   // Format: "18 276 14 016"
+            /\b(\d{2}\s+\d{3}\s+\d{3})\b/,           // Format: "18 276 016"
+            /\b(\d{1,2}\s+\d{3,4}\s+\d{2,6})\b/      // General format
+          ];
+
+          let regridParcelMatch = null;
+          for (const pattern of regridParcelPatterns) {
+            regridParcelMatch = allVisibleText.match(pattern);
+            if (regridParcelMatch) break;
+          }
           if (regridParcelMatch) {
             parcelId = regridParcelMatch[1];
             patternMatches.push(`Regrid parcel ID found: ${parcelId}`);
