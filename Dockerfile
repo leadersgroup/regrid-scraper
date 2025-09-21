@@ -56,7 +56,7 @@ RUN wget -q -O - https://dl.google.com/linux/linux_signing_key.pub | apt-key add
     && rm -rf /var/lib/apt/lists/*
 
 # Create non-root user first
-RUN groupadd -r railway && useradd -r -g railway -s /bin/bash railway
+RUN groupadd -r railway && useradd -r -g railway -s /bin/bash -m railway
 
 WORKDIR /app
 
@@ -69,8 +69,11 @@ RUN npm install --production
 # Copy application files
 COPY . .
 
-# Change ownership to non-root user
-RUN chown -R railway:railway /app
+# Change ownership to non-root user and create necessary directories
+RUN chown -R railway:railway /app && \
+    mkdir -p /home/railway/.local/share/applications && \
+    mkdir -p /home/railway/.config && \
+    chown -R railway:railway /home/railway
 
 # Switch to non-root user
 USER railway
