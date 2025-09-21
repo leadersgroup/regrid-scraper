@@ -118,6 +118,8 @@ server.on('error', (err) => {
 // Graceful shutdown handling
 const gracefulShutdown = (signal) => {
   console.log(`🛑 Received ${signal}, shutting down gracefully...`);
+  console.log('Server uptime:', process.uptime(), 'seconds');
+  console.log('Memory usage:', process.memoryUsage());
 
   server.close((err) => {
     if (err) {
