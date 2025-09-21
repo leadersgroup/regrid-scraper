@@ -153,21 +153,48 @@ app.post('/api/scrape', async (req, res) => {
         }
 
         // Wait for search input and enter address
-        console.log(`🔍 Looking for search input...`);
-        await page.waitForSelector('input[placeholder*="search"], input[name*="search"], .search-input', { timeout: 15000 });
+        console.log(`🔍 Looking for Regrid search input...`);
+
+        // Try multiple possible search input selectors for Regrid
+        const searchSelectors = [
+          'input[placeholder*="Search"]',
+          'input[placeholder*="search"]',
+          'input[placeholder*="address"]',
+          'input[placeholder*="Enter"]',
+          '.search-input',
+          '#search-input',
+          'input[type="search"]',
+          'input[type="text"]',
+          '.geocoder-input',
+          '.mapboxgl-ctrl-geocoder input'
+        ];
+
+        let searchInput = null;
+        for (const selector of searchSelectors) {
+          try {
+            await page.waitForSelector(selector, { timeout: 3000 });
+            searchInput = selector;
+            console.log(`✅ Found search input with selector: ${selector}`);
+            break;
+          } catch (e) {
+            console.log(`❌ Selector ${selector} not found`);
+          }
+        }
+
+        if (!searchInput) {
+          throw new Error('Could not find search input on Regrid page');
+        }
 
         // Clear any existing text and type the address
-        await page.evaluate(() => {
-          const searchInput = document.querySelector('input[placeholder*="search"], input[name*="search"], .search-input');
-          if (searchInput) {
-            searchInput.value = '';
-            searchInput.focus();
-          }
-        });
-
-        await page.type('input[placeholder*="search"], input[name*="search"], .search-input', address);
+        console.log(`⌨️ Typing address: ${address}`);
+        await page.click(searchInput);
+        await page.keyboard.down('Control');
+        await page.keyboard.press('a');
+        await page.keyboard.up('Control');
+        await page.type(searchInput, address);
 
         // Press Enter to search
+        console.log(`🔍 Submitting search...`);
         await page.keyboard.press('Enter');
 
         // Wait longer for results to load and avoid detection
@@ -183,27 +210,46 @@ app.post('/api/scrape', async (req, res) => {
             bodyText: document.body ? document.body.innerText.substring(0, 500) : 'No body'
           };
 
-          // Look for parcel ID and owner name in various possible selectors
+          // Look for parcel ID and owner name in search results or property details
           const parcelIdSelectors = [
-            '[data-testid*="parcel"]',
-            '.parcel-id',
-            '.property-id',
-            '.parcel',
-            '.apn',
-            '*[class*="parcel"]',
-            '*[class*="apn"]',
+            // Common patterns for parcel IDs
+            '*[class*="parcel"]:not([class*="style"])',
             '*[id*="parcel"]',
-            '*[id*="apn"]'
+            '.property-id',
+            '.parcel-number',
+            '.apn',
+            '*[class*="apn"]',
+            // General selectors for property info
+            '.property-info',
+            '.property-details',
+            // Search result selectors
+            '.search-result',
+            '.property-details',
+            '.result-item',
+            // Sidebar or info panel selectors
+            '.sidebar *',
+            '.info-panel *',
+            '.property-info *'
           ];
 
           const ownerNameSelectors = [
-            '[data-testid*="owner"]',
+            // Common patterns for owner names
+            '*[class*="owner"]:not([class*="style"])',
+            '*[id*="owner"]',
             '.owner-name',
             '.property-owner',
             '.owner-info',
+            // General selectors for owner info
+            '.owner-details',
             '.owner',
-            '*[class*="owner"]',
-            '*[id*="owner"]'
+            // Search result selectors
+            '.search-result *',
+            '.property-details *',
+            '.result-item *',
+            // Sidebar or info panel selectors
+            '.sidebar *',
+            '.info-panel *',
+            '.property-info *'
           ];
 
           let parcelId = null;
@@ -237,16 +283,53 @@ app.post('/api/scrape', async (req, res) => {
           // Look for any text that might contain parcel or owner info
           const textNodes = Array.from(document.querySelectorAll('*')).filter(el => {
             const text = el.textContent?.toLowerCase() || '';
-            return (text.includes('parcel') || text.includes('owner') || text.includes('apn')) &&
-                   text.length < 200 && el.children.length === 0;
-          }).map(el => el.textContent?.trim()).filter(Boolean).slice(0, 10);
+            return (text.includes('parcel') || text.includes('owner') || text.includes('apn') ||
+                   text.match(/\d{2,}/)) && // Look for numbers that might be parcel IDs
+                   text.length < 200 && el.children.length === 0 &&
+                   !text.includes('style') && !text.includes('color'); // Exclude styling elements
+          }).map(el => el.textContent?.trim()).filter(Boolean).slice(0, 15);
+
+          // Also look for any visible text that looks like parcel IDs or names
+          const allVisibleText = document.body.innerText || '';
+          const parcelIdPatterns = [
+            /parcel\s*(?:id|number)?[:\s]+([A-Z0-9\-]+)/gi,
+            /apn[:\s]+([A-Z0-9\-]+)/gi,
+            /property\s*id[:\s]+([A-Z0-9\-]+)/gi
+          ];
+
+          const ownerPatterns = [
+            /owner[:\s]+([A-Za-z\s,]+?)(?:\n|$|[A-Z]{2}\s+\d)/gi,
+            /owned\s*by[:\s]+([A-Za-z\s,]+?)(?:\n|$|[A-Z]{2}\s+\d)/gi
+          ];
+
+          // Try pattern matching on visible text
+          let patternMatches = [];
+
+          for (const pattern of parcelIdPatterns) {
+            const matches = [...allVisibleText.matchAll(pattern)];
+            if (matches.length > 0 && !parcelId) {
+              parcelId = matches[0][1].trim();
+              patternMatches.push(`Parcel ID found via pattern: ${parcelId}`);
+              break;
+            }
+          }
+
+          for (const pattern of ownerPatterns) {
+            const matches = [...allVisibleText.matchAll(pattern)];
+            if (matches.length > 0 && !ownerName) {
+              ownerName = matches[0][1].trim();
+              patternMatches.push(`Owner found via pattern: ${ownerName}`);
+              break;
+            }
+          }
 
           return {
             parcelId,
             ownerName,
             pageInfo,
-            foundElements,
-            relevantText: textNodes
+            foundElements: [...foundElements, ...patternMatches],
+            relevantText: textNodes,
+            bodyTextSample: allVisibleText.substring(0, 1000) // Include more text for debugging
           };
         });
 
