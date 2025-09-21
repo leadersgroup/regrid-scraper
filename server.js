@@ -262,55 +262,40 @@ app.post('/api/scrape', async (req, res) => {
           await new Promise(resolve => setTimeout(resolve, 50 + Math.random() * 100));
         }
 
-        // Wait before pressing enter
-        await new Promise(resolve => setTimeout(resolve, 500 + Math.random() * 1000));
-
-        // Press Enter to search
-        console.log(`🔍 Submitting search...`);
-        await page.keyboard.press('Enter');
+        // Wait for reactive search results to appear (no Enter needed)
+        console.log(`🔍 Waiting for reactive search results...`);
+        await new Promise(resolve => setTimeout(resolve, 2000 + Math.random() * 1000));
 
         // Wait for results with more sophisticated loading detection
         console.log(`⏳ Waiting for search results...`);
 
-        // Progressive waiting with multiple checks
+        // Shorter wait since results appear reactively
         let totalWait = 0;
-        const maxWait = 20000; // 20 seconds max
+        const maxWait = 8000; // 8 seconds max for reactive results
 
         while (totalWait < maxWait) {
-          await new Promise(resolve => setTimeout(resolve, 2000));
-          totalWait += 2000;
+          await new Promise(resolve => setTimeout(resolve, 1000));
+          totalWait += 1000;
 
-          // Check for various loading indicators
-          const isLoading = await page.evaluate(() => {
-            const loadingSelectors = [
-              '.loading', '.spinner', '[class*="loading"]', '[class*="spinner"]',
-              '.fa-spinner', '.loading-animation', '[aria-label*="loading"]',
-              '.mapboxgl-ctrl-geocoder--loading'
-            ];
-
-            for (const selector of loadingSelectors) {
-              if (document.querySelector(selector)) return true;
-            }
-
-            // Check if there's meaningful content loaded
+          // Check if we have meaningful search results
+          const hasResults = await page.evaluate(() => {
             const bodyText = document.body.innerText || '';
-            if (bodyText.includes('Base Parcel Styles') || bodyText.length < 100) {
-              return true; // Still loading
-            }
-
-            return false;
+            // Look for signs that search results are displayed
+            return bodyText.includes('Parcel') ||
+                   bodyText.includes('Owner') ||
+                   bodyText.match(/\d{2,}/); // Contains numbers that might be parcel IDs
           });
 
-          if (!isLoading) {
-            console.log(`✅ Page appears loaded after ${totalWait}ms`);
+          if (hasResults) {
+            console.log(`✅ Search results detected after ${totalWait}ms`);
             break;
           }
 
-          console.log(`⏳ Still loading... (${totalWait}ms elapsed)`);
+          console.log(`⏳ Waiting for reactive results... (${totalWait}ms elapsed)`);
         }
 
-        // Additional wait to ensure content is stable
-        await new Promise(resolve => setTimeout(resolve, 3000));
+        // Short wait to ensure results are stable
+        await new Promise(resolve => setTimeout(resolve, 1000));
 
         // Extract property data
         const propertyData = await page.evaluate(() => {
