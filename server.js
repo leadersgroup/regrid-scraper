@@ -437,7 +437,9 @@ app.post('/api/scrape', async (req, res) => {
             /\b(\d{2}\s+\d{4}\s+[A-Z0-9]{6})\b/,     // Format: "17 0036 LL0847"
             /\b(\d{2}\s+\d{3}\s+\d{2}\s+\d{3})\b/,   // Format: "18 276 14 016"
             /\b(\d{2}\s+\d{3}\s+\d{3})\b/,           // Format: "18 276 016"
-            /\b(\d{1,2}\s+\d{3,4}\s+\d{2,6})\b/      // General format
+            /\b(\d{1,2}\s+\d{3,4}\s+\d{2,6})\b/,     // General format
+            /\b(\d{10,20})\b/,                        // Long numeric IDs like \"06424712060010010\"
+            /\b(\d{6,9})\b/                           // Medium numeric IDs like \"06141234\"
           ];
 
           let regridParcelMatch = null;
