@@ -302,7 +302,7 @@ app.post('/api/scrape', async (req, res) => {
         await new Promise(resolve => setTimeout(resolve, 1000));
 
         // Extract property data
-        const propertyData = await page.evaluate(() => {
+        const propertyData = await page.evaluate((cleanAddress) => {
           // Get page title and URL for debugging
           const pageInfo = {
             title: document.title,
@@ -432,26 +432,44 @@ app.post('/api/scrape', async (req, res) => {
             }
           }
 
-          // Final check: Look for Regrid-specific parcel ID formats
-          const regridParcelPatterns = [
-            /\b(\d{4}-\d{3}-\d{3})\b/,               // Format: "4139-029-027" (hyphenated)
-            /\b(\d{2}\s+\d{4}\s+[A-Z0-9]{6})\b/,     // Format: "17 0036 LL0847"
-            /\b(\d{2}\s+\d{3}\s+\d{2}\s+\d{3})\b/,   // Format: "18 276 14 016"
-            /\b(\d{2}\s+\d{3}\s+\d{3})\b/,           // Format: "18 276 016"
-            /\b(\d{1,2}\s+\d{3,4}\s+\d{2,6})\b/,     // General format
-            /\b(\d{10,20})\b/,                        // Long numeric IDs like \"06424712060010010\"
-            /\b(\d{6,9})\b/                           // Medium numeric IDs like \"06141234\"
-          ];
+          // Better approach: Find parcel ID by position relative to owner name
+          // Parcel ID is always the field above owner name in Regrid results
+          if (ownerName && !parcelId) {
+            const lines = allVisibleText.split('\n').map(line => line.trim()).filter(line => line.length > 0);
 
-          let regridParcelMatch = null;
-          for (const pattern of regridParcelPatterns) {
-            regridParcelMatch = allVisibleText.match(pattern);
-            if (regridParcelMatch) break;
-          }
-          if (regridParcelMatch) {
-            // Override CSS selector result if we found a pattern match (more reliable)
-            parcelId = regridParcelMatch[1];
-            patternMatches.push(`Regrid parcel ID found via pattern: ${parcelId}`);
+            // Find the line with the owner name
+            for (let i = 0; i < lines.length; i++) {
+              if (lines[i].includes(ownerName.trim())) {
+                // Look for parcel ID in the lines above the owner name
+                // Check 1-3 lines above for potential parcel ID
+                for (let j = 1; j <= 3 && (i - j) >= 0; j++) {
+                  const candidateLine = lines[i - j];
+
+                  // Skip address lines and other common text
+                  if (!candidateLine.includes(cleanAddress) &&
+                      !candidateLine.toLowerCase().includes('see all') &&
+                      !candidateLine.toLowerCase().includes('result') &&
+                      !candidateLine.toLowerCase().includes('street') &&
+                      !candidateLine.toLowerCase().includes('ave') &&
+                      !candidateLine.toLowerCase().includes('road') &&
+                      !candidateLine.toLowerCase().includes('dr') &&
+                      !candidateLine.toLowerCase().includes('ln') &&
+                      !candidateLine.toLowerCase().includes('blvd') &&
+                      !candidateLine.toLowerCase().includes('california') &&
+                      !candidateLine.toLowerCase().includes('newton') &&
+                      !candidateLine.toLowerCase().includes('segundo') &&
+                      candidateLine.length < 50 && // Reasonable length for parcel ID
+                      candidateLine.match(/\d/) && // Contains at least one digit
+                      candidateLine.length > 3) { // Not too short
+
+                    parcelId = candidateLine;
+                    patternMatches.push(`Parcel ID found ${j} line(s) above owner: ${parcelId}`);
+                    break;
+                  }
+                }
+                break;
+              }
+            }
           }
 
           // Additional check for long numeric parcel IDs (Florida format) or if address was incorrectly selected
@@ -471,7 +489,7 @@ app.post('/api/scrape', async (req, res) => {
             relevantText: textNodes,
             bodyTextSample: allVisibleText.substring(0, 1000) // Include more text for debugging
           };
-        });
+        }, cleanAddress);
 
         results.push({
           originalAddress: address,
