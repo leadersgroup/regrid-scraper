@@ -434,6 +434,7 @@ app.post('/api/scrape', async (req, res) => {
 
           // Final check: Look for Regrid-specific parcel ID formats
           const regridParcelPatterns = [
+            /\b(\d{4}-\d{3}-\d{3})\b/,               // Format: "4139-029-027" (hyphenated)
             /\b(\d{2}\s+\d{4}\s+[A-Z0-9]{6})\b/,     // Format: "17 0036 LL0847"
             /\b(\d{2}\s+\d{3}\s+\d{2}\s+\d{3})\b/,   // Format: "18 276 14 016"
             /\b(\d{2}\s+\d{3}\s+\d{3})\b/,           // Format: "18 276 016"
