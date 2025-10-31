@@ -52,6 +52,59 @@ app.get('/api/test', (req, res) => {
   });
 });
 
+// Prior deed download endpoint
+app.post('/api/deed', async (req, res) => {
+  const DeedScraper = require('./deed-scraper');
+  let scraper = null;
+
+  try {
+    const { address, county, state } = req.body;
+
+    if (!address || typeof address !== 'string' || address.trim().length === 0) {
+      return res.status(400).json({
+        error: 'Invalid input',
+        message: 'Please provide a valid property address',
+        timestamp: new Date().toISOString()
+      });
+    }
+
+    console.log(`📄 Starting prior deed search for: ${address}`);
+
+    // Initialize deed scraper
+    scraper = new DeedScraper({
+      headless: true,
+      timeout: 60000,
+      verbose: true
+    });
+
+    await scraper.initialize();
+
+    // Run complete workflow
+    const result = await scraper.getPriorDeed(address);
+
+    console.log(`📄 Deed search completed: ${result.success ? 'Success' : 'Failed'}`);
+
+    res.json({
+      success: result.success,
+      data: result,
+      timestamp: new Date().toISOString()
+    });
+
+  } catch (error) {
+    console.error('❌ Deed scraping error:', error);
+    res.status(500).json({
+      error: 'Deed scraping failed',
+      message: error.message,
+      timestamp: new Date().toISOString()
+    });
+  } finally {
+    if (scraper) {
+      await scraper.close();
+      console.log('🔒 Deed scraper closed');
+    }
+  }
+});
+
 // Property scraping endpoint
 app.post('/api/scrape', async (req, res) => {
   const puppeteer = require('puppeteer');
