@@ -10,7 +10,26 @@
  * 4. Fallback to owner name search if needed
  */
 
-const puppeteer = require('puppeteer');
+const puppeteer = require('puppeteer-extra');
+const StealthPlugin = require('puppeteer-extra-plugin-stealth');
+const RecaptchaPlugin = require('puppeteer-extra-plugin-recaptcha');
+
+// Use stealth plugin to avoid detection
+puppeteer.use(StealthPlugin());
+
+// Use reCAPTCHA plugin for automatic solving (requires 2Captcha API key)
+// Set TWOCAPTCHA_TOKEN environment variable with your API key
+if (process.env.TWOCAPTCHA_TOKEN) {
+  puppeteer.use(
+    RecaptchaPlugin({
+      provider: {
+        id: '2captcha',
+        token: process.env.TWOCAPTCHA_TOKEN
+      },
+      visualFeedback: true // Display feedback when solving CAPTCHAs
+    })
+  );
+}
 
 class DeedScraper {
   constructor(options = {}) {
