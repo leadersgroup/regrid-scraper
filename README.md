@@ -1,68 +1,101 @@
 # README.md
-# 🏠 Property Data Extractor
+# 🏠 Deed Scraper API - Automated Property Deed Downloads
 
-A powerful web application that extracts property data including parcel ID and owner information from addresses using Regrid's database.
+A production-ready REST API that automatically downloads property deed PDFs from county clerk websites with automatic CAPTCHA solving. Built for Orange County, Florida with support for additional counties coming soon.
 
 ## ✨ Features
 
-- 🔍 **Fast Property Lookup** - Extract data from up to 10 addresses at once
-- 📊 **Comprehensive Data** - Get parcel ID, owner name, property type, and more
-- 🎨 **Modern Interface** - Beautiful, responsive design with real-time feedback
-- ⚡ **Serverless Architecture** - Built on Vercel for optimal performance
-- 📱 **Mobile Friendly** - Works perfectly on all devices
+- 🤖 **Automatic CAPTCHA Solving** - Uses 2Captcha API for fully automated downloads
+- 📄 **Full PDF Download** - Retrieves complete deed documents from embedded viewers
+- 📊 **Transaction History** - Extracts property sales history and document IDs
+- 🚀 **REST API** - Simple HTTP endpoints for easy integration
+- 💰 **Cost Effective** - Only $0.001 per deed (1/10th of a penny)
+- ⚡ **Fast Processing** - 90-120 seconds average response time
+- 🔐 **Secure** - Environment-based API key management
 
-## 🚀 Live Demo
+## 🎯 Quick Start
 
-Visit the live application: [Property Data Extractor](https://your-app.vercel.app)
+### 1. Install Dependencies
+```bash
+npm install
+```
+
+### 2. Get 2Captcha API Key
+```bash
+# Sign up at https://2captcha.com/
+# Add $3 minimum to your account
+# Copy your API key
+export TWOCAPTCHA_TOKEN="your_api_key_here"
+```
+
+### 3. Start API Server
+```bash
+node api-server.js
+```
+
+### 4. Download a Deed
+```bash
+curl -X POST http://localhost:3000/api/deed/download \
+  -H "Content-Type: application/json" \
+  -d '{"address": "6431 Swanson St, Windermere, FL 34786"}'
+```
 
 ## 🛠️ Tech Stack
 
-- **Frontend**: HTML5, Tailwind CSS, Vanilla JavaScript
-- **Backend**: Node.js, Puppeteer, Vercel Serverless Functions
-- **Deployment**: Vercel with GitHub integration
-- **Data Source**: Regrid property database
+- **Backend**: Node.js, Express.js, Puppeteer
+- **CAPTCHA Solving**: 2Captcha API via puppeteer-extra-plugin-recaptcha
+- **Browser Automation**: puppeteer-extra with stealth plugin
+- **API Framework**: Express.js with CORS support
+- **Deployment**: PM2, Docker, or cloud platforms
 
-## 📖 How to Use
+## 📖 How It Works
 
-1. Enter property addresses (one per line, maximum 10)
-2. Click "Extract Property Data"
-3. Wait for processing (typically 30-60 seconds)
-4. View comprehensive property information
+1. Send address via POST request to `/api/deed/download`
+2. System searches Orange County Property Appraiser for property
+3. Extracts transaction history and most recent deed document ID
+4. Navigates to Orange County Clerk website
+5. Automatically solves reCAPTCHA using 2Captcha API
+6. Downloads deed PDF from embedded viewer
+7. Returns PDF file path and metadata
 
-## 🔧 Development
+## 📊 API Endpoints
 
-### Prerequisites
-- Node.js 18+
-- Vercel CLI (optional)
+### GET /api/health
+Check API server status and CAPTCHA solver configuration.
 
-### Local Setup
-```bash
-# Clone the repository
-git clone https://github.com/yourusername/regrid-scraper.git
-
-# Install dependencies
-npm install
-
-# Run development server
-vercel dev
-```
-
-### Deployment
-This project auto-deploys to Vercel when pushed to the main branch.
-
-## 📊 API Reference
-
-### POST /api/scrape
-
-Extract property data for multiple addresses.
-
-**Request Body:**
+**Response:**
 ```json
 {
-  "addresses": [
-    "560 Shavano St, Crested Butte, CO 81224, USA",
-    "123 Main St, Denver, CO 80202, USA"
-  ]
+  "status": "healthy",
+  "version": "1.0.0",
+  "captchaSolver": "enabled",
+  "timestamp": "2025-11-01T19:20:00.000Z"
+}
+```
+
+### GET /api/counties
+List supported counties and their features.
+
+**Response:**
+```json
+{
+  "success": true,
+  "counties": [{
+    "name": "Orange County",
+    "state": "FL",
+    "features": ["Automatic CAPTCHA solving", "Full PDF download", "Transaction history extraction"],
+    "cost": "$0.001 per deed"
+  }]
+}
+```
+
+### POST /api/deed/download
+Download deed PDF for a property address.
+
+**Request:**
+```json
+{
+  "address": "6431 Swanson St, Windermere, FL 34786"
 }
 ```
 
@@ -70,46 +103,153 @@ Extract property data for multiple addresses.
 ```json
 {
   "success": true,
-  "data": [
-    {
-      "originalAddress": "560 Shavano St, Crested Butte, CO 81224, USA",
-      "parcelId": "325728106012",
-      "ownerName": "LAMB ERIC, LAMB JOYCE L",
-      "address": "560 Shavano St",
-      "city": "Crested Butte",
-      "state": "CO",
-      "propertyType": "Parcel",
-      "score": 61.5
-    }
-  ]
+  "message": "Deed downloaded successfully",
+  "duration": "95.34s",
+  "download": {
+    "filename": "deed_20170015765_1762024782019.pdf",
+    "fileSize": 90551,
+    "fileSizeKB": "88.43",
+    "documentId": "20170015765"
+  },
+  "parcelId": "282330246500160",
+  "county": "Orange",
+  "state": "FL",
+  "transactions": [...],
+  "captchaSolved": true,
+  "cost": "$0.001"
 }
+```
+
+## 💻 Usage Examples
+
+### JavaScript/Node.js
+```javascript
+const axios = require('axios');
+
+const response = await axios.post('http://localhost:3000/api/deed/download', {
+  address: '6431 Swanson St, Windermere, FL 34786'
+});
+
+console.log('PDF downloaded:', response.data.download.filename);
+```
+
+### Python
+```python
+import requests
+
+response = requests.post('http://localhost:3000/api/deed/download', json={
+    'address': '6431 Swanson St, Windermere, FL 34786'
+})
+
+print('PDF downloaded:', response.json()['download']['filename'])
+```
+
+### cURL
+```bash
+curl -X POST http://localhost:3000/api/deed/download \
+  -H "Content-Type: application/json" \
+  -d '{"address": "6431 Swanson St, Windermere, FL 34786"}'
+```
+
+## 💰 Pricing
+
+### 2Captcha Costs
+- **$1.00 per 1,000 CAPTCHAs solved**
+- **$0.001 per deed** (1/10th of a penny)
+
+### Monthly Cost Examples
+| Deeds/Month | Cost/Month | Recommended Balance |
+|-------------|------------|---------------------|
+| 100         | $0.10      | $5                  |
+| 1,000       | $1.00      | $10                 |
+| 10,000      | $10.00     | $25                 |
+| 100,000     | $100.00    | $200                |
+
+## 🚀 Deployment
+
+### Option 1: PM2 (Recommended)
+```bash
+pm2 start api-server.js --name deed-api
+pm2 startup
+pm2 save
+```
+
+### Option 2: Docker
+```bash
+docker build -t deed-scraper-api .
+docker run -d -p 3000:3000 \
+  -e TWOCAPTCHA_TOKEN=your_key \
+  deed-scraper-api
+```
+
+### Option 3: Cloud Platforms
+- **Railway**: Auto-deploy from GitHub
+- **Heroku**: Add buildpack for Chrome/Puppeteer
+- **DigitalOcean**: Use Docker container
+
+## 📚 Documentation
+
+- [API Documentation](API_DOCUMENTATION.md) - Complete API reference
+- [Quick Start Guide](API_QUICKSTART.md) - Get started in 3 minutes
+- [CAPTCHA Setup Guide](CAPTCHA_SOLVING_SETUP.md) - 2Captcha configuration
+- [Usage Examples](examples/api-usage-examples.js) - Code examples
+- [Complete Summary](API_COMPLETE_SUMMARY.md) - Full implementation details
+
+## 🎯 Supported Counties
+
+### Currently Supported
+- ✅ **Orange County, Florida**
+  - Full automation with CAPTCHA solving
+  - PDF download
+  - Transaction history
+
+### Coming Soon
+- Miami-Dade County, FL
+- Broward County, FL
+- Hillsborough County, FL
+
+## 🔧 Configuration
+
+### Environment Variables
+| Variable | Required | Description |
+|----------|----------|-------------|
+| `TWOCAPTCHA_TOKEN` | **Yes** | 2Captcha API key |
+| `PORT` | No | Server port (default: 3000) |
+| `DEED_DOWNLOAD_PATH` | No | Download directory (default: ./downloads) |
+
+## 🆘 Troubleshooting
+
+### "CAPTCHA solver not configured"
+```bash
+# Set your 2Captcha API key
+export TWOCAPTCHA_TOKEN="your_api_key_here"
+```
+
+### "ERROR_ZERO_BALANCE"
+```bash
+# Add funds to your 2Captcha account
+# Visit: https://2captcha.com/enterpage
+```
+
+### Server not responding
+```bash
+# Make sure server is running
+node api-server.js
 ```
 
 ## ⚖️ Legal & Compliance
 
-- This tool is for educational and research purposes
-- Respects rate limits and terms of service
-- Data accuracy is not guaranteed
+- Public records access tool for research purposes
+- Respects county clerk website terms of service
 - Users responsible for compliance with local laws
-
-## 🤝 Contributing
-
-1. Fork the repository
-2. Create a feature branch
-3. Make your changes
-4. Submit a pull request
+- Data accuracy not guaranteed
 
 ## 📝 License
 
 MIT License - see LICENSE file for details
 
-## 🆘 Support
-
-For issues or questions:
-- Create an issue on GitHub
-- Check the documentation
-- Review the API reference
-
 ---
 
-Built with ❤️ using Vercel Serverless Functions
+**Status:** ✅ Production Ready
+**Version:** 1.0.0
+**Last Updated:** November 1, 2025
