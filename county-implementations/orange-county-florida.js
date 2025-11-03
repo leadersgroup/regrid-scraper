@@ -835,7 +835,7 @@ class OrangeCountyFloridaScraper extends DeedScraper {
 
               // Check for reCAPTCHA with retries (iframe may load asynchronously)
               let captchaInfo = null;
-              let retries = 3;
+              let retries = 5; // Increased from 3 to 5
 
               for (let i = 0; i < retries; i++) {
                 captchaInfo = await this.page.evaluate(() => {
@@ -846,9 +846,16 @@ class OrangeCountyFloridaScraper extends DeedScraper {
                   const pageText = document.body.innerText || '';
                   const hasRecaptchaText = pageText.toLowerCase().includes('recaptcha') || pageText.toLowerCase().includes('protected by recaptcha');
 
+                  // Check for reCAPTCHA div elements (v2 invisible or v3)
+                  const grecaptchaElements = Array.from(document.querySelectorAll('[class*="grecaptcha"], [id*="recaptcha"], [data-sitekey]'));
+
                   // Check if we've actually progressed past disclaimer
                   const url = window.location.href;
                   const onDisclaimer = url.includes('/user/disclaimer');
+
+                  // Check for Accept button state (might be disabled until CAPTCHA solved)
+                  const acceptButton = document.querySelector('#submitDisclaimerAccept');
+                  const acceptButtonDisabled = acceptButton ? acceptButton.disabled || acceptButton.classList.contains('disabled') : false;
 
                   return {
                     hasCaptcha: recaptchaIframes.length > 0,
@@ -856,13 +863,15 @@ class OrangeCountyFloridaScraper extends DeedScraper {
                     recaptchaCount: recaptchaIframes.length,
                     iframeSrcs: iframes.map(iframe => iframe.src).slice(0, 5),
                     hasRecaptchaText,
+                    grecaptchaElements: grecaptchaElements.length,
                     onDisclaimer,
                     currentUrl: url,
+                    acceptButtonDisabled,
                     pageContentPreview: pageText.substring(0, 300)
                   };
                 });
 
-                this.log(`🔍 CAPTCHA check (attempt ${i + 1}/${retries}): iframes=${captchaInfo.totalIframes}, recaptcha=${captchaInfo.recaptchaCount}, onDisclaimer=${captchaInfo.onDisclaimer}`);
+                this.log(`🔍 CAPTCHA check (attempt ${i + 1}/${retries}): iframes=${captchaInfo.totalIframes}, recaptcha=${captchaInfo.recaptchaCount}, grecaptcha=${captchaInfo.grecaptchaElements}, onDisclaimer=${captchaInfo.onDisclaimer}, buttonDisabled=${captchaInfo.acceptButtonDisabled}`);
 
                 if (captchaInfo.hasCaptcha) {
                   break;
