@@ -269,6 +269,76 @@ app.post('/api/deed/download', async (req, res) => {
   }
 });
 
+// Regrid parcel ID lookup endpoint
+app.post('/api/scrape', async (req, res) => {
+  const RegridScraper = require('./regrid-scraper-railway');
+  let scraper = null;
+
+  try {
+    const { addresses } = req.body;
+
+    if (!addresses || !Array.isArray(addresses) || addresses.length === 0) {
+      return res.status(400).json({
+        success: false,
+        error: 'Invalid input',
+        message: 'Please provide an array of addresses',
+        timestamp: new Date().toISOString()
+      });
+    }
+
+    if (addresses.length > 10) {
+      return res.status(400).json({
+        success: false,
+        error: 'Too many addresses',
+        message: 'Maximum 10 addresses allowed per request',
+        timestamp: new Date().toISOString()
+      });
+    }
+
+    console.log(`\n${'='.repeat(80)}`);
+    console.log(`📥 NEW REQUEST [/api/scrape]: ${addresses.length} addresses`);
+    console.log(`${'='.repeat(80)}\n`);
+
+    // Initialize Regrid scraper
+    scraper = new RegridScraper();
+    await scraper.initialize();
+    await scraper.establishSession();
+
+    // Search for properties
+    const results = await scraper.searchMultipleProperties(addresses);
+
+    await scraper.close();
+
+    console.log(`\n${'='.repeat(80)}`);
+    console.log(`✅ Scraping completed: ${results.length} addresses processed`);
+    console.log(`${'='.repeat(80)}\n`);
+
+    res.json({
+      success: true,
+      data: results,
+      summary: {
+        total: results.length,
+        successful: results.filter(r => !r.error).length,
+        failed: results.filter(r => r.error).length
+      },
+      timestamp: new Date().toISOString()
+    });
+
+  } catch (error) {
+    console.error('❌ Scraping error:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Scraping failed',
+      message: error.message,
+      timestamp: new Date().toISOString()
+    });
+  } finally {
+    if (scraper) {
+      await scraper.close();
+    }
+  }
+});
+
 // 404 handler
 app.use((req, res) => {
   res.status(404).json({
@@ -277,6 +347,7 @@ app.use((req, res) => {
     availableEndpoints: [
       'GET /api/health',
       'GET /api/counties',
+      'POST /api/scrape',
       'POST /api/getPriorDeed',
       'POST /api/deed/download'
     ]
@@ -304,6 +375,7 @@ app.listen(PORT, () => {
   console.log('\n📖 Available endpoints:');
   console.log(`   GET  http://localhost:${PORT}/api/health`);
   console.log(`   GET  http://localhost:${PORT}/api/counties`);
+  console.log(`   POST http://localhost:${PORT}/api/scrape`);
   console.log(`   POST http://localhost:${PORT}/api/getPriorDeed`);
   console.log(`   POST http://localhost:${PORT}/api/deed/download`);
   console.log('\n💡 Example requests:');
