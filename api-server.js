@@ -109,6 +109,85 @@ async function processDeedDownload(address, county, state, options = {}) {
   }
 }
 
+// Legacy endpoint - /api/scrapePriorDeed (alias for /api/getPriorDeed)
+app.post('/api/scrapePriorDeed', async (req, res) => {
+  const startTime = Date.now();
+
+  try {
+    const { address, county, state } = req.body;
+
+    // Validate required parameters
+    if (!address) {
+      return res.status(400).json({
+        success: false,
+        error: 'Missing required parameter: address',
+        message: 'Please provide an address to search for'
+      });
+    }
+
+    // Check if 2Captcha API key is configured
+    if (!process.env.TWOCAPTCHA_TOKEN) {
+      return res.status(503).json({
+        success: false,
+        error: 'CAPTCHA solver not configured',
+        message: 'Set TWOCAPTCHA_TOKEN environment variable to enable deed downloads',
+        documentation: 'See CAPTCHA_SOLVING_SETUP.md for setup instructions'
+      });
+    }
+
+    console.log(`\n${'='.repeat(80)}`);
+    console.log(`📥 NEW REQUEST [/api/scrapePriorDeed]: ${address}`);
+    console.log(`${'='.repeat(80)}\n`);
+
+    const result = await processDeedDownload(address, county, state);
+    const duration = ((Date.now() - startTime) / 1000).toFixed(2);
+
+    console.log(`\n${'='.repeat(80)}`);
+    console.log(`✅ REQUEST COMPLETED in ${duration}s`);
+    console.log(`${'='.repeat(80)}\n`);
+
+    // If successful and PDF was downloaded, include base64 for immediate download
+    if (result.success && result.download?.success) {
+      const pdfPath = path.join(
+        result.download.downloadPath,
+        result.download.filename
+      );
+
+      // Check if file exists and convert to base64
+      if (fs.existsSync(pdfPath)) {
+        const pdfBuffer = fs.readFileSync(pdfPath);
+        const pdfBase64 = pdfBuffer.toString('base64');
+
+        console.log(`📦 Including PDF as base64 (${pdfBuffer.length} bytes)`);
+
+        // Add base64 to response
+        result.download.pdfBase64 = pdfBase64;
+        result.download.contentType = 'application/pdf';
+      } else {
+        console.log(`⚠️  PDF file not found: ${pdfPath}`);
+      }
+    }
+
+    // Return result in original format
+    return res.json({
+      ...result,
+      duration: `${duration}s`,
+      timestamp: new Date().toISOString()
+    });
+
+  } catch (error) {
+    const duration = ((Date.now() - startTime) / 1000).toFixed(2);
+    console.error(`\n❌ ERROR after ${duration}s:`, error.message);
+
+    return res.status(500).json({
+      success: false,
+      error: error.message,
+      duration: `${duration}s`,
+      timestamp: new Date().toISOString()
+    });
+  }
+});
+
 // Legacy endpoint - /api/getPriorDeed
 app.post('/api/getPriorDeed', async (req, res) => {
   const startTime = Date.now();
@@ -375,6 +454,7 @@ app.use((req, res) => {
       'GET /api/health',
       'GET /api/counties',
       'POST /api/scrape',
+      'POST /api/scrapePriorDeed',
       'POST /api/getPriorDeed',
       'POST /api/deed/download'
     ]
