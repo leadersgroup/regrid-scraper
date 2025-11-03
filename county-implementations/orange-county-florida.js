@@ -785,8 +785,15 @@ class OrangeCountyFloridaScraper extends DeedScraper {
       if (requiresPopupHandling) {
         // Enable download handling first
         const path = require('path');
+        const fs = require('fs');
         const relativePath = process.env.DEED_DOWNLOAD_PATH || './downloads';
         const downloadPath = path.resolve(relativePath);
+
+        // Ensure download directory exists (create if necessary)
+        if (!fs.existsSync(downloadPath)) {
+          fs.mkdirSync(downloadPath, { recursive: true });
+          this.log(`📁 Created download directory: ${downloadPath}`);
+        }
 
         const client = await this.page.target().createCDPSession();
         await client.send('Page.setDownloadBehavior', {
