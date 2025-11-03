@@ -22,6 +22,7 @@ const path = require('path');
 
 // Import county implementations
 const OrangeCountyFloridaScraper = require('./county-implementations/orange-county-florida');
+const HillsboroughCountyFloridaScraper = require('./county-implementations/hillsborough-county-florida');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -70,6 +71,17 @@ app.get('/api/counties', (req, res) => {
           'Transaction history extraction'
         ],
         cost: '$0.001 per deed (with 2Captcha API)'
+      },
+      {
+        name: 'Hillsborough County',
+        state: 'FL',
+        stateCode: 'Florida',
+        features: [
+          'Full PDF download',
+          'Transaction history extraction',
+          'CFN and Book/Page support'
+        ],
+        cost: 'Free (no CAPTCHA)'
       }
     ]
   });
@@ -84,6 +96,12 @@ async function processDeedDownload(address, county, state, options = {}) {
 
   if (detectedCounty === 'Orange' && detectedState === 'FL') {
     scraper = new OrangeCountyFloridaScraper({
+      headless: options?.headless !== false, // Default to headless
+      timeout: options?.timeout || 120000,
+      verbose: options?.verbose || false
+    });
+  } else if (detectedCounty === 'Hillsborough' && detectedState === 'FL') {
+    scraper = new HillsboroughCountyFloridaScraper({
       headless: options?.headless !== false, // Default to headless
       timeout: options?.timeout || 120000,
       verbose: options?.verbose || false
