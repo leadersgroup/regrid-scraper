@@ -89,6 +89,41 @@ List supported counties and their features.
 }
 ```
 
+### POST /api/scrape
+Get parcel IDs and owner names from Regrid (no deed download).
+
+**Request:**
+```json
+{
+  "addresses": [
+    "123 Main St, Orlando, FL 32801",
+    "456 Oak Ave, Miami, FL 33101"
+  ]
+}
+```
+
+**Response:**
+```json
+{
+  "success": true,
+  "data": [
+    {
+      "originalAddress": "123 Main St, Orlando, FL 32801",
+      "parcelId": "12345678901234",
+      "ownerName": "SMITH JOHN",
+      "address": "123 Main St",
+      "city": "Orlando",
+      "state": "FL"
+    }
+  ],
+  "summary": {
+    "total": 2,
+    "successful": 2,
+    "failed": 0
+  }
+}
+```
+
 ### POST /api/getPriorDeed
 Legacy endpoint for downloading deed PDFs (returns raw scraper output).
 
