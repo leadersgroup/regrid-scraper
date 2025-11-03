@@ -827,21 +827,59 @@ class OrangeCountyFloridaScraper extends DeedScraper {
             // Check if still on disclaimer page (CAPTCHA not solved)
             const stillOnDisclaimer = this.page.url().includes('/user/disclaimer');
             if (stillOnDisclaimer) {
-              this.log(`⚠️ Still on disclaimer page - reCAPTCHA detected`);
+              this.log(`⚠️ Still on disclaimer page - reCAPTCHA may be present`);
 
-              // Check for reCAPTCHA
-              const captchaInfo = await this.page.evaluate(() => {
-                const iframes = Array.from(document.querySelectorAll('iframe'));
-                const recaptchaIframes = iframes.filter(iframe => iframe.src && iframe.src.includes('recaptcha'));
-                return {
-                  hasCaptcha: recaptchaIframes.length > 0,
-                  totalIframes: iframes.length,
-                  recaptchaCount: recaptchaIframes.length,
-                  iframeSrcs: iframes.map(iframe => iframe.src).slice(0, 5)
-                };
-              });
+              // Wait for reCAPTCHA iframe to load (may take a few seconds)
+              this.log(`⏳ Waiting for reCAPTCHA iframe to load...`);
+              await this.randomWait(3000, 5000);
 
-              this.log(`🔍 CAPTCHA check: ${JSON.stringify(captchaInfo)}`);
+              // Check for reCAPTCHA with retries (iframe may load asynchronously)
+              let captchaInfo = null;
+              let retries = 3;
+
+              for (let i = 0; i < retries; i++) {
+                captchaInfo = await this.page.evaluate(() => {
+                  const iframes = Array.from(document.querySelectorAll('iframe'));
+                  const recaptchaIframes = iframes.filter(iframe => iframe.src && iframe.src.includes('recaptcha'));
+
+                  // Also check page content for CAPTCHA indicators
+                  const pageText = document.body.innerText || '';
+                  const hasRecaptchaText = pageText.toLowerCase().includes('recaptcha') || pageText.toLowerCase().includes('protected by recaptcha');
+
+                  // Check if we've actually progressed past disclaimer
+                  const url = window.location.href;
+                  const onDisclaimer = url.includes('/user/disclaimer');
+
+                  return {
+                    hasCaptcha: recaptchaIframes.length > 0,
+                    totalIframes: iframes.length,
+                    recaptchaCount: recaptchaIframes.length,
+                    iframeSrcs: iframes.map(iframe => iframe.src).slice(0, 5),
+                    hasRecaptchaText,
+                    onDisclaimer,
+                    currentUrl: url,
+                    pageContentPreview: pageText.substring(0, 300)
+                  };
+                });
+
+                this.log(`🔍 CAPTCHA check (attempt ${i + 1}/${retries}): iframes=${captchaInfo.totalIframes}, recaptcha=${captchaInfo.recaptchaCount}, onDisclaimer=${captchaInfo.onDisclaimer}`);
+
+                if (captchaInfo.hasCaptcha) {
+                  break;
+                }
+
+                // If we're not on disclaimer anymore, CAPTCHA was bypassed/auto-solved
+                if (!captchaInfo.onDisclaimer) {
+                  this.log(`ℹ️ No longer on disclaimer page - CAPTCHA was bypassed or auto-solved`);
+                  break;
+                }
+
+                // Wait before retry
+                if (i < retries - 1) {
+                  this.log(`⏳ No CAPTCHA iframe yet, waiting 2 seconds before retry...`);
+                  await this.randomWait(2000, 3000);
+                }
+              }
 
               if (captchaInfo.hasCaptcha) {
                 this.log(`⚠️ reCAPTCHA challenge detected`);
@@ -913,6 +951,25 @@ class OrangeCountyFloridaScraper extends DeedScraper {
                     manualInstructions: `Visit ${continueLink.href}, complete the CAPTCHA, and download the PDF manually.`,
                     error: 'CAPTCHA_REQUIRED_NO_API_KEY'
                   };
+                }
+              } else {
+                // No CAPTCHA iframe detected after retries
+                if (!captchaInfo.onDisclaimer) {
+                  this.log(`✅ Already moved past disclaimer page to: ${captchaInfo.currentUrl}`);
+                } else {
+                  this.log(`ℹ️ No reCAPTCHA iframe detected after ${retries} attempts`);
+                  this.log(`   Page preview: ${captchaInfo.pageContentPreview}`);
+
+                  // Sometimes the page auto-progresses without CAPTCHA
+                  // Wait a bit more and check again
+                  await this.randomWait(3000, 5000);
+
+                  const finalCheck = await this.page.url();
+                  if (!finalCheck.includes('/user/disclaimer')) {
+                    this.log(`✅ Page auto-progressed past disclaimer to: ${finalCheck}`);
+                  } else {
+                    this.log(`⚠️ Still on disclaimer without detectable CAPTCHA - may need manual intervention`);
+                  }
                 }
               }
             }
