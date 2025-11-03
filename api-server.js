@@ -146,6 +146,28 @@ app.post('/api/getPriorDeed', async (req, res) => {
     console.log(`✅ REQUEST COMPLETED in ${duration}s`);
     console.log(`${'='.repeat(80)}\n`);
 
+    // If successful and PDF was downloaded, include base64 for immediate download
+    if (result.success && result.download?.success) {
+      const pdfPath = path.join(
+        result.download.downloadPath,
+        result.download.filename
+      );
+
+      // Check if file exists and convert to base64
+      if (fs.existsSync(pdfPath)) {
+        const pdfBuffer = fs.readFileSync(pdfPath);
+        const pdfBase64 = pdfBuffer.toString('base64');
+
+        console.log(`📦 Including PDF as base64 (${pdfBuffer.length} bytes)`);
+
+        // Add base64 to response
+        result.download.pdfBase64 = pdfBase64;
+        result.download.contentType = 'application/pdf';
+      } else {
+        console.log(`⚠️  PDF file not found: ${pdfPath}`);
+      }
+    }
+
     // Return result in original format
     return res.json({
       ...result,
