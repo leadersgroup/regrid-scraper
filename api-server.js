@@ -38,7 +38,12 @@ app.use((req, res, next) => {
   next();
 });
 
-// Health check endpoint
+// Railway health check endpoint (required by railway.json)
+app.get('/health', (req, res) => {
+  res.status(200).send('OK');
+});
+
+// API health check endpoint
 app.get('/api/health', (req, res) => {
   const has2CaptchaKey = !!process.env.TWOCAPTCHA_TOKEN;
 
