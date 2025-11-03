@@ -830,12 +830,20 @@ class OrangeCountyFloridaScraper extends DeedScraper {
               this.log(`⚠️ Still on disclaimer page - reCAPTCHA detected`);
 
               // Check for reCAPTCHA
-              const hasCaptcha = await this.page.evaluate(() => {
+              const captchaInfo = await this.page.evaluate(() => {
                 const iframes = Array.from(document.querySelectorAll('iframe'));
-                return iframes.some(iframe => iframe.src && iframe.src.includes('recaptcha'));
+                const recaptchaIframes = iframes.filter(iframe => iframe.src && iframe.src.includes('recaptcha'));
+                return {
+                  hasCaptcha: recaptchaIframes.length > 0,
+                  totalIframes: iframes.length,
+                  recaptchaCount: recaptchaIframes.length,
+                  iframeSrcs: iframes.map(iframe => iframe.src).slice(0, 5)
+                };
               });
 
-              if (hasCaptcha) {
+              this.log(`🔍 CAPTCHA check: ${JSON.stringify(captchaInfo)}`);
+
+              if (captchaInfo.hasCaptcha) {
                 this.log(`⚠️ reCAPTCHA challenge detected`);
 
                 // Check if 2Captcha API key is configured
@@ -843,8 +851,8 @@ class OrangeCountyFloridaScraper extends DeedScraper {
                   this.log(`🔧 Attempting to solve reCAPTCHA using 2Captcha API...`);
 
                   try {
-                    // Use puppeteer-extra-plugin-recaptcha to solve the CAPTCHA
-                    await this.page.solveRecaptchas();
+                    // Use manual reCAPTCHA solving (vanilla Puppeteer)
+                    await this.solveRecaptchas();
                     this.log(`✅ reCAPTCHA solved successfully!`);
 
                     // Wait for page to process the CAPTCHA solution

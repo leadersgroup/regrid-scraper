@@ -10,26 +10,8 @@
  * 4. Fallback to owner name search if needed
  */
 
-const puppeteer = require('puppeteer-extra');
-const StealthPlugin = require('puppeteer-extra-plugin-stealth');
-const RecaptchaPlugin = require('puppeteer-extra-plugin-recaptcha');
-
-// Use stealth plugin to avoid detection
-puppeteer.use(StealthPlugin());
-
-// Use reCAPTCHA plugin for automatic solving (requires 2Captcha API key)
-// Set TWOCAPTCHA_TOKEN environment variable with your API key
-if (process.env.TWOCAPTCHA_TOKEN) {
-  puppeteer.use(
-    RecaptchaPlugin({
-      provider: {
-        id: '2captcha',
-        token: process.env.TWOCAPTCHA_TOKEN
-      },
-      visualFeedback: true // Display feedback when solving CAPTCHAs
-    })
-  );
-}
+const puppeteer = require('puppeteer');
+const axios = require('axios');
 
 class DeedScraper {
   constructor(options = {}) {
@@ -44,50 +26,36 @@ class DeedScraper {
    * Initialize browser and setup anti-detection measures
    */
   async initialize() {
-    this.log('🚀 Initializing browser...');
+    this.log('🚀 Initializing browser (vanilla Puppeteer)...');
 
     const isRailway = process.env.RAILWAY_ENVIRONMENT_NAME || process.env.RAILWAY_PROJECT_NAME;
+    const isLinux = process.platform === 'linux';
+
+    const executablePath = isRailway || isLinux
+      ? (process.env.PUPPETEER_EXECUTABLE_PATH || '/usr/bin/google-chrome-stable')
+      : undefined;
 
     this.browser = await puppeteer.launch({
       headless: this.headless,
-      executablePath: isRailway ? '/usr/bin/google-chrome-stable' : undefined,
+      ...(executablePath && { executablePath }),
       args: [
         '--no-sandbox',
         '--disable-setuid-sandbox',
         '--disable-dev-shm-usage',
-        '--disable-accelerated-2d-canvas',
-        '--no-first-run',
-        '--no-zygote',
-        '--single-process',
-        '--disable-gpu',
-        '--disable-background-timer-throttling',
-        '--disable-backgrounding-occluded-windows',
-        '--disable-renderer-backgrounding',
-        '--disable-extensions',
-        '--disable-default-apps',
         '--disable-blink-features=AutomationControlled',
-        '--disable-web-security'
+        '--window-size=1366,768'
       ]
     });
 
     this.page = await this.browser.newPage();
 
-    // Enhanced anti-detection measures
+    // Minimal anti-detection - just hide webdriver
     await this.page.evaluateOnNewDocument(() => {
       Object.defineProperty(navigator, 'webdriver', {
         get: () => undefined,
       });
 
-      window.chrome = {
-        runtime: {},
-      };
-
-      const originalQuery = window.navigator.permissions.query;
-      window.navigator.permissions.query = (parameters) => (
-        parameters.name === 'notifications' ?
-          Promise.resolve({ state: 'denied' }) :
-          originalQuery(parameters)
-      );
+      delete navigator.__proto__.webdriver;
     });
 
     // Set realistic user agent
@@ -132,6 +100,140 @@ class DeedScraper {
   log(message) {
     if (this.verbose) {
       console.log(message);
+    }
+  }
+
+  /**
+   * Manually solve reCAPTCHA using 2Captcha API
+   */
+  async solveCaptchaManually(siteKey, pageUrl) {
+    const twoCaptchaToken = process.env.TWOCAPTCHA_TOKEN;
+
+    if (!twoCaptchaToken) {
+      throw new Error('2Captcha token not configured');
+    }
+
+    this.log('🔧 Attempting to solve reCAPTCHA using 2Captcha API...');
+
+    try {
+      // Step 1: Submit CAPTCHA to 2Captcha
+      const submitResponse = await axios.get('http://2captcha.com/in.php', {
+        params: {
+          key: twoCaptchaToken,
+          method: 'userrecaptcha',
+          googlekey: siteKey,
+          pageurl: pageUrl,
+          json: 1
+        }
+      });
+
+      if (submitResponse.data.status !== 1) {
+        throw new Error(`2Captcha submission failed: ${submitResponse.data.request}`);
+      }
+
+      const requestId = submitResponse.data.request;
+      this.log(`📝 CAPTCHA submitted, request ID: ${requestId}`);
+
+      // Step 2: Poll for result
+      let attempts = 0;
+      const maxAttempts = 60; // 3 minutes max
+
+      while (attempts < maxAttempts) {
+        await new Promise(resolve => setTimeout(resolve, 3000)); // Wait 3 seconds
+
+        const resultResponse = await axios.get('http://2captcha.com/res.php', {
+          params: {
+            key: twoCaptchaToken,
+            action: 'get',
+            id: requestId,
+            json: 1
+          }
+        });
+
+        if (resultResponse.data.status === 1) {
+          this.log('✅ reCAPTCHA solved successfully!');
+          return resultResponse.data.request; // This is the g-recaptcha-response token
+        }
+
+        if (resultResponse.data.request !== 'CAPCHA_NOT_READY') {
+          throw new Error(`2Captcha error: ${resultResponse.data.request}`);
+        }
+
+        attempts++;
+      }
+
+      throw new Error('2Captcha timeout waiting for solution');
+
+    } catch (error) {
+      this.log(`❌ CAPTCHA solving failed: ${error.message}`);
+      throw error;
+    }
+  }
+
+  /**
+   * Handle reCAPTCHA if present on page (replacement for solveRecaptchas())
+   */
+  async solveRecaptchas() {
+    try {
+      // Check if reCAPTCHA is present
+      const captchaFrame = this.page.frames().find(frame =>
+        frame.url().includes('google.com/recaptcha/api2/anchor') ||
+        frame.url().includes('google.com/recaptcha/enterprise/anchor')
+      );
+
+      if (!captchaFrame) {
+        this.log('No reCAPTCHA detected on page');
+        return { captchas: [], solutions: [] }; // No CAPTCHA
+      }
+
+      this.log('⚠️ reCAPTCHA challenge detected');
+
+      // Get site key and page URL
+      const siteKey = await this.page.evaluate(() => {
+        const iframe = document.querySelector('iframe[src*="google.com/recaptcha"]');
+        if (iframe) {
+          const src = iframe.getAttribute('src');
+          const match = src.match(/[?&]k=([^&]+)/);
+          return match ? match[1] : null;
+        }
+        return null;
+      });
+
+      if (!siteKey) {
+        throw new Error('Could not find reCAPTCHA site key');
+      }
+
+      const pageUrl = this.page.url();
+
+      // Solve CAPTCHA
+      const captchaToken = await this.solveCaptchaManually(siteKey, pageUrl);
+
+      // Inject solution
+      await this.page.evaluate((token) => {
+        const responseElement = document.getElementById('g-recaptcha-response');
+        if (responseElement) {
+          responseElement.innerHTML = token;
+        }
+
+        // Trigger callback if available
+        if (typeof ___grecaptcha_cfg !== 'undefined') {
+          const clientIds = Object.keys(___grecaptcha_cfg.clients || {});
+          if (clientIds.length > 0) {
+            const recaptchaId = clientIds[0];
+            const callback = ___grecaptcha_cfg.clients[recaptchaId]?.callback;
+            if (callback) {
+              callback(token);
+            }
+          }
+        }
+      }, captchaToken);
+
+      this.log('📝 Clicking "I Accept" again to submit CAPTCHA solution...');
+      return { captchas: [{ isSolved: true }], solutions: [captchaToken] };
+
+    } catch (error) {
+      this.log(`⚠️ Error handling CAPTCHA: ${error.message}`);
+      throw error;
     }
   }
 
