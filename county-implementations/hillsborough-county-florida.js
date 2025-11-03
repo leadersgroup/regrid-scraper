@@ -714,19 +714,36 @@ class HillsboroughCountyFloridaScraper extends DeedScraper {
         throw new Error('Downloaded file is not a valid PDF');
       }
 
-      // Convert to base64
-      const pdfBase64 = pdfBuffer.toString('base64');
-
-      this.log(`✅ PDF downloaded successfully (${pdfBuffer.length} bytes, ${pdfBase64.length} base64 chars)`);
+      this.log(`✅ PDF downloaded successfully (${pdfBuffer.length} bytes)`);
 
       // Close the new window
       await newPage.close();
 
+      // Save PDF to disk (same format as Orange County)
+      const path = require('path');
+      const fs = require('fs');
+      const relativePath = process.env.DEED_DOWNLOAD_PATH || './downloads';
+      const downloadPath = path.resolve(relativePath);
+
+      // Ensure download directory exists
+      if (!fs.existsSync(downloadPath)) {
+        fs.mkdirSync(downloadPath, { recursive: true });
+        this.log(`📁 Created download directory: ${downloadPath}`);
+      }
+
+      const filename = `hillsborough_deed_${transaction.documentId || `${transaction.bookNumber}_${transaction.pageNumber}`}.pdf`;
+      const filepath = path.join(downloadPath, filename);
+
+      fs.writeFileSync(filepath, pdfBuffer);
+      this.log(`💾 Saved PDF to: ${filepath}`);
+
       return {
         success: true,
-        pdfBase64,
-        fileSize: Buffer.from(pdfBase64, 'base64').length,
-        filename: `hillsborough_deed_${transaction.documentId || `${transaction.bookNumber}_${transaction.pageNumber}`}.pdf`
+        filename,
+        downloadPath,
+        documentId: transaction.documentId,
+        timestamp: new Date().toISOString(),
+        fileSize: pdfBuffer.length
       };
 
     } catch (error) {
