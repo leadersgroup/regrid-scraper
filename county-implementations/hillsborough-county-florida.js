@@ -633,7 +633,7 @@ class HillsboroughCountyFloridaScraper extends DeedScraper {
 
   /**
    * Download deed PDF from Hillsborough County Clerk
-   * Navigate to clerk page, click view button, wait for iframe to load, then extract PDF URL
+   * Navigate to clerk page, click view button, wait for NEW WINDOW to open with PDF, then download
    */
   async downloadDeed(transaction) {
     this.log('📄 Downloading deed from Hillsborough County Clerk...');
@@ -653,104 +653,74 @@ class HillsboroughCountyFloridaScraper extends DeedScraper {
 
       await this.randomWait(5000, 7000);
 
-      // The clerk page shows search results immediately
-      // We need to click on the VIEW button in the first row with the CFN
-      this.log('🔍 Looking for VIEW button in document result row...');
-
-      // Use Puppeteer's native click on the button element
-      try {
-        // Look for all buttons in the page
-        const buttons = await this.page.$$('button');
-
-        this.log(`📊 Found ${buttons.length} buttons on page`);
-
-        // Click the first button (which should be the view button for the first result)
-        if (buttons.length > 0) {
-          await buttons[0].click();
-          this.log(`✅ Clicked first VIEW button via Puppeteer`);
-        } else {
-          throw new Error('No buttons found on page');
-        }
-      } catch (buttonError) {
-        this.log(`⚠️ Could not click button: ${buttonError.message}`);
-      }
-
-      // Wait for iframe to load with PDF
-      this.log('⏳ Waiting for PDF iframe to load (may take 10-15 seconds)...');
-
-      // Give it time to initialize
-      await this.randomWait(5000, 7000);
-
-      // Wait for iframe to have a valid src (not about:blank)
-      try {
-        await this.page.waitForFunction(() => {
-          const iframe = document.querySelector('iframe.docview-frame') ||
-                        document.querySelector('iframe[src*="pdf"]') ||
-                        document.querySelector('iframe[src*="document"]') ||
-                        document.querySelector('iframe');
-          return iframe && iframe.src && iframe.src !== 'about:blank' && iframe.src.length > 20;
-        }, { timeout: 30000 }); // 30 second timeout
-
-        this.log('✅ PDF iframe loaded');
-      } catch (waitError) {
-        this.log('⚠️ Timeout waiting for iframe (waited 30s), attempting to extract URL anyway...');
-      }
-
-      // Additional wait for iframe content to fully load
-      await this.randomWait(3000, 5000);
-
-      // Extract the PDF URL from the iframe
-      const pdfUrl = await this.page.evaluate(() => {
-        // Try multiple iframe selectors
-        const iframe = document.querySelector('iframe.docview-frame') ||
-                      document.querySelector('iframe[src*="pdf"]') ||
-                      document.querySelector('iframe[src*="document"]') ||
-                      document.querySelector('iframe');
-
-        if (iframe && iframe.src && iframe.src !== 'about:blank') {
-          return iframe.src;
-        }
-
-        // Alternative: look for direct links to PDF
-        const pdfLinks = Array.from(document.querySelectorAll('a[href*="pdf"], a[href*="GetView"], a[href*="document"]'));
-        if (pdfLinks.length > 0) {
-          return pdfLinks[0].href;
-        }
-
-        return null;
+      // Set up listener for new page/popup BEFORE clicking the button
+      const newPagePromise = new Promise(resolve => {
+        this.browser.once('targetcreated', async target => {
+          if (target.type() === 'page') {
+            const newPage = await target.page();
+            resolve(newPage);
+          }
+        });
       });
 
-      if (!pdfUrl) {
-        throw new Error('Could not find PDF URL in iframe or page links');
-      }
+      // The clerk page shows search results with "Open in New Window" buttons
+      // Click the first button using page.evaluate to trigger the popup
+      this.log('🔍 Clicking VIEW button to open PDF in new window...');
 
-      this.log(`📥 Found PDF URL: ${pdfUrl}`);
+      await this.page.evaluate(() => {
+        const buttons = Array.from(document.querySelectorAll('button'));
+        if (buttons.length > 0) {
+          buttons[0].click();
+        }
+      });
 
-      // Download the PDF from the extracted URL
-      this.log('🌐 Downloading PDF...');
+      this.log('✅ Button clicked, waiting for new window...');
 
-      const pdfBase64 = await this.page.evaluate(async (url) => {
+      // Wait for new window to open (with timeout)
+      const newPage = await Promise.race([
+        newPagePromise,
+        new Promise((_, reject) =>
+          setTimeout(() => reject(new Error('Timeout waiting for popup window')), 30000)
+        )
+      ]);
+
+      this.log('✅ New window opened with PDF viewer');
+
+      // Wait for the PDF to load in the new window
+      await this.randomWait(3000, 5000);
+
+      // Get the PDF URL from the new window
+      const pdfUrl = newPage.url();
+      this.log(`📍 PDF URL: ${pdfUrl}`);
+
+      // Download the PDF using fetch in the new window's context
+      this.log('📥 Downloading PDF...');
+
+      const pdfArrayBuffer = await newPage.evaluate(async (url) => {
         const response = await fetch(url);
-
         if (!response.ok) {
           throw new Error(`HTTP ${response.status}: ${response.statusText}`);
         }
-
-        const blob = await response.blob();
-
-        // Verify it's a PDF
-        if (blob.size === 0) {
-          throw new Error('Downloaded file is empty');
-        }
-
-        return new Promise((resolve) => {
-          const reader = new FileReader();
-          reader.onloadend = () => resolve(reader.result.split(',')[1]);
-          reader.readAsDataURL(blob);
-        });
+        const arrayBuffer = await response.arrayBuffer();
+        return Array.from(new Uint8Array(arrayBuffer));
       }, pdfUrl);
 
-      this.log(`✅ PDF downloaded successfully`);
+      // Convert array to Buffer
+      const pdfBuffer = Buffer.from(pdfArrayBuffer);
+
+      // Verify it's a PDF
+      const isPDF = pdfBuffer.slice(0, 4).toString() === '%PDF';
+      if (!isPDF) {
+        throw new Error('Downloaded file is not a valid PDF');
+      }
+
+      // Convert to base64
+      const pdfBase64 = pdfBuffer.toString('base64');
+
+      this.log(`✅ PDF downloaded successfully (${pdfBuffer.length} bytes, ${pdfBase64.length} base64 chars)`);
+
+      // Close the new window
+      await newPage.close();
 
       return {
         success: true,
