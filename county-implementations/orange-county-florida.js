@@ -1284,7 +1284,6 @@ class OrangeCountyFloridaScraper extends DeedScraper {
                           documentId,
                           timestamp: new Date().toISOString(),
                           fileSize: pdfBuffer.length,
-                          pdfUrl: pdfUrl,
                           pdfBase64: pdfBase64
                         });
                       });
