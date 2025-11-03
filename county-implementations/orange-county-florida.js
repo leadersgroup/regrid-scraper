@@ -780,9 +780,64 @@ class OrangeCountyFloridaScraper extends DeedScraper {
 
         this.log(`✅ Found deed URL: ${continueLink.href}`);
 
+        // STRATEGY: Switch to puppeteer-extra browser for CAPTCHA handling
+        // Vanilla Puppeteer works for Property Appraiser (Step 2) but needs
+        // puppeteer-extra plugins for Clerk CAPTCHA solving (Step 3)
+        this.log(`🔄 Switching to puppeteer-extra browser for CAPTCHA handling...`);
+
+        const deedUrl = continueLink.href;
+
+        // Close current (vanilla) browser
+        await this.browser.close();
+        this.log(`🔒 Closed vanilla Puppeteer browser`);
+
+        // Initialize new browser with puppeteer-extra for CAPTCHA
+        const puppeteerExtra = require('puppeteer-extra');
+        const StealthPlugin = require('puppeteer-extra-plugin-stealth');
+        const RecaptchaPlugin = require('puppeteer-extra-plugin-recaptcha');
+
+        puppeteerExtra.use(StealthPlugin());
+
+        if (process.env.TWOCAPTCHA_TOKEN) {
+          puppeteerExtra.use(
+            RecaptchaPlugin({
+              provider: {
+                id: '2captcha',
+                token: process.env.TWOCAPTCHA_TOKEN
+              },
+              visualFeedback: true
+            })
+          );
+        }
+
+        const isRailway = process.env.RAILWAY_ENVIRONMENT_NAME || process.env.RAILWAY_PROJECT_NAME;
+        const isLinux = process.platform === 'linux';
+
+        const executablePath = isRailway || isLinux
+          ? (process.env.PUPPETEER_EXECUTABLE_PATH || '/usr/bin/google-chrome-stable')
+          : undefined;
+
+        this.browser = await puppeteerExtra.launch({
+          headless: this.headless,
+          ...(executablePath && { executablePath }),
+          args: [
+            '--no-sandbox',
+            '--disable-setuid-sandbox',
+            '--disable-dev-shm-usage',
+            '--disable-blink-features=AutomationControlled',
+            '--window-size=1366,768'
+          ]
+        });
+
+        this.page = await this.browser.newPage();
+        await this.page.setViewport({ width: 1366, height: 768 });
+        await this.page.setUserAgent('Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
+
+        this.log(`✅ Initialized puppeteer-extra browser with CAPTCHA plugin`);
+
         // Navigate directly to the deed URL
         this.log(`📄 Navigating to deed document page...`);
-        await this.page.goto(continueLink.href, { waitUntil: 'networkidle2', timeout: 60000 });
+        await this.page.goto(deedUrl, { waitUntil: 'networkidle2', timeout: 60000 });
 
         // Wait for page to load
         await this.randomWait(3000, 5000);
@@ -898,8 +953,8 @@ class OrangeCountyFloridaScraper extends DeedScraper {
                   this.log(`🔧 Attempting to solve reCAPTCHA using 2Captcha API...`);
 
                   try {
-                    // Use manual reCAPTCHA solving (vanilla Puppeteer)
-                    await this.solveRecaptchas();
+                    // Use puppeteer-extra-plugin-recaptcha (now using puppeteer-extra browser)
+                    await this.page.solveRecaptchas();
                     this.log(`✅ reCAPTCHA solved successfully!`);
 
                     // Wait for page to process the CAPTCHA solution
