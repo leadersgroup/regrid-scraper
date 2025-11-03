@@ -729,12 +729,21 @@ class DeedScraper {
    */
   getCityToCountyMapping() {
     return {
-      // Florida
+      // Florida - Orange County
       'Windermere': { county: 'Orange', state: 'FL' },
+      'Winter Garden': { county: 'Orange', state: 'FL' },
       'Orlando': { county: 'Orange', state: 'FL' },
       'Winter Park': { county: 'Orange', state: 'FL' },
       'Apopka': { county: 'Orange', state: 'FL' },
       'Ocoee': { county: 'Orange', state: 'FL' },
+      'Maitland': { county: 'Orange', state: 'FL' },
+      'Altamonte Springs': { county: 'Orange', state: 'FL' },
+      'Lake Mary': { county: 'Orange', state: 'FL' },
+      'Casselberry': { county: 'Orange', state: 'FL' },
+      'Pine Hills': { county: 'Orange', state: 'FL' },
+      'Oviedo': { county: 'Orange', state: 'FL' },
+
+      // Florida - Other Counties
       'Miami': { county: 'Miami-Dade', state: 'FL' },
       'Fort Lauderdale': { county: 'Broward', state: 'FL' },
 
