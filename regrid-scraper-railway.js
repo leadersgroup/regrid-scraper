@@ -11,10 +11,17 @@ class RegridScraper {
 
     async initialize() {
         console.log('Initializing browser on Railway...');
-        
+
+        // Detect if we're on Railway/Linux or local development
+        const isLinux = process.platform === 'linux';
+        const executablePath = isLinux
+            ? (process.env.PUPPETEER_EXECUTABLE_PATH || '/usr/bin/google-chrome-stable')
+            : undefined; // Let puppeteer find Chrome on Mac/Windows
+
         // Simple browser launch - Railway handles all dependencies
         const launchOptions = {
             headless: true,
+            ...(executablePath && { executablePath }),
             args: [
                 '--no-sandbox',
                 '--disable-setuid-sandbox',
