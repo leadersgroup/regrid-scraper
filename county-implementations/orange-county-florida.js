@@ -94,19 +94,23 @@ class OrangeCountyFloridaScraper extends DeedScraper {
       await this.randomWait(3000, 5000);
 
       // Extract just the street address (remove city, state, zip)
-      // Example: "12729 Hawkstone Drive, Windermere, FL 34786" -> "12729 Hawkstone Drive"
+      // Example: "12729 Hawkstone Drive, Windermere, FL 34786" -> "12729 Hawkstone"
       const fullAddress = this.currentAddress || '';
       let streetAddress = fullAddress.split(',')[0].trim();
 
-      // Normalize street suffix abbreviations
-      const originalAddress = streetAddress;
-      streetAddress = this.normalizeStreetSuffix(streetAddress);
-
-      if (originalAddress !== streetAddress) {
-        this.log(`🔄 Normalized address: "${originalAddress}" -> "${streetAddress}"`);
+      // STRATEGY: Search with just street number + street name (no suffix type)
+      // This avoids issues with abbreviated suffixes and makes search more reliable
+      // Example: "13109 Tollcross Way" -> "13109 Tollcross"
+      const addressParts = streetAddress.split(/\s+/);
+      if (addressParts.length >= 3) {
+        // Has at least: number + name + type
+        // Remove the last word (street type)
+        const searchAddress = addressParts.slice(0, -1).join(' ');
+        this.log(`🔍 Simplified search: "${streetAddress}" -> "${searchAddress}" (removed street type)`);
+        streetAddress = searchAddress;
+      } else {
+        this.log(`🏠 Using full address for search: ${streetAddress}`);
       }
-
-      this.log(`🏠 Using street address for search: ${streetAddress}`);
 
       // Look for property address input field
       const addressInputSelectors = [
