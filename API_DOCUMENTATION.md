@@ -86,9 +86,66 @@ curl http://localhost:3000/api/counties
 
 ---
 
-### 3. Download Deed
+### 3. Get Prior Deed (Legacy)
 
-Download a prior deed PDF for a given address.
+Download a prior deed PDF for a given address. This is the original endpoint format.
+
+**Endpoint:** `POST /api/getPriorDeed`
+
+**Request Body:**
+
+```json
+{
+  "address": "6431 Swanson St, Windermere, FL 34786",
+  "county": "Orange",
+  "state": "FL"
+}
+```
+
+**Parameters:**
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `address` | string | **Yes** | Full street address including city, state, and ZIP |
+| `county` | string | No | County name (default: "Orange") |
+| `state` | string | No | State code (default: "FL") |
+
+**Success Response (200 OK):**
+
+Returns the full result from the scraper including all steps, transactions, and download information.
+
+```json
+{
+  "success": true,
+  "address": "6431 Swanson St, Windermere, FL 34786",
+  "steps": {
+    "step1": {
+      "parcelId": "282330246500160",
+      "county": "Orange",
+      "state": "FL"
+    },
+    "step2": {
+      "transactions": [...]
+    }
+  },
+  "download": {
+    "success": true,
+    "filename": "deed_20170015765_1762024782019.pdf",
+    "downloadPath": "./downloads",
+    "documentId": "20170015765",
+    "fileSize": 90551,
+    "pdfUrl": "https://selfservice.or.occompt.com/ssweb/document/servepdf/..."
+  },
+  "duration": "95.34s",
+  "timestamp": "2025-11-03T00:00:00.000Z"
+}
+```
+
+---
+
+### 4. Download Deed (Recommended)
+
+Download a prior deed PDF for a given address with enhanced response formatting.
 
 **Endpoint:** `POST /api/deed/download`
 

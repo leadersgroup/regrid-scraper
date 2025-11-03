@@ -89,8 +89,29 @@ List supported counties and their features.
 }
 ```
 
+### POST /api/getPriorDeed
+Legacy endpoint for downloading deed PDFs (returns raw scraper output).
+
+**Request:**
+```json
+{
+  "address": "6431 Swanson St, Windermere, FL 34786"
+}
+```
+
+**Response:**
+```json
+{
+  "success": true,
+  "address": "6431 Swanson St, Windermere, FL 34786",
+  "steps": {...},
+  "download": {...},
+  "duration": "95.34s"
+}
+```
+
 ### POST /api/deed/download
-Download deed PDF for a property address.
+Recommended endpoint for downloading deed PDFs (enhanced response format).
 
 **Request:**
 ```json
