@@ -7,12 +7,71 @@
  */
 
 const DeedScraper = require('../deed-scraper');
+const puppeteer = require('puppeteer-extra');
+const StealthPlugin = require('puppeteer-extra-plugin-stealth');
+
+// Use stealth plugin to avoid bot detection on Hillsborough County website
+puppeteer.use(StealthPlugin());
 
 class HillsboroughCountyFloridaScraper extends DeedScraper {
   constructor(options = {}) {
     super(options);
     this.county = 'Hillsborough';
     this.state = 'FL';
+  }
+
+  /**
+   * Override initialize to use puppeteer-extra with stealth plugin
+   * Hillsborough County has strict bot detection
+   */
+  async initialize() {
+    this.log('🚀 Initializing browser with stealth mode...');
+
+    const isRailway = process.env.RAILWAY_ENVIRONMENT_NAME || process.env.RAILWAY_PROJECT_NAME;
+    const isLinux = process.platform === 'linux';
+
+    const executablePath = isRailway || isLinux
+      ? (process.env.PUPPETEER_EXECUTABLE_PATH || '/usr/bin/google-chrome-stable')
+      : undefined;
+
+    this.browser = await puppeteer.launch({
+      headless: this.headless,
+      ...(executablePath && { executablePath }),
+      protocolTimeout: 300000, // 5 minute timeout for protocol operations
+      args: [
+        '--no-sandbox',
+        '--disable-setuid-sandbox',
+        '--disable-dev-shm-usage',
+        '--disable-blink-features=AutomationControlled',
+        '--window-size=1920,1080',
+        '--disable-web-security',
+        '--disable-features=IsolateOrigins,site-per-process'
+      ]
+    });
+
+    this.page = await this.browser.newPage();
+
+    // Set realistic user agent
+    await this.page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
+
+    // Set realistic viewport
+    await this.page.setViewport({ width: 1920, height: 1080 });
+
+    // Add realistic headers
+    await this.page.setExtraHTTPHeaders({
+      'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,image/apng,*/*;q=0.8',
+      'Accept-Language': 'en-US,en;q=0.9',
+      'Accept-Encoding': 'gzip, deflate, br',
+      'DNT': '1',
+      'Connection': 'keep-alive',
+      'Upgrade-Insecure-Requests': '1',
+      'Sec-Fetch-Dest': 'document',
+      'Sec-Fetch-Mode': 'navigate',
+      'Sec-Fetch-Site': 'none',
+      'Sec-Fetch-User': '?1'
+    });
+
+    this.log('✅ Browser initialized with stealth mode');
   }
 
   /**
@@ -49,16 +108,39 @@ class HillsboroughCountyFloridaScraper extends DeedScraper {
         originalAddress: address
       };
 
-      // STEP 2: Search Property Appraiser for transaction records
-      const step2Result = await this.searchPropertyAssessor({
+      // STEP 2: Search Property Appraiser for property
+      this.log(`📋 Step 2: Searching county property assessor for: ${this.county} County, ${this.state}`);
+      this.log(`🌐 Navigating to assessor: https://gis.hcpafl.org/propertysearch/`);
+
+      const assessorResult = await this.searchAssessorSite(null, null);
+
+      if (!assessorResult.success) {
+        result.success = false;
+        result.message = 'Could not find property on assessor website';
+        result.duration = `${((Date.now() - startTime) / 1000).toFixed(2)}s`;
+        result.steps.step2 = {
+          success: false,
+          message: 'Could not find property on assessor website',
+          originalAddress: address,
+          county: 'Hillsborough',
+          state: 'FL'
+        };
+        return result;
+      }
+
+      // Extract transaction records
+      const transactionResult = await this.extractTransactionRecords();
+
+      result.steps.step2 = {
+        success: transactionResult.success,
+        transactions: transactionResult.transactions || [],
+        assessorUrl: 'https://gis.hcpafl.org/propertysearch/',
         originalAddress: address,
         county: 'Hillsborough',
         state: 'FL'
-      });
+      };
 
-      result.steps.step2 = step2Result;
-
-      if (!step2Result.success || !step2Result.transactions || step2Result.transactions.length === 0) {
+      if (!transactionResult.success || !transactionResult.transactions || transactionResult.transactions.length === 0) {
         result.success = false;
         result.message = 'No transactions found on Property Appraiser';
         result.duration = `${((Date.now() - startTime) / 1000).toFixed(2)}s`;
@@ -66,8 +148,9 @@ class HillsboroughCountyFloridaScraper extends DeedScraper {
       }
 
       // STEP 3: Download the most recent deed
-      const mostRecentDeed = step2Result.transactions[0];
-      this.log(`📥 Attempting to download most recent deed: ${mostRecentDeed.documentId}`);
+      const mostRecentDeed = transactionResult.transactions[0];
+      const deedId = mostRecentDeed.documentId || `Book ${mostRecentDeed.bookNumber} Page ${mostRecentDeed.pageNumber}`;
+      this.log(`📥 Attempting to download most recent deed: ${deedId}`);
 
       const downloadResult = await this.downloadDeed(mostRecentDeed);
 
@@ -128,14 +211,28 @@ class HillsboroughCountyFloridaScraper extends DeedScraper {
       const fullAddress = this.currentAddress || '';
       let streetAddress = fullAddress.split(',')[0].trim();
 
+      // Further simplify: remove street suffix (RD, ROAD, ST, STREET, etc.)
+      // Just use street number + street name
+      // Example: "19620 PINE TREE RD" -> "19620 PINE TREE"
+      const addressParts = streetAddress.split(/\s+/);
+      if (addressParts.length >= 3) {
+        // Has at least: number + name + suffix
+        // Remove the last word (street suffix)
+        const simplifiedAddress = addressParts.slice(0, -1).join(' ');
+        this.log(`🔍 Simplified search: "${streetAddress}" -> "${simplifiedAddress}"`);
+        streetAddress = simplifiedAddress;
+      }
+
       this.log(`🏠 Searching for address: ${streetAddress}`);
 
       // Look for property address input field
+      // The site uses Knockout.js bindings: data-bind="value: address"
       const addressInputSelectors = [
-        'input[name*="SITE_ADDR"]',
-        'input[placeholder*="Site Address"]',
-        'input[placeholder*="Address"]',
+        'input[data-bind*="value: address"]', // Knockout.js binding for address field
+        'input[placeholder*="ARMENIA"]', // Example placeholder from the site
+        'input[autocomplete="address"]',
         'input[name*="Address"]',
+        'input[placeholder*="Address"]',
         'input[id*="address"]',
         'input[type="text"]'
       ];
@@ -160,92 +257,221 @@ class HillsboroughCountyFloridaScraper extends DeedScraper {
         };
       }
 
-      // Enter street address
-      await this.page.click(addressInput);
-      await this.randomWait(200, 400);
-
-      // Clear existing text
-      await this.page.evaluate((selector) => {
+      // Enter street address directly via evaluate (faster and no timeout)
+      await this.page.evaluate((selector, address) => {
         const input = document.querySelector(selector);
-        if (input) input.value = '';
-      }, addressInput);
+        if (input) {
+          input.value = '';
+          input.value = address;
+          // Trigger input event to notify Knockout.js and show autocomplete
+          const inputEvent = new Event('input', { bubbles: true });
+          input.dispatchEvent(inputEvent);
+        }
+      }, addressInput, streetAddress);
 
-      // Type address with human-like delays
-      for (const char of streetAddress) {
-        await this.page.keyboard.type(char);
-        await this.randomWait(50, 150);
-      }
+      await this.randomWait(2000, 3000);
 
       this.log(`✅ Entered address: ${streetAddress}`);
 
-      // Look for and click search button
-      await this.randomWait(1000, 2000);
+      // Look for autocomplete dropdown and click on the first result
+      const autocompleteClicked = await this.page.evaluate((searchAddr) => {
+        // Extract first two parts of address for matching (e.g., "19620 PINE TREE")
+        const searchParts = searchAddr.trim().split(/\s+/);
+        const firstPart = searchParts[0]; // house number
+        const secondPart = searchParts[1]; // street name start
 
-      const searchButtonSelectors = [
-        'button[type="submit"]',
-        'input[type="submit"]',
-        'button:contains("Search")',
-        'button[aria-label*="Search"]',
-        '.btn-search',
-        '#btnSearch',
-        'button.submit',
-        'input.submit'
-      ];
+        // Look for autocomplete results
+        const autocompleteItems = Array.from(document.querySelectorAll('ul li, .autocomplete-item, .dropdown-item, .ui-menu-item'));
 
-      let searchClicked = false;
-      for (const selector of searchButtonSelectors) {
-        try {
-          const button = await this.page.$(selector);
-          if (button) {
-            await button.click();
-            searchClicked = true;
-            this.log(`✅ Clicked search button`);
-            break;
+        for (const item of autocompleteItems) {
+          const text = (item.innerText || item.textContent || '').trim();
+          // Look for the address parts
+          if (firstPart && secondPart && text.includes(firstPart) && text.includes(secondPart)) {
+            item.click();
+            return { clicked: true, text: text.substring(0, 100) };
           }
-        } catch (e) {
-          // Try next
         }
+
+        // Alternative: look for any clickable element with the address
+        const allElements = Array.from(document.querySelectorAll('div, span, a'));
+        for (const el of allElements) {
+          const text = (el.innerText || el.textContent || '').trim();
+          if (firstPart && secondPart && text.includes(firstPart) && text.includes(secondPart)) {
+            // Check if it's clickable
+            if (el.onclick || el.tagName === 'A' || el.getAttribute('role') === 'button') {
+              el.click();
+              return { clicked: true, text: text.substring(0, 100) };
+            }
+          }
+        }
+
+        return { clicked: false };
+      }, streetAddress);
+
+      if (autocompleteClicked.clicked) {
+        this.log(`✅ Clicked autocomplete item: "${autocompleteClicked.text}"`);
+        // Wait longer for autocomplete selection to fully register before clicking search
+        await this.randomWait(3000, 5000);
+      } else {
+        this.log(`ℹ️  No autocomplete item found`);
+        await this.randomWait(1000, 2000);
       }
 
-      if (!searchClicked) {
-        // Try pressing Enter
+      const searchTriggered = await this.page.evaluate(() => {
+        // Look for search button
+        const searchButton = document.querySelector('button[type="submit"]') ||
+                            document.querySelector('button[aria-label*="Search"]') ||
+                            document.querySelector('.btn-search') ||
+                            document.querySelector('button.submit');
+
+        if (searchButton) {
+          // Trigger click event programmatically
+          const clickEvent = new MouseEvent('click', {
+            bubbles: true,
+            cancelable: true,
+            view: window
+          });
+          searchButton.dispatchEvent(clickEvent);
+          return true;
+        }
+        return false;
+      });
+
+      if (searchTriggered) {
+        this.log(`✅ Triggered search via DOM event`);
+      } else {
+        // Fallback: Press Enter key
         await this.page.keyboard.press('Enter');
         this.log(`⌨️  Pressed Enter to search`);
       }
 
-      // Wait for results
-      await this.randomWait(3000, 5000);
+      // Wait for Angular/React app to update - try multiple strategies
+      this.log(`⏳ Waiting for search results to load...`);
+
+      // Strategy 1: Wait for URL to change (SPAs often update hash or query params)
+      await this.randomWait(2000, 3000);
+
+      // Strategy 2: Wait for specific Angular/React elements or content to appear
+      try {
+        await this.page.waitForFunction(() => {
+          const text = document.body.innerText.toLowerCase();
+          // Look for positive indicators that results loaded
+          return text.includes('folio') ||
+                 text.includes('owner name') ||
+                 text.includes('property address') ||
+                 text.includes('parcel') ||
+                 text.includes('assessed') ||
+                 text.includes('market value') ||
+                 // Or negative indicator that search completed
+                 text.includes('no results') ||
+                 text.includes('no records found');
+        }, { timeout: 15000 }); // Wait up to 15 seconds for results
+
+        this.log(`✅ Search results loaded`);
+      } catch (waitError) {
+        this.log(`⚠️ Timeout waiting for results, checking page content anyway...`);
+      }
+
+      // Additional wait for any animations/transitions
+      await this.randomWait(2000, 3000);
 
       // Check if property was found
       const searchStatus = await this.page.evaluate(() => {
         const text = document.body.innerText.toLowerCase();
-        const pageText = text.substring(0, 500);
+        const pageText = text.substring(0, 1000); // Increased from 500 to 1000
 
         const hasNoResults = text.includes('no results') ||
                             text.includes('not found') ||
                             text.includes('no records found') ||
-                            text.includes('no properties found');
+                            text.includes('no properties found') ||
+                            text.includes('no matches');
 
         const hasPropertyInfo = text.includes('folio') ||
                                text.includes('owner') ||
                                text.includes('sales') ||
                                text.includes('property information') ||
                                text.includes('assessed value') ||
+                               text.includes('market value') ||
                                text.includes('parcel');
 
         return {
           hasNoResults,
           hasPropertyInfo,
-          pageText
+          pageText,
+          url: window.location.href
         };
       });
 
       this.log(`🔍 Search result analysis:`);
+      this.log(`   Current URL: ${searchStatus.url}`);
       this.log(`   Has "no results" message: ${searchStatus.hasNoResults}`);
       this.log(`   Has property info: ${searchStatus.hasPropertyInfo}`);
+      this.log(`   Page preview: ${searchStatus.pageText.substring(0, 200)}...`);
 
       if (!searchStatus.hasNoResults && searchStatus.hasPropertyInfo) {
         this.log(`✅ Property found via address search`);
+
+        // Click on the first result to get detailed information
+        await this.randomWait(2000, 3000);
+
+        const resultClicked = await this.page.evaluate(() => {
+          // Look for the folio number link in the results table
+          const folioLinks = Array.from(document.querySelectorAll('a, td, div')).filter(el => {
+            const text = el.innerText || el.textContent || '';
+            // Folio format: XXXXXX-XXXX (e.g., 000034-0200)
+            return /^\d{6}-\d{4}$/.test(text.trim());
+          });
+
+          if (folioLinks.length > 0) {
+            const link = folioLinks[0];
+            if (link.tagName === 'A') {
+              link.click();
+            } else {
+              // If it's not a link, try to find the closest link or clickable parent
+              const closestLink = link.closest('a');
+              if (closestLink) {
+                closestLink.click();
+              } else {
+                // Try clicking the element itself
+                link.click();
+              }
+            }
+            return true;
+          }
+
+          // Alternative: try clicking any row in the results table
+          const resultRows = Array.from(document.querySelectorAll('table tr'));
+          for (const row of resultRows) {
+            const text = row.innerText || '';
+            if (text && text.includes('PINE TREE')) {
+              row.click();
+              return true;
+            }
+          }
+
+          return false;
+        });
+
+        if (resultClicked) {
+          this.log(`✅ Clicked on property result to view details`);
+
+          // Wait for property detail page to load
+          await this.randomWait(5000, 7000);
+
+          // Wait for detail page content to load
+          await this.page.waitForFunction(() => {
+            const text = document.body.innerText.toLowerCase();
+            return text.includes('property information') ||
+                   text.includes('parcel') ||
+                   text.includes('sales') ||
+                   text.includes('deed');
+          }, { timeout: 15000 }).catch(() => {
+            this.log(`⚠️ Timeout waiting for property details`);
+          });
+        } else {
+          this.log(`⚠️ Could not click on property result`);
+        }
+
         return {
           success: true,
           message: 'Property found on assessor website'
@@ -338,91 +564,68 @@ class HillsboroughCountyFloridaScraper extends DeedScraper {
       const transactions = await this.page.evaluate(() => {
         const results = [];
 
-        // Look for various patterns that might contain document IDs
-        // Hillsborough County typically uses format: CFN (Clerk File Number) or OR (Official Records) Book/Page
+        // Hillsborough County Property Appraiser has direct links to the Clerk's website
+        // Format: https://publicaccess.hillsclerk.com/PAVDirectSearch/index.html?CQID=320&OBKey__1006_1=CFN_NUMBER
+        // Or: https://publicaccess.hillsclerk.com/PAVDirectSearch/index.html?CQID=319&OBKey__1530_1=O&OBKey__573_1=BOOK&OBKey__1049_1=PAGE
 
-        // Pattern 1: Look for tables with transaction/sales data
-        const tables = Array.from(document.querySelectorAll('table'));
+        // Look for links to the Clerk's website
+        const allLinks = Array.from(document.querySelectorAll('a[href*="publicaccess.hillsclerk.com"]'));
 
-        for (const table of tables) {
-          const headerText = table.innerText || '';
+        for (const link of allLinks) {
+          const href = link.href || '';
+          const text = (link.innerText || '').trim();
 
-          // Check if this table contains sale/transfer information
-          if (headerText.toLowerCase().includes('sale') ||
-              headerText.toLowerCase().includes('transfer') ||
-              headerText.toLowerCase().includes('document') ||
-              headerText.toLowerCase().includes('instrument')) {
-
-            const rows = Array.from(table.querySelectorAll('tr'));
-
-            for (let i = 1; i < rows.length; i++) {
-              const row = rows[i];
-              const cells = Array.from(row.querySelectorAll('td'));
-              const rowText = row.innerText;
-
-              // Look for document ID patterns in the row
-              // CFN format: CFN followed by 12 digits
-              const cfnMatch = rowText.match(/CFN[:\s]?(\d{12})/i);
-
-              // OR Book/Page format: Book XXXX Page XXXX
-              const bookPageMatch = rowText.match(/Book[:\s]?(\d+)[,\s]+Page[:\s]?(\d+)/i);
-
-              // Clerk File Number format
-              const clerkFileMatch = rowText.match(/Clerk[:\s]+File[:\s]+(?:Number|No\.?|#)[:\s]?(\d+)/i);
-
-              if (cfnMatch) {
-                results.push({
-                  documentId: cfnMatch[1],
-                  type: 'cfn',
-                  source: 'Hillsborough County Property Appraiser',
-                  rawText: rowText.trim().substring(0, 200)
-                });
-              } else if (clerkFileMatch) {
-                results.push({
-                  documentId: clerkFileMatch[1],
-                  type: 'clerk_file_number',
-                  source: 'Hillsborough County Property Appraiser',
-                  rawText: rowText.trim().substring(0, 200)
-                });
-              } else if (bookPageMatch) {
-                results.push({
-                  bookNumber: bookPageMatch[1],
-                  pageNumber: bookPageMatch[2],
-                  type: 'book_page',
-                  source: 'Hillsborough County Property Appraiser',
-                  rawText: rowText.trim().substring(0, 200)
-                });
-              }
-            }
-          }
-        }
-
-        // Pattern 2: Look for labeled fields with document IDs
-        const allText = document.body.innerText;
-        const lines = allText.split('\n');
-
-        for (const line of lines) {
-          // Look for CFN pattern
-          const cfnMatch = line.match(/CFN[:\s]?(\d{12})/i);
-          if (cfnMatch && !results.some(r => r.documentId === cfnMatch[1])) {
+          // Extract CFN from URL parameter OBKey__1006_1
+          const cfnMatch = href.match(/OBKey__1006_1=(\d+)/);
+          if (cfnMatch && cfnMatch[1].length > 5) { // CFN should be a long number
             results.push({
               documentId: cfnMatch[1],
               type: 'cfn',
               source: 'Hillsborough County Property Appraiser',
-              rawText: line.trim().substring(0, 200)
+              clerkUrl: href,
+              displayText: text
             });
           }
 
-          // Look for OR Book/Page
-          const bookPageMatch = line.match(/(?:OR|O\.R\.|Official Record)[:\s]+Book[:\s]?(\d+)[,\s]+Page[:\s]?(\d+)/i);
-          if (bookPageMatch) {
-            const exists = results.some(r => r.bookNumber === bookPageMatch[1] && r.pageNumber === bookPageMatch[2]);
-            if (!exists) {
+          // Extract Book/Page from URL parameters
+          const bookMatch = href.match(/OBKey__573_1=(\d+)/);
+          const pageMatch = href.match(/OBKey__1049_1=(\d+)/);
+          if (bookMatch && pageMatch && bookMatch[1] && pageMatch[1]) {
+            const bookNum = bookMatch[1];
+            const pageNum = pageMatch[1];
+
+            // Avoid duplicates
+            const exists = results.some(r =>
+              r.type === 'book_page' && r.bookNumber === bookNum && r.pageNumber === pageNum
+            );
+
+            if (!exists && parseInt(bookNum) > 100) { // Filter out plat books (usually low numbers like 5)
               results.push({
-                bookNumber: bookPageMatch[1],
-                pageNumber: bookPageMatch[2],
+                bookNumber: bookNum,
+                pageNumber: pageNum,
                 type: 'book_page',
                 source: 'Hillsborough County Property Appraiser',
+                clerkUrl: href,
+                displayText: text
+              });
+            }
+          }
+        }
+
+        // Fallback: Look for CFN or Book/Page patterns in text
+        const allText = document.body.innerText;
+        const lines = allText.split('\n');
+
+        for (const line of lines) {
+          // CFN format: 10 digit number that might be a CFN
+          const cfnMatch = line.match(/\b(\d{10})\b/);
+          if (cfnMatch && !results.some(r => r.documentId === cfnMatch[1])) {
+            // Only add if it looks like a valid CFN (we already got some from links)
+            if (results.length === 0) {
+              results.push({
+                documentId: cfnMatch[1],
+                type: 'cfn',
+                source: 'Hillsborough County Property Appraiser (text)',
                 rawText: line.trim().substring(0, 200)
               });
             }
@@ -432,310 +635,175 @@ class HillsboroughCountyFloridaScraper extends DeedScraper {
         return results;
       });
 
+      // Merge with old pattern matching as fallback - remove this as we now have direct links
+      // The oldTransactions is no longer needed since we're extracting from clerk links
+
       this.log(`✅ Found ${transactions.length} transaction record(s)`);
 
-      if (transactions.length > 0) {
-        transactions.forEach((t, i) => {
-          if (t.documentId) {
-            this.log(`   ${i + 1}. Document ID: ${t.documentId} (${t.type})`);
-          } else if (t.bookNumber) {
-            this.log(`   ${i + 1}. Book ${t.bookNumber}, Page ${t.pageNumber}`);
-          }
-        });
+      // Log what we found
+      for (const trans of transactions) {
+        if (trans.type === 'cfn') {
+          this.log(`   CFN: ${trans.documentId}`);
+        } else if (trans.type === 'book_page') {
+          this.log(`   Book/Page: ${trans.bookNumber}/${trans.pageNumber}`);
+        }
       }
 
-      return transactions;
+      return {
+        success: transactions.length > 0,
+        transactions
+      };
 
     } catch (error) {
-      this.log(`❌ Transaction extraction failed: ${error.message}`);
-      return [];
+      this.log(`❌ Failed to extract transaction records: ${error.message}`);
+      return {
+        success: false,
+        error: error.message
+      };
     }
   }
 
   /**
-   * Download deed from Hillsborough County Clerk's website
-   * Uses the official records search: https://publicaccess.hillsclerk.com/oripublicaccess/
+   * Download deed PDF from Hillsborough County Clerk
+   * Navigate to clerk page, click view button, wait for iframe to load, then extract PDF URL
    */
-  async downloadDeed(deedRecord) {
-    this.log(`⬇️ Downloading deed from Hillsborough County Clerk`);
+  async downloadDeed(transaction) {
+    this.log('📄 Downloading deed from Hillsborough County Clerk...');
 
     try {
-      const { documentId, bookNumber, pageNumber, type } = deedRecord;
-
-      if (!documentId && !bookNumber) {
-        throw new Error('No document ID or book/page number available');
+      if (!transaction.clerkUrl) {
+        throw new Error('No clerk URL available for this transaction');
       }
 
-      this.log(`🌐 Navigating to Hillsborough Clerk Official Records...`);
+      this.log(`🌐 Navigating to Clerk document: ${transaction.clerkUrl}`);
 
-      await this.page.goto('https://publicaccess.hillsclerk.com/oripublicaccess/', {
+      // Navigate to the clerk's document page
+      await this.page.goto(transaction.clerkUrl, {
         waitUntil: 'networkidle2',
         timeout: this.timeout
       });
 
+      await this.randomWait(5000, 7000);
+
+      // The clerk page shows search results immediately
+      // We need to click on the result row to view the document
+      this.log('🔍 Looking for document result row...');
+
+      const resultClicked = await this.page.evaluate((cfn) => {
+        // Look for table rows containing the CFN/Instrument number
+        const allRows = Array.from(document.querySelectorAll('tr, div[role="row"]'));
+
+        for (const row of allRows) {
+          const text = row.innerText || row.textContent || '';
+
+          // Look for the CFN number in the row
+          if (text.includes(cfn)) {
+            // Try to find a clickable element within the row
+            const clickableEls = Array.from(row.querySelectorAll('a, button, td[onclick]'));
+
+            if (clickableEls.length > 0) {
+              clickableEls[0].click();
+              return { clicked: true, text: text.substring(0, 100) };
+            }
+
+            // If no clickable child, try clicking the row itself
+            row.click();
+            return { clicked: true, text: text.substring(0, 100) };
+          }
+        }
+
+        return { clicked: false };
+      }, transaction.documentId);
+
+      if (resultClicked.clicked) {
+        this.log(`✅ Clicked document result row`);
+      } else {
+        this.log('⚠️ Could not find document result row');
+      }
+
+      // Wait for iframe to load with PDF
+      this.log('⏳ Waiting for PDF iframe to load...');
+
       await this.randomWait(3000, 5000);
 
-      // Accept disclaimer if present
-      const disclaimerAccepted = await this.page.evaluate(() => {
-        const buttons = Array.from(document.querySelectorAll('button, input[type="button"], input[type="submit"]'));
-        for (const btn of buttons) {
-          const text = (btn.textContent || btn.value || '').toLowerCase();
-          if (text.includes('accept') || text.includes('agree') || text.includes('continue')) {
-            btn.click();
-            return true;
-          }
+      // Wait for iframe to have a valid src (not about:blank)
+      try {
+        await this.page.waitForFunction(() => {
+          const iframe = document.querySelector('iframe.docview-frame') ||
+                        document.querySelector('iframe[src*="pdf"]') ||
+                        document.querySelector('iframe[src*="document"]');
+          return iframe && iframe.src && iframe.src !== 'about:blank' && iframe.src.length > 20;
+        }, { timeout: 15000 });
+
+        this.log('✅ PDF iframe loaded');
+      } catch (waitError) {
+        this.log('⚠️ Timeout waiting for iframe, attempting to extract URL anyway...');
+      }
+
+      await this.randomWait(2000, 3000);
+
+      // Extract the PDF URL from the iframe
+      const pdfUrl = await this.page.evaluate(() => {
+        // Try multiple iframe selectors
+        const iframe = document.querySelector('iframe.docview-frame') ||
+                      document.querySelector('iframe[src*="pdf"]') ||
+                      document.querySelector('iframe[src*="document"]') ||
+                      document.querySelector('iframe');
+
+        if (iframe && iframe.src && iframe.src !== 'about:blank') {
+          return iframe.src;
         }
-        return false;
+
+        // Alternative: look for direct links to PDF
+        const pdfLinks = Array.from(document.querySelectorAll('a[href*="pdf"], a[href*="GetView"], a[href*="document"]'));
+        if (pdfLinks.length > 0) {
+          return pdfLinks[0].href;
+        }
+
+        return null;
       });
 
-      if (disclaimerAccepted) {
-        this.log(`✅ Accepted disclaimer`);
-        await this.randomWait(3000, 4000);
+      if (!pdfUrl) {
+        throw new Error('Could not find PDF URL in iframe or page links');
       }
 
-      // Look for search options
-      this.log('🔍 Looking for document search...');
+      this.log(`📥 Found PDF URL: ${pdfUrl}`);
 
-      if (documentId) {
-        // Search by CFN or Clerk File Number
-        this.log(`🔍 Searching by Document ID: ${documentId}`);
+      // Download the PDF from the extracted URL
+      this.log('🌐 Downloading PDF...');
 
-        // Look for CFN or document number input
-        const searchInput = await this.page.evaluate(() => {
-          const inputs = Array.from(document.querySelectorAll('input[type="text"]'));
-          for (const input of inputs) {
-            const label = input.previousElementSibling?.textContent ||
-                         input.parentElement?.textContent ||
-                         input.placeholder || '';
+      const pdfBase64 = await this.page.evaluate(async (url) => {
+        const response = await fetch(url);
 
-            if (label.toLowerCase().includes('cfn') ||
-                label.toLowerCase().includes('clerk file') ||
-                label.toLowerCase().includes('document') ||
-                label.toLowerCase().includes('instrument')) {
-              return input.id || input.name || 'found';
-            }
-          }
-          return null;
-        });
-
-        if (searchInput) {
-          await this.page.type(`input`, documentId, { delay: 100 });
-          this.log(`✅ Entered document ID: ${documentId}`);
+        if (!response.ok) {
+          throw new Error(`HTTP ${response.status}: ${response.statusText}`);
         }
 
-      } else if (bookNumber && pageNumber) {
-        // Search by Book/Page
-        this.log(`🔍 Searching by Book ${bookNumber}, Page ${pageNumber}`);
+        const blob = await response.blob();
 
-        // Find book and page inputs
-        const bookInput = await this.page.evaluate(() => {
-          const inputs = Array.from(document.querySelectorAll('input[type="text"], input[type="number"]'));
-          for (const input of inputs) {
-            const label = input.previousElementSibling?.textContent ||
-                         input.parentElement?.textContent ||
-                         input.placeholder || '';
-
-            if (label.toLowerCase().includes('book')) {
-              return input.id || input.name || 'book-found';
-            }
-          }
-          return null;
-        });
-
-        const pageInput = await this.page.evaluate(() => {
-          const inputs = Array.from(document.querySelectorAll('input[type="text"], input[type="number"]'));
-          for (const input of inputs) {
-            const label = input.previousElementSibling?.textContent ||
-                         input.parentElement?.textContent ||
-                         input.placeholder || '';
-
-            if (label.toLowerCase().includes('page')) {
-              return input.id || input.name || 'page-found';
-            }
-          }
-          return null;
-        });
-
-        if (bookInput && pageInput) {
-          // Find and fill book input
-          const bookInputElement = await this.page.evaluateHandle((id) => {
-            const inputs = Array.from(document.querySelectorAll('input'));
-            for (const input of inputs) {
-              const label = input.previousElementSibling?.textContent ||
-                           input.parentElement?.textContent ||
-                           input.placeholder || '';
-              if (label.toLowerCase().includes('book')) {
-                return input;
-              }
-            }
-            return null;
-          }, bookInput);
-
-          if (bookInputElement) {
-            await bookInputElement.asElement().type(bookNumber, { delay: 100 });
-            this.log(`✅ Entered book number: ${bookNumber}`);
-          }
-
-          // Find and fill page input
-          const pageInputElement = await this.page.evaluateHandle((id) => {
-            const inputs = Array.from(document.querySelectorAll('input'));
-            for (const input of inputs) {
-              const label = input.previousElementSibling?.textContent ||
-                           input.parentElement?.textContent ||
-                           input.placeholder || '';
-              if (label.toLowerCase().includes('page')) {
-                return input;
-              }
-            }
-            return null;
-          }, pageInput);
-
-          if (pageInputElement) {
-            await pageInputElement.asElement().type(pageNumber, { delay: 100 });
-            this.log(`✅ Entered page number: ${pageNumber}`);
-          }
+        // Verify it's a PDF
+        if (blob.size === 0) {
+          throw new Error('Downloaded file is empty');
         }
-      }
 
-      // Click search button
-      await this.randomWait(1000, 2000);
-
-      const searchClicked = await this.page.evaluate(() => {
-        const buttons = Array.from(document.querySelectorAll('button, input[type="submit"], input[type="button"]'));
-        for (const btn of buttons) {
-          const text = (btn.textContent || btn.value || '').toLowerCase();
-          if (text.includes('search') || text.includes('submit')) {
-            btn.click();
-            return true;
-          }
-        }
-        return false;
-      });
-
-      if (searchClicked) {
-        this.log(`✅ Clicked search button`);
-        await this.randomWait(5000, 7000);
-
-        // Look for PDF link or download button
-        this.log('🔍 Looking for PDF download link...');
-
-        const pdfLink = await this.page.evaluate(() => {
-          const links = Array.from(document.querySelectorAll('a, button'));
-          for (const link of links) {
-            const href = link.href || '';
-            const text = (link.textContent || '').toLowerCase();
-
-            if (href.includes('.pdf') ||
-                text.includes('view') ||
-                text.includes('download') ||
-                text.includes('document')) {
-              return {
-                url: link.href,
-                text: link.textContent?.trim()
-              };
-            }
-          }
-          return null;
+        return new Promise((resolve) => {
+          const reader = new FileReader();
+          reader.onloadend = () => resolve(reader.result.split(',')[1]);
+          reader.readAsDataURL(blob);
         });
+      }, pdfUrl);
 
-        if (pdfLink && pdfLink.url) {
-          this.log(`📥 Found PDF link: ${pdfLink.text}`);
+      this.log(`✅ PDF downloaded successfully`);
 
-          // Setup download
-          const path = require('path');
-          const fs = require('fs');
-          const downloadPath = path.join(process.cwd(), 'downloads');
-
-          if (!fs.existsSync(downloadPath)) {
-            fs.mkdirSync(downloadPath, { recursive: true });
-          }
-
-          const client = await this.page.target().createCDPSession();
-          await client.send('Page.setDownloadBehavior', {
-            behavior: 'allow',
-            downloadPath: downloadPath
-          });
-
-          // Navigate to PDF
-          await this.page.goto(pdfLink.url, {
-            waitUntil: 'networkidle2',
-            timeout: this.timeout
-          });
-
-          await this.randomWait(5000, 7000);
-
-          // Check if PDF downloaded or need to extract from iframe
-          const pdfContent = await this.page.evaluate(() => {
-            const iframe = document.querySelector('iframe[src*=".pdf"], embed[src*=".pdf"]');
-            if (iframe) {
-              return iframe.src;
-            }
-            return null;
-          });
-
-          if (pdfContent) {
-            this.log(`📄 Extracting PDF from iframe: ${pdfContent}`);
-
-            // Download PDF using fetch with cookies
-            const cookies = await this.page.cookies();
-            const cookieString = cookies.map(c => `${c.name}=${c.value}`).join('; ');
-
-            const https = require('https');
-            const url = require('url');
-
-            return new Promise((resolve, reject) => {
-              const pdfUrl = new URL(pdfContent, this.page.url());
-              const filename = `deed_${documentId || `${bookNumber}_${pageNumber}`}_${Date.now()}.pdf`;
-              const filepath = path.join(downloadPath, filename);
-
-              const options = {
-                method: 'GET',
-                headers: {
-                  'Cookie': cookieString,
-                  'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
-                }
-              };
-
-              https.get(pdfUrl.toString(), options, (res) => {
-                if (res.statusCode === 200) {
-                  const chunks = [];
-                  res.on('data', (chunk) => chunks.push(chunk));
-                  res.on('end', () => {
-                    const pdfBuffer = Buffer.concat(chunks);
-                    fs.writeFileSync(filepath, pdfBuffer);
-
-                    const pdfBase64 = pdfBuffer.toString('base64');
-
-                    this.log(`✅ PDF downloaded: ${filename} (${(pdfBuffer.length / 1024).toFixed(2)} KB)`);
-
-                    resolve({
-                      success: true,
-                      filename,
-                      downloadPath,
-                      documentId: documentId || `${bookNumber}/${pageNumber}`,
-                      timestamp: new Date().toISOString(),
-                      fileSize: pdfBuffer.length,
-                      pdfBase64: pdfBase64
-                    });
-                  });
-                } else {
-                  reject(new Error(`HTTP ${res.statusCode}`));
-                }
-              }).on('error', reject);
-            });
-          }
-        }
-      }
-
-      // If we get here, download failed
       return {
-        success: false,
-        error: 'Could not find or download PDF from Hillsborough Clerk website',
-        documentId: documentId || `${bookNumber}/${pageNumber}`
+        success: true,
+        pdfBase64,
+        fileSize: Buffer.from(pdfBase64, 'base64').length,
+        filename: `hillsborough_deed_${transaction.documentId || `${transaction.bookNumber}_${transaction.pageNumber}`}.pdf`
       };
 
     } catch (error) {
-      this.log(`❌ Download failed: ${error.message}`);
+      this.log(`❌ Failed to download deed: ${error.message}`);
       return {
         success: false,
         error: error.message
