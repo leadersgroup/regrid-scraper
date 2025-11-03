@@ -518,32 +518,39 @@ class OrangeCountyFloridaScraper extends DeedScraper {
       if (salesClicked && salesClicked.clicked) {
         this.log(`✅ Clicked on Sales tab (${salesClicked.element})`);
 
-        // Wait for Sales content to load - give it more time for the table to appear
-        await this.randomWait(5000, 7000);
+        // Wait LONGER for Sales content to load on Railway (headless + slower server)
+        this.log(`⏳ Waiting for Sales tab content to load (8-12 seconds)...`);
+        await this.randomWait(8000, 12000);
 
         // Scroll down to make sure all content is loaded/visible and trigger any lazy-loading
         await this.page.evaluate(() => {
           window.scrollBy(0, 1200);
         });
 
-        await this.randomWait(2000, 3000);
+        await this.randomWait(3000, 4000);
 
         // Scroll back up to where sales history table should be
         await this.page.evaluate(() => {
           window.scrollBy(0, -600);
         });
 
-        await this.randomWait(2000, 3000);
+        await this.randomWait(3000, 4000);
 
         // Try to wait for the sales history table specifically
         try {
           await this.page.waitForFunction(() => {
             const text = document.body.innerText;
             return text.includes('Instrument #') || text.includes('Parcel Sales History');
-          }, { timeout: 10000 });
+          }, { timeout: 15000 }); // Increased from 10s to 15s
           this.log(`✅ Sales History table detected`);
         } catch (e) {
-          this.log(`⚠️ Sales History table not detected after waiting`);
+          this.log(`⚠️ Sales History table not detected after waiting - checking page content...`);
+
+          // Debug: Log what's actually on the page
+          const pagePreview = await this.page.evaluate(() => {
+            return document.body.innerText.substring(0, 500);
+          });
+          this.log(`   Page content preview: ${pagePreview.substring(0, 200)}...`);
         }
       } else {
         this.log(`⚠️ Could not find Sales tab, extracting from current page`);
@@ -558,10 +565,13 @@ class OrangeCountyFloridaScraper extends DeedScraper {
         // Look for the Sales History table
         // Table structure: Sale Date | Sale Amt | Instrument # | Book/Page | Seller(s) | Buyer(s) | Deed Code | Vac/Imp Code
         const tables = Array.from(document.querySelectorAll('table'));
+        console.log(`DEBUG: Found ${tables.length} table(s) on page`);
 
         for (const table of tables) {
           // Check if this is the sales history table by looking for "Instrument #" header
           const headerText = table.innerText || '';
+          console.log(`DEBUG: Table header preview: ${headerText.substring(0, 100)}`);
+
           if (headerText.includes('Instrument #') || headerText.includes('Instrument')) {
             console.log('Found Sales History table');
 
