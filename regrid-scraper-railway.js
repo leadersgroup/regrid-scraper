@@ -113,50 +113,42 @@ class RegridScraper {
         try {
             console.log(`Searching for property: ${address}`);
 
-            const encodedAddress = encodeURIComponent(address);
+            // Extract just the street address (number + name) to avoid rate limiting
+            // Regrid blocks overly specific queries with full city/state/zip
+            const streetMatch = address.match(/^(\d+\s+[^,]+)/);
+            const searchAddress = streetMatch ? streetMatch[1] : address;
+            console.log(`Using search query: ${searchAddress}`);
+
+            const encodedAddress = encodeURIComponent(searchAddress);
             const searchUrl = `https://app.regrid.com/search.json?query=${encodedAddress}&autocomplete=1&context=false&strict=false`;
 
-            const headers = {
-                'Accept': 'application/json, text/javascript, */*; q=0.01',
-                'Accept-Language': 'en-US,en;q=0.9',
-                'Accept-Encoding': 'gzip, deflate, br',
-                'X-Requested-With': 'XMLHttpRequest',
-                'Referer': 'https://app.regrid.com/us',
-                'Sec-Fetch-Dest': 'empty',
-                'Sec-Fetch-Mode': 'cors',
-                'Sec-Fetch-Site': 'same-origin',
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36'
-            };
+            // Use page.evaluate with fetch() to make the request from the browser context
+            // This keeps us on the main page and maintains the session
+            const searchResults = await this.page.evaluate(async (url, token) => {
+                const headers = {
+                    'Accept': 'application/json',
+                    'X-Requested-With': 'XMLHttpRequest'
+                };
 
-            if (this.csrfToken) {
-                headers['X-CSRF-Token'] = this.csrfToken;
-            }
+                if (token) {
+                    headers['X-CSRF-Token'] = token;
+                }
 
-            await this.page.setExtraHTTPHeaders(headers);
+                const response = await fetch(url, {
+                    method: 'GET',
+                    headers: headers,
+                    credentials: 'include'
+                });
 
-            const response = await this.page.goto(searchUrl, {
-                waitUntil: 'networkidle2',
-                timeout: 30000
-            });
+                if (!response.ok) {
+                    const text = await response.text();
+                    throw new Error(`HTTP ${response.status}: ${text.substring(0, 200)}`);
+                }
 
-            if (!response) {
-                throw new Error('No response received from server');
-            }
+                return await response.json();
+            }, searchUrl, this.csrfToken);
 
-            if (!response.ok()) {
-                throw new Error(`HTTP ${response.status()}: ${response.statusText()}`);
-            }
-
-            const responseText = await response.text();
-            let searchResults;
-            
-            try {
-                searchResults = JSON.parse(responseText);
-                console.log('✓ Search results received');
-            } catch (parseError) {
-                console.log('Response text:', responseText.substring(0, 200) + '...');
-                throw new Error('Invalid JSON response from server');
-            }
+            console.log('✓ Search results received');
 
             return this.parseSearchResults(searchResults, address);
 
