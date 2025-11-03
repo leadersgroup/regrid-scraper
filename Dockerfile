@@ -82,4 +82,4 @@ USER railway
 EXPOSE 3000
 
 # Use exec form and add signal handling
-CMD ["node", "server.js"]
+CMD ["node", "api-server.js"]
