@@ -82,56 +82,9 @@ class OrangeCountyFloridaScraper extends DeedScraper {
    */
   async searchAssessorSite(parcelId, ownerName) {
     this.log(`🔍 Searching Orange County FL Property Appraiser`);
-    this.log(`   Parcel ID available: ${parcelId || 'none'}`);
+    this.log(`   Using address search (Angular SPA won't render Sales tab from direct parcel URL)`);
 
     try {
-      // STRATEGY 1: Try direct URL with parcel ID first (most reliable)
-      if (parcelId) {
-        this.log(`🎯 Trying direct URL with Parcel ID: ${parcelId}`);
-        const directUrl = `https://ocpaweb.ocpafl.org/parcelsearch/#/summary/${parcelId}`;
-
-        await this.page.goto(directUrl, {
-          waitUntil: 'networkidle2',
-          timeout: this.timeout
-        });
-
-        await this.randomWait(5000, 7000); // Wait longer for Angular to load
-
-        // Check if property loaded
-        const directUrlResult = await this.page.evaluate(() => {
-          const text = document.body.innerText.toLowerCase();
-          const hasPropertyInfo = text.includes('parcel') ||
-                                 text.includes('owner') ||
-                                 text.includes('sales') ||
-                                 text.includes('property information') ||
-                                 text.includes('assessed value');
-          const hasError = text.includes('no results') ||
-                          text.includes('not found') ||
-                          text.includes('invalid');
-
-          return {
-            hasPropertyInfo,
-            hasError,
-            pageText: text.substring(0, 300)
-          };
-        });
-
-        this.log(`   Direct URL result: hasInfo=${directUrlResult.hasPropertyInfo}, hasError=${directUrlResult.hasError}`);
-
-        if (directUrlResult.hasPropertyInfo && !directUrlResult.hasError) {
-          this.log(`✅ Property found via direct URL (Parcel ID)`);
-          return {
-            success: true,
-            message: 'Property found via parcel ID'
-          };
-        }
-
-        this.log(`⚠️ Direct URL didn't load property, falling back to address search`);
-      }
-
-      // STRATEGY 2: Address search (original approach)
-      this.log(`🔍 Trying address search...`);
-
       // Navigate to property search page
       await this.page.goto('https://ocpaweb.ocpafl.org/parcelsearch', {
         waitUntil: 'networkidle2',
@@ -267,6 +220,17 @@ class OrangeCountyFloridaScraper extends DeedScraper {
       this.log(`   Has "no results" message: ${searchStatus.hasNoResults}`);
       this.log(`   Has property info: ${searchStatus.hasPropertyInfo}`);
       this.log(`   Page preview: ${searchStatus.pageText.substring(0, 200)}...`);
+
+      // Take screenshot for debugging on Railway
+      if (process.env.RAILWAY_ENVIRONMENT) {
+        try {
+          const screenshotPath = `/tmp/property-search-${Date.now()}.png`;
+          await this.page.screenshot({ path: screenshotPath, fullPage: false });
+          this.log(`📸 Screenshot saved to: ${screenshotPath}`);
+        } catch (e) {
+          this.log(`⚠️ Could not save screenshot: ${e.message}`);
+        }
+      }
 
       if (!searchStatus.hasNoResults && searchStatus.hasPropertyInfo) {
         this.log(`✅ Property found via address search`);
