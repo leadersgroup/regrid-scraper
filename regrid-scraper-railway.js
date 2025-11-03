@@ -1,9 +1,5 @@
-// regrid-scraper-railway.js - Works with puppeteer-extra on Railway
-const puppeteer = require('puppeteer-extra');
-const StealthPlugin = require('puppeteer-extra-plugin-stealth');
-
-// Use stealth plugin to avoid bot detection
-puppeteer.use(StealthPlugin());
+// regrid-scraper-railway.js - Works with regular Puppeteer on Railway
+const puppeteer = require('puppeteer');
 
 class RegridScraper {
     constructor() {
@@ -22,9 +18,9 @@ class RegridScraper {
             ? (process.env.PUPPETEER_EXECUTABLE_PATH || '/usr/bin/google-chrome-stable')
             : undefined; // Let puppeteer find Chrome on Mac/Windows
 
-        // Browser launch with stealth settings
+        // Simple browser launch - Railway handles all dependencies
         const launchOptions = {
-            headless: 'new', // Use new headless mode
+            headless: true,
             ...(executablePath && { executablePath }),
             args: [
                 '--no-sandbox',
@@ -33,9 +29,8 @@ class RegridScraper {
                 '--disable-accelerated-2d-canvas',
                 '--no-first-run',
                 '--no-zygote',
-                '--disable-gpu',
-                '--disable-blink-features=AutomationControlled',
-                '--disable-features=IsolateOrigins,site-per-process'
+                '--single-process',
+                '--disable-gpu'
             ]
         };
 
@@ -76,18 +71,7 @@ class RegridScraper {
                 timeout: 30000
             });
 
-            // Simulate human-like behavior
             await new Promise(resolve => setTimeout(resolve, 3000));
-
-            // Scroll to simulate real user
-            await this.page.evaluate(() => {
-                window.scrollBy(0, 300);
-            });
-            await new Promise(resolve => setTimeout(resolve, 500));
-
-            // Move mouse randomly
-            await this.page.mouse.move(100, 100);
-            await new Promise(resolve => setTimeout(resolve, 500));
 
             this.cookies = await this.page.cookies();
             
@@ -132,33 +116,47 @@ class RegridScraper {
             const encodedAddress = encodeURIComponent(address);
             const searchUrl = `https://app.regrid.com/search.json?query=${encodedAddress}&autocomplete=1&context=false&strict=false`;
 
-            // Use page.evaluate to make fetch call from within the browser context
-            // This makes it look like a real browser making the request
-            const searchResults = await this.page.evaluate(async (url, csrfToken) => {
-                const headers = {
-                    'Accept': 'application/json, text/javascript, */*; q=0.01',
-                    'X-Requested-With': 'XMLHttpRequest'
-                };
+            const headers = {
+                'Accept': 'application/json, text/javascript, */*; q=0.01',
+                'Accept-Language': 'en-US,en;q=0.9',
+                'Accept-Encoding': 'gzip, deflate, br',
+                'X-Requested-With': 'XMLHttpRequest',
+                'Referer': 'https://app.regrid.com/us',
+                'Sec-Fetch-Dest': 'empty',
+                'Sec-Fetch-Mode': 'cors',
+                'Sec-Fetch-Site': 'same-origin',
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36'
+            };
 
-                if (csrfToken) {
-                    headers['X-CSRF-Token'] = csrfToken;
-                }
+            if (this.csrfToken) {
+                headers['X-CSRF-Token'] = this.csrfToken;
+            }
 
-                const response = await fetch(url, {
-                    method: 'GET',
-                    headers: headers,
-                    credentials: 'include'
-                });
+            await this.page.setExtraHTTPHeaders(headers);
 
-                if (!response.ok) {
-                    const text = await response.text();
-                    throw new Error(`HTTP ${response.status}: ${text.substring(0, 500)}`);
-                }
+            const response = await this.page.goto(searchUrl, {
+                waitUntil: 'networkidle2',
+                timeout: 30000
+            });
 
-                return await response.json();
-            }, searchUrl, this.csrfToken);
+            if (!response) {
+                throw new Error('No response received from server');
+            }
 
-            console.log('✓ Search results received');
+            if (!response.ok()) {
+                throw new Error(`HTTP ${response.status()}: ${response.statusText()}`);
+            }
+
+            const responseText = await response.text();
+            let searchResults;
+            
+            try {
+                searchResults = JSON.parse(responseText);
+                console.log('✓ Search results received');
+            } catch (parseError) {
+                console.log('Response text:', responseText.substring(0, 200) + '...');
+                throw new Error('Invalid JSON response from server');
+            }
 
             return this.parseSearchResults(searchResults, address);
 
