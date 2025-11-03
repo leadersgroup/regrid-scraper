@@ -32,6 +32,11 @@ class OrangeCountyFloridaScraper extends DeedScraper {
     };
 
     try {
+      // Initialize browser if not already initialized
+      if (!this.browser) {
+        await this.initialize();
+      }
+
       // SKIP STEP 1 (Regrid) - Orange County doesn't need parcel ID
       // We can search Property Appraiser directly by address
       this.log(`ℹ️  Skipping Step 1 (Regrid) - Orange County supports direct address search`);
@@ -1198,39 +1203,115 @@ class OrangeCountyFloridaScraper extends DeedScraper {
               const pdfUrl = baseUrl + pdfPath;
 
               this.log(`🔗 Extracted PDF URL: ${pdfUrl}`);
-              this.log(`📥 Downloading PDF using direct fetch...`);
+              this.log(`📥 Downloading PDF using CDP fetch with cookies...`);
 
               // Download the PDF using fetch and save it manually
               const fs = require('fs');
               const path = require('path');
-              const https = require('https');
 
               const filename = `deed_${documentId}_${Date.now()}.pdf`;
               const filepath = path.join(downloadPath, filename);
 
-              // Use Puppeteer's page to fetch with cookies/session
-              const pdfBuffer = await this.page.evaluate(async (url) => {
-                const response = await fetch(url);
-                const blob = await response.blob();
-                const arrayBuffer = await blob.arrayBuffer();
-                return Array.from(new Uint8Array(arrayBuffer));
-              }, pdfUrl);
+              // METHOD: Download PDF using Node.js https with cookies from browser session
+              try {
+                this.log(`🔄 Downloading PDF using https module with session cookies...`);
 
-              // Convert array back to Buffer and save
-              fs.writeFileSync(filepath, Buffer.from(pdfBuffer));
+                // Get cookies from current page session
+                const cookies = await this.page.cookies();
+                const cookieString = cookies.map(c => `${c.name}=${c.value}`).join('; ');
+                this.log(`📋 Using ${cookies.length} cookies from session`);
 
-              this.log(`✅ PDF saved to: ${filepath}`);
-              this.log(`📄 File size: ${(fs.statSync(filepath).size / 1024).toFixed(2)} KB`);
+                // Download PDF using Node.js https module
+                const https = require('https');
+                const url = require('url');
+                const parsedUrl = url.parse(pdfUrl);
 
-              return {
-                success: true,
-                filename,
-                downloadPath: downloadPath,
-                documentId,
-                timestamp: new Date().toISOString(),
-                fileSize: fs.statSync(filepath).size,
-                pdfUrl: pdfUrl
-              };
+                return await new Promise((resolve, reject) => {
+                  const options = {
+                    hostname: parsedUrl.hostname,
+                    port: parsedUrl.port || 443,
+                    path: parsedUrl.path,
+                    method: 'GET',
+                    headers: {
+                      'Cookie': cookieString,
+                      'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                      'Accept': 'application/pdf,*/*',
+                      'Referer': 'https://selfservice.or.occompt.com/',
+                      'Accept-Language': 'en-US,en;q=0.9'
+                    },
+                    timeout: 60000
+                  };
+
+                  this.log(`🌐 GET ${pdfUrl}`);
+
+                  const req = https.request(options, (res) => {
+                    this.log(`📥 Response: ${res.statusCode} ${res.statusMessage}`);
+                    this.log(`   Content-Type: ${res.headers['content-type']}`);
+                    this.log(`   Content-Length: ${res.headers['content-length']}`);
+
+                    if (res.statusCode === 200) {
+                      const chunks = [];
+
+                      res.on('data', (chunk) => {
+                        chunks.push(chunk);
+                      });
+
+                      res.on('end', () => {
+                        const pdfBuffer = Buffer.concat(chunks);
+
+                        // Verify it's actually a PDF
+                        const header = pdfBuffer.slice(0, 5).toString();
+                        if (header !== '%PDF-') {
+                          this.log(`❌ Response is not a PDF (header: ${header})`);
+                          this.log(`   First 100 bytes: ${pdfBuffer.slice(0, 100).toString()}`);
+                          reject(new Error('Downloaded content is not a PDF file'));
+                          return;
+                        }
+
+                        // Save the PDF
+                        fs.writeFileSync(filepath, pdfBuffer);
+
+                        this.log(`✅ PDF downloaded and saved to: ${filepath}`);
+                        this.log(`📄 File size: ${(pdfBuffer.length / 1024).toFixed(2)} KB`);
+
+                        // Convert to base64 for API response
+                        const pdfBase64 = pdfBuffer.toString('base64');
+
+                        resolve({
+                          success: true,
+                          filename,
+                          downloadPath: downloadPath,
+                          documentId,
+                          timestamp: new Date().toISOString(),
+                          fileSize: pdfBuffer.length,
+                          pdfUrl: pdfUrl,
+                          pdfBase64: pdfBase64
+                        });
+                      });
+                    } else if (res.statusCode === 302 || res.statusCode === 301) {
+                      reject(new Error(`Redirect to: ${res.headers.location}`));
+                    } else {
+                      reject(new Error(`HTTP ${res.statusCode}: ${res.statusMessage}`));
+                    }
+                  });
+
+                  req.on('error', (err) => {
+                    this.log(`❌ Request error: ${err.message}`);
+                    reject(err);
+                  });
+
+                  req.on('timeout', () => {
+                    req.destroy();
+                    reject(new Error('Request timeout after 60 seconds'));
+                  });
+
+                  req.end();
+                });
+
+              } catch (downloadError) {
+                this.log(`❌ HTTPS download method failed: ${downloadError.message}`);
+                throw new Error(`Could not download the PDF file from the county website. Error: ${downloadError.message}`);
+              }
             } else {
               this.log(`⚠️ Could not extract PDF URL from iframe`);
             }
