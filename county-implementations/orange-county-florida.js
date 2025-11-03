@@ -28,6 +28,52 @@ class OrangeCountyFloridaScraper extends DeedScraper {
   }
 
   /**
+   * Normalize street suffix abbreviations to full words
+   * Example: "123 Main St" -> "123 Main Street"
+   */
+  normalizeStreetSuffix(address) {
+    const suffixMap = {
+      // Common abbreviations
+      ' St': ' Street',
+      ' St.': ' Street',
+      ' Ave': ' Avenue',
+      ' Ave.': ' Avenue',
+      ' Dr': ' Drive',
+      ' Dr.': ' Drive',
+      ' Rd': ' Road',
+      ' Rd.': ' Road',
+      ' Blvd': ' Boulevard',
+      ' Blvd.': ' Boulevard',
+      ' Ln': ' Lane',
+      ' Ln.': ' Lane',
+      ' Ct': ' Court',
+      ' Ct.': ' Court',
+      ' Pl': ' Place',
+      ' Pl.': ' Place',
+      ' Cir': ' Circle',
+      ' Cir.': ' Circle',
+      ' Way': ' Way',
+      ' Wy': ' Way',
+      ' Wy.': ' Way',
+      ' Pkwy': ' Parkway',
+      ' Pkwy.': ' Parkway',
+      ' Ter': ' Terrace',
+      ' Ter.': ' Terrace',
+      ' Trl': ' Trail',
+      ' Trl.': ' Trail'
+    };
+
+    let normalized = address;
+    for (const [abbrev, full] of Object.entries(suffixMap)) {
+      // Match at end of string or before a number (like unit number)
+      const regex = new RegExp(abbrev.replace('.', '\\.') + '(?=\\s|$)', 'gi');
+      normalized = normalized.replace(regex, full);
+    }
+
+    return normalized;
+  }
+
+  /**
    * Search Orange County Property Appraiser by address
    * Use address search (without city/state/zip) then navigate to sales tab
    * URL: https://ocpaweb.ocpafl.org/parcelsearch
@@ -47,7 +93,15 @@ class OrangeCountyFloridaScraper extends DeedScraper {
       // Extract just the street address (remove city, state, zip)
       // Example: "12729 Hawkstone Drive, Windermere, FL 34786" -> "12729 Hawkstone Drive"
       const fullAddress = this.currentAddress || '';
-      const streetAddress = fullAddress.split(',')[0].trim();
+      let streetAddress = fullAddress.split(',')[0].trim();
+
+      // Normalize street suffix abbreviations
+      const originalAddress = streetAddress;
+      streetAddress = this.normalizeStreetSuffix(streetAddress);
+
+      if (originalAddress !== streetAddress) {
+        this.log(`🔄 Normalized address: "${originalAddress}" -> "${streetAddress}"`);
+      }
 
       this.log(`🏠 Using street address for search: ${streetAddress}`);
 
