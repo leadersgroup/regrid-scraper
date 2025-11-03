@@ -188,25 +188,47 @@ class OrangeCountyFloridaScraper extends DeedScraper {
       // Wait for results
       await this.randomWait(3000, 5000);
 
-      // Check if property was found
-      const propertyFound = await this.page.evaluate(() => {
+      // Check if property was found - look for positive indicators
+      const searchStatus = await this.page.evaluate(() => {
         const text = document.body.innerText.toLowerCase();
-        return !text.includes('no results') &&
-               !text.includes('not found') &&
-               !text.includes('no records found');
+        const pageText = text.substring(0, 500); // First 500 chars for debugging
+
+        // Negative indicators
+        const hasNoResults = text.includes('no results') ||
+                            text.includes('not found') ||
+                            text.includes('no records found') ||
+                            text.includes('no properties found');
+
+        // Positive indicators for Orange County Property Appraiser
+        const hasPropertyInfo = text.includes('parcel') ||
+                               text.includes('owner') ||
+                               text.includes('sales') ||
+                               text.includes('property information') ||
+                               text.includes('assessed value');
+
+        return {
+          hasNoResults,
+          hasPropertyInfo,
+          pageText
+        };
       });
 
-      if (propertyFound) {
+      this.log(`🔍 Search result analysis:`);
+      this.log(`   Has "no results" message: ${searchStatus.hasNoResults}`);
+      this.log(`   Has property info: ${searchStatus.hasPropertyInfo}`);
+      this.log(`   Page preview: ${searchStatus.pageText.substring(0, 200)}...`);
+
+      if (!searchStatus.hasNoResults && searchStatus.hasPropertyInfo) {
         this.log(`✅ Property found via address search`);
         return {
           success: true,
           message: 'Property found on assessor website'
         };
       } else {
-        this.log(`⚠️ Property not found`);
+        this.log(`⚠️ Property not found or search failed`);
         return {
           success: false,
-          message: 'Property not found'
+          message: `Property not found (noResults: ${searchStatus.hasNoResults}, hasInfo: ${searchStatus.hasPropertyInfo})`
         };
       }
 
