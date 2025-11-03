@@ -17,6 +17,72 @@ class OrangeCountyFloridaScraper extends DeedScraper {
   }
 
   /**
+   * Override getPriorDeed to skip Step 1 (Regrid)
+   * Orange County can search Property Appraiser directly by address
+   */
+  async getPriorDeed(address) {
+    this.log(`🏁 Starting prior deed download for: ${address}`);
+    this.currentAddress = address;
+
+    const startTime = Date.now();
+    const result = {
+      address,
+      timestamp: new Date().toISOString(),
+      steps: {}
+    };
+
+    try {
+      // SKIP STEP 1 (Regrid) - Orange County doesn't need parcel ID
+      // We can search Property Appraiser directly by address
+      this.log(`ℹ️  Skipping Step 1 (Regrid) - Orange County supports direct address search`);
+
+      result.steps.step1 = {
+        success: true,
+        skipped: true,
+        message: 'Orange County supports direct address search',
+        county: 'Orange',
+        state: 'FL',
+        originalAddress: address
+      };
+
+      // STEP 2: Search Property Appraiser for transaction records
+      const step2Result = await this.searchPropertyAssessor({
+        originalAddress: address,
+        county: 'Orange',
+        state: 'FL'
+      });
+
+      result.steps.step2 = step2Result;
+
+      if (!step2Result.success || !step2Result.transactions || step2Result.transactions.length === 0) {
+        result.success = false;
+        result.message = 'No transactions found on Property Appraiser';
+        result.duration = `${((Date.now() - startTime) / 1000).toFixed(2)}s`;
+        return result;
+      }
+
+      // STEP 3: Download the most recent deed
+      const mostRecentDeed = step2Result.transactions[0];
+      this.log(`📥 Attempting to download most recent deed: ${mostRecentDeed.documentId}`);
+
+      const downloadResult = await this.downloadDeed(mostRecentDeed);
+
+      result.download = downloadResult;
+      result.success = downloadResult.success;
+      result.duration = `${((Date.now() - startTime) / 1000).toFixed(2)}s`;
+
+      return result;
+
+    } catch (error) {
+      this.log(`❌ Error in getPriorDeed: ${error.message}`);
+      result.success = false;
+      result.error = error.message;
+      result.duration = `${((Date.now() - startTime) / 1000).toFixed(2)}s`;
+      return result;
+    }
+  }
+
+  /**
    * Get deed recorder/clerk URL for Orange County
    * Updated to use the new Self-Service Official Records system
    */
@@ -837,7 +903,12 @@ class OrangeCountyFloridaScraper extends DeedScraper {
 
         // Navigate directly to the deed URL
         this.log(`📄 Navigating to deed document page...`);
-        await this.page.goto(deedUrl, { waitUntil: 'networkidle2', timeout: 60000 });
+
+        // Set longer timeout for puppeteer-extra page
+        this.page.setDefaultNavigationTimeout(120000); // 2 minutes
+        this.page.setDefaultTimeout(120000);
+
+        await this.page.goto(deedUrl, { waitUntil: 'domcontentloaded', timeout: 120000 });
 
         // Wait for page to load
         await this.randomWait(3000, 5000);
