@@ -310,75 +310,52 @@ class HillsboroughCountyFloridaScraper extends DeedScraper {
 
       if (autocompleteClicked.clicked) {
         this.log(`✅ Clicked autocomplete item: "${autocompleteClicked.text}"`);
-        // Wait longer for autocomplete selection to fully register before clicking search
-        await this.randomWait(3000, 5000);
       } else {
-        this.log(`ℹ️  No autocomplete item found`);
-        await this.randomWait(1000, 2000);
+        this.log(`ℹ️  No autocomplete item found, will proceed with search`);
       }
 
-      const searchTriggered = await this.page.evaluate(() => {
-        // Look for search button
-        const searchButton = document.querySelector('button[type="submit"]') ||
-                            document.querySelector('button[aria-label*="Search"]') ||
-                            document.querySelector('.btn-search') ||
-                            document.querySelector('button.submit');
+      // After entering address (with or without autocomplete), trigger search button
+      await this.randomWait(1000, 2000);
 
-        if (searchButton) {
-          // Trigger click event programmatically
-          const clickEvent = new MouseEvent('click', {
-            bubbles: true,
-            cancelable: true,
-            view: window
-          });
-          searchButton.dispatchEvent(clickEvent);
-          return true;
-        }
-        return false;
-      });
-
-      if (searchTriggered) {
-        this.log(`✅ Triggered search via DOM event`);
-      } else {
+      // Try using Puppeteer's native click instead of evaluate
+      try {
+        const searchButtonSelector = 'button[type="submit"]';
+        await this.page.waitForSelector(searchButtonSelector, { timeout: 5000 });
+        await this.page.click(searchButtonSelector);
+        this.log(`✅ Clicked search button via Puppeteer`);
+      } catch (clickError) {
         // Fallback: Press Enter key
+        this.log(`⚠️  Could not click search button, trying Enter key: ${clickError.message}`);
         await this.page.keyboard.press('Enter');
         this.log(`⌨️  Pressed Enter to search`);
       }
 
-      // Wait for Angular/React app to update - try multiple strategies
-      this.log(`⏳ Waiting for search results to load...`);
+      // Wait for search results to load - this can take 20-30+ seconds
+      this.log(`⏳ Waiting for search results to load (this may take 20-30+ seconds)...`);
 
-      // Strategy 1: Wait for URL to change (SPAs often update hash or query params)
-      await this.randomWait(2000, 3000);
+      // First, wait for initial response
+      await this.randomWait(5000, 7000);
 
-      // Strategy 2: Wait for specific Angular/React elements or content to appear
+      // Then wait for URL to change indicating navigation to results page
       try {
         await this.page.waitForFunction(() => {
-          const text = document.body.innerText.toLowerCase();
-          // Look for positive indicators that results loaded
-          return text.includes('folio') ||
-                 text.includes('owner name') ||
-                 text.includes('property address') ||
-                 text.includes('parcel') ||
-                 text.includes('assessed') ||
-                 text.includes('market value') ||
-                 // Or negative indicator that search completed
-                 text.includes('no results') ||
-                 text.includes('no records found');
-        }, { timeout: 15000 }); // Wait up to 15 seconds for results
+          const url = window.location.href;
+          // The search MUST navigate to a new URL - either /search/ or with address= parameter
+          // Don't accept page content alone, as the search form page has similar text
+          return url.includes('/search/') || url.includes('address=') || url.includes('/result');
+        }, { timeout: 45000 }); // 45 second timeout for slow search
 
-        this.log(`✅ Search results loaded`);
+        this.log(`✅ Search results loaded (URL changed to results page)`);
       } catch (waitError) {
-        this.log(`⚠️ Timeout waiting for results, checking page content anyway...`);
+        this.log(`⚠️ Timeout waiting for URL to change (waited 45s), checking page content anyway...`);
       }
 
-      // Additional wait for any animations/transitions
-      await this.randomWait(2000, 3000);
+      // Additional wait for any animations/transitions to complete
+      await this.randomWait(3000, 5000);
 
-      // Check if property was found
+      // Check if property was found by looking for results table
       const searchStatus = await this.page.evaluate(() => {
         const text = document.body.innerText.toLowerCase();
-        const pageText = text.substring(0, 1000); // Increased from 500 to 1000
 
         const hasNoResults = text.includes('no results') ||
                             text.includes('not found') ||
@@ -386,74 +363,62 @@ class HillsboroughCountyFloridaScraper extends DeedScraper {
                             text.includes('no properties found') ||
                             text.includes('no matches');
 
-        const hasPropertyInfo = text.includes('folio') ||
-                               text.includes('owner') ||
-                               text.includes('sales') ||
-                               text.includes('property information') ||
-                               text.includes('assessed value') ||
-                               text.includes('market value') ||
-                               text.includes('parcel');
+        // Look for results table headers
+        const hasResultsTable = text.includes('folio') &&
+                               text.includes('owner name') &&
+                               text.includes('property address');
 
         return {
           hasNoResults,
-          hasPropertyInfo,
-          pageText,
+          hasResultsTable,
           url: window.location.href
         };
       });
 
       this.log(`🔍 Search result analysis:`);
       this.log(`   Current URL: ${searchStatus.url}`);
+      this.log(`   Has results table: ${searchStatus.hasResultsTable}`);
       this.log(`   Has "no results" message: ${searchStatus.hasNoResults}`);
-      this.log(`   Has property info: ${searchStatus.hasPropertyInfo}`);
-      this.log(`   Page preview: ${searchStatus.pageText.substring(0, 200)}...`);
 
-      if (!searchStatus.hasNoResults && searchStatus.hasPropertyInfo) {
-        this.log(`✅ Property found via address search`);
+      if (!searchStatus.hasNoResults && searchStatus.hasResultsTable) {
+        this.log(`✅ Property found in results table`);
 
-        // Click on the first result to get detailed information
+        // Click on the folio number in the results table
         await this.randomWait(2000, 3000);
 
         const resultClicked = await this.page.evaluate(() => {
           // Look for the folio number link in the results table
-          const folioLinks = Array.from(document.querySelectorAll('a, td, div')).filter(el => {
-            const text = el.innerText || el.textContent || '';
-            // Folio format: XXXXXX-XXXX (e.g., 000034-0200)
-            return /^\d{6}-\d{4}$/.test(text.trim());
-          });
+          // Folio format: XXXXXX-XXXX (e.g., 000034-0200)
+          const allElements = Array.from(document.querySelectorAll('a, td, div, span'));
 
-          if (folioLinks.length > 0) {
-            const link = folioLinks[0];
-            if (link.tagName === 'A') {
-              link.click();
-            } else {
-              // If it's not a link, try to find the closest link or clickable parent
-              const closestLink = link.closest('a');
-              if (closestLink) {
-                closestLink.click();
+          for (const el of allElements) {
+            const text = (el.innerText || el.textContent || '').trim();
+
+            if (/^\d{6}-\d{4}$/.test(text)) {
+              // Found a folio number
+              if (el.tagName === 'A') {
+                el.click();
+                return { clicked: true, folio: text };
               } else {
+                // Look for parent link or clickable element
+                const closestLink = el.closest('a') || el.closest('[onclick]');
+                if (closestLink) {
+                  closestLink.click();
+                  return { clicked: true, folio: text };
+                }
+
                 // Try clicking the element itself
-                link.click();
+                el.click();
+                return { clicked: true, folio: text };
               }
             }
-            return true;
           }
 
-          // Alternative: try clicking any row in the results table
-          const resultRows = Array.from(document.querySelectorAll('table tr'));
-          for (const row of resultRows) {
-            const text = row.innerText || '';
-            if (text && text.includes('PINE TREE')) {
-              row.click();
-              return true;
-            }
-          }
-
-          return false;
+          return { clicked: false };
         });
 
-        if (resultClicked) {
-          this.log(`✅ Clicked on property result to view details`);
+        if (resultClicked.clicked) {
+          this.log(`✅ Clicked on folio ${resultClicked.folio} in results table`);
 
           // Wait for property detail page to load
           await this.randomWait(5000, 7000);
@@ -461,15 +426,18 @@ class HillsboroughCountyFloridaScraper extends DeedScraper {
           // Wait for detail page content to load
           await this.page.waitForFunction(() => {
             const text = document.body.innerText.toLowerCase();
-            return text.includes('property information') ||
-                   text.includes('parcel') ||
-                   text.includes('sales') ||
-                   text.includes('deed');
+            // Check if we're on the detail page (not the results table anymore)
+            return (text.includes('sales history') ||
+                   text.includes('official record') ||
+                   text.includes('book / page')) &&
+                   !text.includes('search results'); // Make sure we left the results page
           }, { timeout: 15000 }).catch(() => {
-            this.log(`⚠️ Timeout waiting for property details`);
+            this.log(`⚠️ Timeout waiting for property detail page`);
           });
+
+          this.log(`✅ Property detail page loaded`);
         } else {
-          this.log(`⚠️ Could not click on property result`);
+          this.log(`⚠️ Could not click on folio number in results table`);
         }
 
         return {
@@ -480,7 +448,7 @@ class HillsboroughCountyFloridaScraper extends DeedScraper {
         this.log(`⚠️ Property not found or search failed`);
         return {
           success: false,
-          message: `Property not found (noResults: ${searchStatus.hasNoResults}, hasInfo: ${searchStatus.hasPropertyInfo})`
+          message: `Property not found (noResults: ${searchStatus.hasNoResults}, hasTable: ${searchStatus.hasResultsTable})`
         };
       }
 
@@ -686,61 +654,50 @@ class HillsboroughCountyFloridaScraper extends DeedScraper {
       await this.randomWait(5000, 7000);
 
       // The clerk page shows search results immediately
-      // We need to click on the result row to view the document
-      this.log('🔍 Looking for document result row...');
+      // We need to click on the VIEW button in the first row with the CFN
+      this.log('🔍 Looking for VIEW button in document result row...');
 
-      const resultClicked = await this.page.evaluate((cfn) => {
-        // Look for table rows containing the CFN/Instrument number
-        const allRows = Array.from(document.querySelectorAll('tr, div[role="row"]'));
+      // Use Puppeteer's native click on the button element
+      try {
+        // Look for all buttons in the page
+        const buttons = await this.page.$$('button');
 
-        for (const row of allRows) {
-          const text = row.innerText || row.textContent || '';
+        this.log(`📊 Found ${buttons.length} buttons on page`);
 
-          // Look for the CFN number in the row
-          if (text.includes(cfn)) {
-            // Try to find a clickable element within the row
-            const clickableEls = Array.from(row.querySelectorAll('a, button, td[onclick]'));
-
-            if (clickableEls.length > 0) {
-              clickableEls[0].click();
-              return { clicked: true, text: text.substring(0, 100) };
-            }
-
-            // If no clickable child, try clicking the row itself
-            row.click();
-            return { clicked: true, text: text.substring(0, 100) };
-          }
+        // Click the first button (which should be the view button for the first result)
+        if (buttons.length > 0) {
+          await buttons[0].click();
+          this.log(`✅ Clicked first VIEW button via Puppeteer`);
+        } else {
+          throw new Error('No buttons found on page');
         }
-
-        return { clicked: false };
-      }, transaction.documentId);
-
-      if (resultClicked.clicked) {
-        this.log(`✅ Clicked document result row`);
-      } else {
-        this.log('⚠️ Could not find document result row');
+      } catch (buttonError) {
+        this.log(`⚠️ Could not click button: ${buttonError.message}`);
       }
 
       // Wait for iframe to load with PDF
-      this.log('⏳ Waiting for PDF iframe to load...');
+      this.log('⏳ Waiting for PDF iframe to load (may take 10-15 seconds)...');
 
-      await this.randomWait(3000, 5000);
+      // Give it time to initialize
+      await this.randomWait(5000, 7000);
 
       // Wait for iframe to have a valid src (not about:blank)
       try {
         await this.page.waitForFunction(() => {
           const iframe = document.querySelector('iframe.docview-frame') ||
                         document.querySelector('iframe[src*="pdf"]') ||
-                        document.querySelector('iframe[src*="document"]');
+                        document.querySelector('iframe[src*="document"]') ||
+                        document.querySelector('iframe');
           return iframe && iframe.src && iframe.src !== 'about:blank' && iframe.src.length > 20;
-        }, { timeout: 15000 });
+        }, { timeout: 30000 }); // 30 second timeout
 
         this.log('✅ PDF iframe loaded');
       } catch (waitError) {
-        this.log('⚠️ Timeout waiting for iframe, attempting to extract URL anyway...');
+        this.log('⚠️ Timeout waiting for iframe (waited 30s), attempting to extract URL anyway...');
       }
 
-      await this.randomWait(2000, 3000);
+      // Additional wait for iframe content to fully load
+      await this.randomWait(3000, 5000);
 
       // Extract the PDF URL from the iframe
       const pdfUrl = await this.page.evaluate(() => {
