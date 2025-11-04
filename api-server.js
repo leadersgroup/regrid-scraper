@@ -23,6 +23,7 @@ const path = require('path');
 // Import county implementations
 const OrangeCountyFloridaScraper = require('./county-implementations/orange-county-florida');
 const HillsboroughCountyFloridaScraper = require('./county-implementations/hillsborough-county-florida');
+const BrevardCountyFloridaScraper = require('./county-implementations/brevard-county-florida');
 const LeeCountyFloridaScraper = require('./county-implementations/lee-county-florida');
 const PalmBeachCountyFloridaScraper = require('./county-implementations/palm-beach-county-florida');
 const MiamiDadeCountyFloridaScraper = require('./county-implementations/miami-dade-county-florida');
@@ -87,6 +88,7 @@ app.get('/api/counties', (req, res) => {
         cost: 'Free (no CAPTCHA)'
       },
       {
+        name: 'Brevard County',
         name: 'Lee County',
         name: 'Palm Beach County',
         name: 'Miami-Dade County',
@@ -148,6 +150,8 @@ async function processDeedDownload(address, county, state, options = {}) {
       timeout: options?.timeout || 120000,
       verbose: options?.verbose || false
     });
+  } else if (detectedCounty === 'Brevard' && detectedState === 'FL') {
+    scraper = new BrevardCountyFloridaScraper({
   } else if (detectedCounty === 'Lee' && detectedState === 'FL') {
     scraper = new LeeCountyFloridaScraper({
   } else if (detectedCounty === 'Palm Beach' && detectedState === 'FL') {
