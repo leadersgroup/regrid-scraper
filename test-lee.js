@@ -13,7 +13,7 @@ async function testLeeCounty() {
   const testAddress = '2201 SECOND ST, FORT MYERS, FL 33901';
 
   const scraper = new LeeCountyFloridaScraper({
-    headless: false, // Set to true for headless testing
+    headless: true, // Set to true for headless testing
     timeout: 120000,
     verbose: true
   });
