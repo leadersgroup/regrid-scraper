@@ -24,6 +24,10 @@ const path = require('path');
 const OrangeCountyFloridaScraper = require('./county-implementations/orange-county-florida');
 const HillsboroughCountyFloridaScraper = require('./county-implementations/hillsborough-county-florida');
 const PolkCountyFloridaScraper = require('./county-implementations/polk-county-florida');
+const PinellasCountyFloridaScraper = require('./county-implementations/pinellas-county-florida');
+const BrevardCountyFloridaScraper = require('./county-implementations/brevard-county-florida');
+const LeeCountyFloridaScraper = require('./county-implementations/lee-county-florida');
+const PalmBeachCountyFloridaScraper = require('./county-implementations/palm-beach-county-florida');
 const MiamiDadeCountyFloridaScraper = require('./county-implementations/miami-dade-county-florida');
 
 const app = express();
@@ -87,6 +91,10 @@ app.get('/api/counties', (req, res) => {
       },
       {
         name: 'Polk County',
+        name: 'Pinellas County',
+        name: 'Brevard County',
+        name: 'Lee County',
+        name: 'Palm Beach County',
         name: 'Miami-Dade County',
         state: 'FL',
         stateCode: 'Florida',
@@ -94,6 +102,9 @@ app.get('/api/counties', (req, res) => {
           'Full PDF download',
           'Transaction history extraction',
           'Book/Page support'
+          'Document Number and Book/Page support'
+          'Instrument Number and Book/Page support'
+          'Instrument number and Book/Page support'
           'ORB/Book and Page support'
         ],
         cost: 'Free (no CAPTCHA)'
@@ -147,6 +158,14 @@ async function processDeedDownload(address, county, state, options = {}) {
     });
   } else if (detectedCounty === 'Polk' && detectedState === 'FL') {
     scraper = new PolkCountyFloridaScraper({
+  } else if (detectedCounty === 'Pinellas' && detectedState === 'FL') {
+    scraper = new PinellasCountyFloridaScraper({
+  } else if (detectedCounty === 'Brevard' && detectedState === 'FL') {
+    scraper = new BrevardCountyFloridaScraper({
+  } else if (detectedCounty === 'Lee' && detectedState === 'FL') {
+    scraper = new LeeCountyFloridaScraper({
+  } else if (detectedCounty === 'Palm Beach' && detectedState === 'FL') {
+    scraper = new PalmBeachCountyFloridaScraper({
   } else if (detectedCounty === 'Miami-Dade' && detectedState === 'FL') {
     scraper = new MiamiDadeCountyFloridaScraper({
       headless: options?.headless !== false, // Default to headless
