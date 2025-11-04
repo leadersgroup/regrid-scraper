@@ -2,7 +2,8 @@
  * Miami-Dade County, Florida - Deed Scraper Implementation
  *
  * County Resources:
- * - Property Appraiser: https://www.miamidade.gov/Apps/PA/propertysearch/
+ * - Property Appraiser: https://apps.miamidadepa.gov/propertysearch/ (Updated URL as of 2025)
+ * - Old URL (redirects): https://www.miamidade.gov/Apps/PA/propertysearch/
  * - Clerk of Courts (Official Records): https://onlineservices.miamidadeclerk.gov/officialrecords/
  */
 
@@ -119,7 +120,7 @@ class MiamiDadeCountyFloridaScraper extends DeedScraper {
 
       // STEP 2: Search Property Appraiser for property
       this.log(`📋 Step 2: Searching county property assessor for: ${this.county} County, ${this.state}`);
-      this.log(`🌐 Navigating to assessor: https://www.miamidade.gov/Apps/PA/propertysearch/`);
+      this.log(`🌐 Navigating to assessor: https://apps.miamidadepa.gov/propertysearch/`);
 
       const assessorResult = await this.searchAssessorSite(null, null);
 
@@ -143,7 +144,7 @@ class MiamiDadeCountyFloridaScraper extends DeedScraper {
       result.steps.step2 = {
         success: transactionResult.success,
         transactions: transactionResult.transactions || [],
-        assessorUrl: 'https://www.miamidade.gov/Apps/PA/propertysearch/',
+        assessorUrl: 'https://apps.miamidadepa.gov/propertysearch/',
         originalAddress: address,
         county: 'Miami-Dade',
         state: 'FL'
@@ -193,22 +194,25 @@ class MiamiDadeCountyFloridaScraper extends DeedScraper {
    */
   getAssessorUrl(county, state) {
     if (county === 'Miami-Dade' && state === 'FL') {
-      return 'https://www.miamidade.gov/Apps/PA/propertysearch/';
+      return 'https://apps.miamidadepa.gov/propertysearch/';
     }
     return null;
   }
 
   /**
    * Search Miami-Dade County Property Appraiser by address
-   * URL: https://www.miamidade.gov/Apps/PA/propertysearch/
+   * URL: https://apps.miamidadepa.gov/propertysearch/ (Updated 2025)
    */
   async searchAssessorSite(parcelId, ownerName) {
     this.log(`🔍 Searching Miami-Dade County FL Property Appraiser`);
     this.log(`   Using address search`);
 
     try {
-      // Navigate to property search page
-      await this.page.goto('https://www.miamidade.gov/Apps/PA/propertysearch/', {
+      // Navigate to property search page (updated URL)
+      const assessorUrl = 'https://apps.miamidadepa.gov/propertysearch/';
+      this.log(`🌐 Navigating to: ${assessorUrl}`);
+
+      await this.page.goto(assessorUrl, {
         waitUntil: 'networkidle2',
         timeout: this.timeout
       });
