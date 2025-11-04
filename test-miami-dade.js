@@ -10,7 +10,7 @@ async function testMiamiDadeCounty() {
   console.log('🧪 Testing Miami-Dade County FL deed scraper...\n');
 
   // Real Miami-Dade County residential property address
-  const testAddress = '1637 NW 59th St, Miami, FL 33142';
+  const testAddress = '1637 NW 59th St, Miami, FL 33142, USA';
 
   const scraper = new MiamiDadeCountyFloridaScraper({
     headless: true, // Set to false for non-headless testing

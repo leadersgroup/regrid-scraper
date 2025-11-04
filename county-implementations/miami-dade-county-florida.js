@@ -215,7 +215,8 @@ class MiamiDadeCountyFloridaScraper extends DeedScraper {
 
     try {
       // Navigate to correct property search page
-      const assessorUrl = 'https://www.miamidadepa.gov/pa/home.page';
+      // Use the apps subdomain property search application
+      const assessorUrl = 'https://apps.miamidadepa.gov/propertysearch/#/';
       this.log(`🌐 Navigating to: ${assessorUrl}`);
 
       await this.page.goto(assessorUrl, {
@@ -223,7 +224,9 @@ class MiamiDadeCountyFloridaScraper extends DeedScraper {
         timeout: this.timeout
       });
 
-      await this.randomWait(3000, 5000);
+      // This is a JavaScript SPA - wait longer for it to fully load
+      this.log('⏳ Waiting for SPA to load...');
+      await this.randomWait(5000, 7000);
 
       // Extract just the street address (remove city, state, zip)
       const fullAddress = this.currentAddress || '';
@@ -233,13 +236,32 @@ class MiamiDadeCountyFloridaScraper extends DeedScraper {
 
       // Debug: Check what's on the page
       const pageStructure = await this.page.evaluate(() => {
-        const inputs = Array.from(document.querySelectorAll('input')).map(inp => ({
-          type: inp.type,
-          id: inp.id,
-          name: inp.name,
-          placeholder: inp.placeholder,
-          visible: inp.offsetParent !== null
-        }));
+        const inputs = Array.from(document.querySelectorAll('input')).map(inp => {
+          // Get label or nearby text
+          let label = '';
+          const labelEl = inp.closest('label') || document.querySelector(`label[for="${inp.id}"]`);
+          if (labelEl) {
+            label = labelEl.textContent?.trim() || '';
+          } else {
+            // Try to find nearby text
+            const parent = inp.parentElement;
+            if (parent) {
+              const prevText = parent.previousElementSibling?.textContent?.trim() || '';
+              const parentText = parent.textContent?.trim() || '';
+              label = prevText || parentText.substring(0, 50);
+            }
+          }
+
+          return {
+            type: inp.type,
+            id: inp.id,
+            name: inp.name,
+            placeholder: inp.placeholder,
+            visible: inp.offsetParent !== null,
+            label: label.substring(0, 50),
+            className: inp.className
+          };
+        });
         const buttons = Array.from(document.querySelectorAll('button')).map(btn => ({
           text: btn.textContent?.trim().substring(0, 30),
           type: btn.type,
@@ -251,8 +273,19 @@ class MiamiDadeCountyFloridaScraper extends DeedScraper {
       this.log(`📋 Page has ${pageStructure.inputs.length} inputs, ${pageStructure.buttons.length} buttons`);
       this.log(`📄 Page title: ${pageStructure.title}`);
 
+      // Log visible inputs with their labels
+      const visibleInputs = pageStructure.inputs.filter(inp => inp.visible);
+      if (visibleInputs.length > 0) {
+        this.log(`📋 Visible inputs:`);
+        visibleInputs.forEach((inp, i) => {
+          this.log(`   ${i + 1}. ${inp.label || '(no label)'} [${inp.type}] id="${inp.id}" class="${inp.className}"`);
+        });
+      }
+
       // Look for property address input field with improved selectors
+      // The SPA uses Kendo UI components with dynamic IDs
       const addressInputSelectors = [
+        'input.k-input-inner[type="text"]:visible', // Kendo UI input (SPA)
         'input#PropertyAddressSearch',
         'input#propertyAddressInput',
         'input[name="PropertyAddress"]',
@@ -266,24 +299,53 @@ class MiamiDadeCountyFloridaScraper extends DeedScraper {
       ];
 
       let addressInput = null;
-      for (const selector of addressInputSelectors) {
-        try {
-          const elements = await this.page.$$(selector);
-          if (elements.length > 0) {
-            // Check if visible
-            const isVisible = await this.page.evaluate((sel) => {
-              const elem = document.querySelector(sel);
-              return elem && elem.offsetParent !== null;
-            }, selector);
 
-            if (isVisible) {
-              addressInput = selector;
-              this.log(`✅ Found visible address input: ${selector}`);
-              break;
-            }
+      // For Kendo UI SPA, find the first visible k-input-inner
+      const kendoInputFound = await this.page.evaluate(() => {
+        // Try different selectors
+        let inputs = Array.from(document.querySelectorAll('input.k-input-inner'));
+        if (inputs.length === 0) {
+          inputs = Array.from(document.querySelectorAll('input[class*="k-input"]'));
+        }
+
+        for (let i = 0; i < inputs.length; i++) {
+          const input = inputs[i];
+          // Only consider text inputs that are visible
+          if (input.type === 'text' && input.offsetParent !== null) {
+            // Add a temporary attribute to identify it
+            input.setAttribute('data-address-input', 'true');
+            return { found: true, index: i, id: input.id, className: input.className };
           }
-        } catch (e) {
-          // Try next selector
+        }
+        return { found: false, inputCount: inputs.length };
+      });
+
+      this.log(`🔍 Kendo UI search result: ${JSON.stringify(kendoInputFound)}`);
+
+      if (kendoInputFound.found) {
+        addressInput = 'input[data-address-input="true"]';
+        this.log(`✅ Found Kendo UI address input (index ${kendoInputFound.index})`);
+      } else {
+        // Fallback to other selectors
+        for (const selector of addressInputSelectors) {
+          try {
+            const elements = await this.page.$$(selector);
+            if (elements.length > 0) {
+              // Check if visible
+              const isVisible = await this.page.evaluate((sel) => {
+                const elem = document.querySelector(sel);
+                return elem && elem.offsetParent !== null;
+              }, selector);
+
+              if (isVisible) {
+                addressInput = selector;
+                this.log(`✅ Found visible address input: ${selector}`);
+                break;
+              }
+            }
+          } catch (e) {
+            // Try next selector
+          }
         }
       }
 
@@ -297,7 +359,15 @@ class MiamiDadeCountyFloridaScraper extends DeedScraper {
       }
 
       // Enter street address
+      // First click to focus
       await this.page.click(addressInput);
+      await this.randomWait(500, 1000);
+
+      // Clear any existing placeholder/default text (triple-click to select all, then type)
+      await this.page.click(addressInput, { clickCount: 3 });
+      await this.randomWait(200, 500);
+
+      // Type the address
       await this.page.type(addressInput, streetAddress, { delay: 100 });
       this.log(`✅ Entered address: ${streetAddress}`);
 
@@ -307,18 +377,19 @@ class MiamiDadeCountyFloridaScraper extends DeedScraper {
       // Look for autocomplete dropdown and click on the first result
       this.log('🔍 Looking for autocomplete suggestions...');
 
-      const autocompleteClicked = await this.page.evaluate(() => {
+      const autocompleteClicked = await this.page.evaluate((streetAddress) => {
         // Look for autocomplete results with multiple selector strategies
         const selectors = [
           'ul.ui-autocomplete li',
           'ul.autocomplete-results li',
           '.dropdown-menu .dropdown-item',
-          'ul li',
           '.autocomplete-item',
           '.ui-menu-item',
           'div[role="option"]',
           '[role="listbox"] [role="option"]'
         ];
+
+        const foundItems = [];
 
         for (const selector of selectors) {
           const items = Array.from(document.querySelectorAll(selector));
@@ -327,24 +398,54 @@ class MiamiDadeCountyFloridaScraper extends DeedScraper {
               // Check if visible and has text
               if (item.offsetParent !== null) {
                 const text = (item.innerText || item.textContent || '').trim();
-                if (text.length > 5) {
+
+                // Log what we find for debugging
+                if (text.length > 0) {
+                  foundItems.push({ selector, text: text.substring(0, 100) });
+                }
+
+                // Filter for actual property addresses:
+                // 1. Must contain street address parts
+                // 2. Should look like an address (has street number + street name pattern)
+                // 3. Should NOT be navigation/UI elements
+                const containsSearchAddress = text.toLowerCase().includes(streetAddress.toLowerCase());
+                const looksLikeAddress = /^\d+\s+\w+/.test(text); // Starts with number followed by street name
+                const hasCommonStreetSuffixes = /\b(st|street|ave|avenue|rd|road|dr|drive|ln|lane|blvd|boulevard|way|ct|court|pl|place|ter|terrace|pkwy|parkway|cir|circle)\b/i.test(text);
+                const isNotUIElement = !text.toLowerCase().match(/^(go to|slide|online|property search|sales?|home|help|about|contact|menu|nav)/i);
+
+                // Best match: contains our search address AND looks like an address
+                if (containsSearchAddress && looksLikeAddress && text.length > 10) {
                   item.click();
-                  return { clicked: true, text: text.substring(0, 100), selector };
+                  return { clicked: true, text: text.substring(0, 100), selector, matched: 'exact', foundItems };
+                }
+
+                // Good match: looks like an address with common street patterns
+                if (looksLikeAddress && hasCommonStreetSuffixes && isNotUIElement && text.length > 10) {
+                  item.click();
+                  return { clicked: true, text: text.substring(0, 100), selector, matched: 'address-pattern', foundItems };
                 }
               }
             }
           }
         }
 
-        return { clicked: false };
-      });
+        return { clicked: false, foundItems };
+      }, streetAddress);
+
+      // Log what was found for debugging
+      if (autocompleteClicked.foundItems && autocompleteClicked.foundItems.length > 0) {
+        this.log(`📋 Found ${autocompleteClicked.foundItems.length} autocomplete item(s):`);
+        autocompleteClicked.foundItems.slice(0, 5).forEach((item, i) => {
+          this.log(`   ${i + 1}. "${item.text}" (${item.selector})`);
+        });
+      }
 
       if (autocompleteClicked.clicked) {
-        this.log(`✅ Clicked autocomplete item: "${autocompleteClicked.text}"`);
+        this.log(`✅ Clicked autocomplete item (${autocompleteClicked.matched} match): "${autocompleteClicked.text}"`);
         await this.randomWait(3000, 5000);
       } else {
         // No autocomplete, try submitting search
-        this.log(`ℹ️  No autocomplete item found, will try search button`);
+        this.log(`ℹ️  No valid autocomplete address found, will try search button`);
 
         // Look for search button
         const searchButtonSelectors = [
@@ -386,25 +487,42 @@ class MiamiDadeCountyFloridaScraper extends DeedScraper {
       const folioClicked = await this.page.evaluate(() => {
         // Look for folio number links - they typically look like: 01-3114-035-2520
         const allLinks = Array.from(document.querySelectorAll('a'));
+        const linkInfo = [];
 
         for (const link of allLinks) {
           const text = (link.textContent || '').trim();
           const href = link.href || '';
+
+          // Collect all links with numbers for debugging
+          if (/\d/.test(text) && text.length > 0 && text.length < 100) {
+            linkInfo.push({ text, href: href.substring(0, 80) });
+          }
 
           // Match folio pattern: XX-XXXX-XXX-XXXX (Miami-Dade folio format)
           if (text.match(/^\d{2}-\d{4}-\d{3}-\d{4}$/) ||
               href.includes('propertyrecord') ||
               href.includes('Property_ID')) {
             link.click();
-            return { clicked: true, folio: text, href: href.substring(0, 100) };
+            return { clicked: true, folio: text, href: href.substring(0, 100), linkInfo };
           }
         }
 
-        return { clicked: false };
+        return { clicked: false, linkInfo };
       });
 
       if (!folioClicked.clicked) {
         this.log(`⚠️ Could not find folio number link in search results`);
+
+        // Log what links we did find for debugging
+        if (folioClicked.linkInfo && folioClicked.linkInfo.length > 0) {
+          this.log(`📋 Found ${folioClicked.linkInfo.length} links with numbers:`);
+          folioClicked.linkInfo.slice(0, 10).forEach((link, i) => {
+            this.log(`   ${i + 1}. "${link.text}" -> ${link.href}`);
+          });
+        } else {
+          this.log(`   No links with numbers found on page`);
+        }
+
         return {
           success: false,
           message: 'Property found but could not navigate to details (no folio link)'
