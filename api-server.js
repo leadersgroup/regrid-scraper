@@ -23,6 +23,7 @@ const path = require('path');
 // Import county implementations
 const OrangeCountyFloridaScraper = require('./county-implementations/orange-county-florida');
 const HillsboroughCountyFloridaScraper = require('./county-implementations/hillsborough-county-florida');
+const PolkCountyFloridaScraper = require('./county-implementations/polk-county-florida');
 const PinellasCountyFloridaScraper = require('./county-implementations/pinellas-county-florida');
 const BrevardCountyFloridaScraper = require('./county-implementations/brevard-county-florida');
 const LeeCountyFloridaScraper = require('./county-implementations/lee-county-florida');
@@ -89,6 +90,7 @@ app.get('/api/counties', (req, res) => {
         cost: 'Free (no CAPTCHA)'
       },
       {
+        name: 'Polk County',
         name: 'Pinellas County',
         name: 'Brevard County',
         name: 'Lee County',
@@ -99,6 +101,7 @@ app.get('/api/counties', (req, res) => {
         features: [
           'Full PDF download',
           'Transaction history extraction',
+          'Book/Page support'
           'Document Number and Book/Page support'
           'Instrument Number and Book/Page support'
           'Instrument number and Book/Page support'
@@ -153,6 +156,8 @@ async function processDeedDownload(address, county, state, options = {}) {
       timeout: options?.timeout || 120000,
       verbose: options?.verbose || false
     });
+  } else if (detectedCounty === 'Polk' && detectedState === 'FL') {
+    scraper = new PolkCountyFloridaScraper({
   } else if (detectedCounty === 'Pinellas' && detectedState === 'FL') {
     scraper = new PinellasCountyFloridaScraper({
   } else if (detectedCounty === 'Brevard' && detectedState === 'FL') {
