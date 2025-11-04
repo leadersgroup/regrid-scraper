@@ -2,8 +2,8 @@
  * Miami-Dade County, Florida - Deed Scraper Implementation
  *
  * County Resources:
- * - Property Appraiser: https://apps.miamidadepa.gov/propertysearch/ (Updated URL as of 2025)
- * - Old URL (redirects): https://www.miamidade.gov/Apps/PA/propertysearch/
+ * - Property Appraiser: https://www.miamidadepa.gov/pa/home.page (Correct URL)
+ * - Workflow: Search address → Click folio → Sales Information tab → Click ORB-Page → Document Image → Download PDF
  * - Clerk of Courts (Official Records): https://onlineservices.miamidadeclerk.gov/officialrecords/
  */
 
@@ -120,7 +120,7 @@ class MiamiDadeCountyFloridaScraper extends DeedScraper {
 
       // STEP 2: Search Property Appraiser for property
       this.log(`📋 Step 2: Searching county property assessor for: ${this.county} County, ${this.state}`);
-      this.log(`🌐 Navigating to assessor: https://apps.miamidadepa.gov/propertysearch/`);
+      this.log(`🌐 Navigating to assessor: https://www.miamidadepa.gov/pa/home.page`);
 
       const assessorResult = await this.searchAssessorSite(null, null);
 
@@ -144,7 +144,8 @@ class MiamiDadeCountyFloridaScraper extends DeedScraper {
       result.steps.step2 = {
         success: transactionResult.success,
         transactions: transactionResult.transactions || [],
-        assessorUrl: 'https://apps.miamidadepa.gov/propertysearch/',
+        assessorUrl: 'https://www.miamidadepa.gov/pa/home.page',
+        folio: assessorResult.folio,
         originalAddress: address,
         county: 'Miami-Dade',
         state: 'FL'
@@ -194,22 +195,27 @@ class MiamiDadeCountyFloridaScraper extends DeedScraper {
    */
   getAssessorUrl(county, state) {
     if (county === 'Miami-Dade' && state === 'FL') {
-      return 'https://apps.miamidadepa.gov/propertysearch/';
+      return 'https://www.miamidadepa.gov/pa/home.page';
     }
     return null;
   }
 
   /**
    * Search Miami-Dade County Property Appraiser by address
-   * URL: https://apps.miamidadepa.gov/propertysearch/ (Updated 2025)
+   * URL: https://www.miamidadepa.gov/pa/home.page
+   *
+   * Workflow:
+   * 1. Search by address
+   * 2. Click on folio number (e.g., 01-3114-035-2520)
+   * 3. Navigate to property details page
    */
   async searchAssessorSite(parcelId, ownerName) {
     this.log(`🔍 Searching Miami-Dade County FL Property Appraiser`);
     this.log(`   Using address search`);
 
     try {
-      // Navigate to property search page (updated URL)
-      const assessorUrl = 'https://apps.miamidadepa.gov/propertysearch/';
+      // Navigate to correct property search page
+      const assessorUrl = 'https://www.miamidadepa.gov/pa/home.page';
       this.log(`🌐 Navigating to: ${assessorUrl}`);
 
       await this.page.goto(assessorUrl, {
@@ -374,7 +380,41 @@ class MiamiDadeCountyFloridaScraper extends DeedScraper {
       this.log(`⏳ Waiting for property details to load...`);
       await this.randomWait(5000, 7000);
 
-      // Check if we're on a property detail page with improved detection
+      // Look for folio number link in search results and click it
+      this.log('🔍 Looking for folio number link in search results...');
+
+      const folioClicked = await this.page.evaluate(() => {
+        // Look for folio number links - they typically look like: 01-3114-035-2520
+        const allLinks = Array.from(document.querySelectorAll('a'));
+
+        for (const link of allLinks) {
+          const text = (link.textContent || '').trim();
+          const href = link.href || '';
+
+          // Match folio pattern: XX-XXXX-XXX-XXXX (Miami-Dade folio format)
+          if (text.match(/^\d{2}-\d{4}-\d{3}-\d{4}$/) ||
+              href.includes('propertyrecord') ||
+              href.includes('Property_ID')) {
+            link.click();
+            return { clicked: true, folio: text, href: href.substring(0, 100) };
+          }
+        }
+
+        return { clicked: false };
+      });
+
+      if (!folioClicked.clicked) {
+        this.log(`⚠️ Could not find folio number link in search results`);
+        return {
+          success: false,
+          message: 'Property found but could not navigate to details (no folio link)'
+        };
+      }
+
+      this.log(`✅ Clicked folio number: ${folioClicked.folio}`);
+      await this.randomWait(5000, 7000);
+
+      // Check if we're on the property detail page
       const propertyCheckResult = await this.page.evaluate(() => {
         const text = document.body.innerText.toLowerCase();
         const url = window.location.href;
@@ -389,52 +429,31 @@ class MiamiDadeCountyFloridaScraper extends DeedScraper {
                                text.includes('assessed value') ||
                                text.includes('property details');
 
-        // Check for error messages
-        const hasError = text.includes('no results') ||
-                        text.includes('not found') ||
-                        text.includes('no matches') ||
-                        text.includes('no properties found');
-
-        // Check if URL changed (might indicate navigation to property page)
-        const urlChanged = url.includes('property') ||
-                          url.includes('folio') ||
-                          url.includes('details');
-
         return {
           hasPropertyInfo,
-          hasError,
-          urlChanged,
           url,
           textSample: text.substring(0, 300)
         };
       });
 
-      this.log(`🔍 Property check result:`);
+      this.log(`🔍 Property detail page check:`);
       this.log(`   Has property info: ${propertyCheckResult.hasPropertyInfo}`);
-      this.log(`   Has error message: ${propertyCheckResult.hasError}`);
-      this.log(`   URL changed: ${propertyCheckResult.urlChanged}`);
       this.log(`   Current URL: ${propertyCheckResult.url}`);
 
-      if (propertyCheckResult.hasPropertyInfo || propertyCheckResult.urlChanged) {
-        this.log(`✅ Property details page loaded`);
+      if (propertyCheckResult.hasPropertyInfo) {
+        this.log(`✅ Property details page loaded successfully`);
         return {
           success: true,
           message: 'Property found on assessor website',
-          url: propertyCheckResult.url
-        };
-      } else if (propertyCheckResult.hasError) {
-        this.log(`⚠️ Property not found - error message detected`);
-        this.log(`   Text sample: ${propertyCheckResult.textSample}`);
-        return {
-          success: false,
-          message: 'Property not found - no results from search'
+          url: propertyCheckResult.url,
+          folio: folioClicked.folio
         };
       } else {
-        this.log(`⚠️ Property search failed - no property details detected`);
+        this.log(`⚠️ Property details not found after clicking folio`);
         this.log(`   Text sample: ${propertyCheckResult.textSample}`);
         return {
           success: false,
-          message: 'Could not verify property details loaded'
+          message: 'Could not verify property details loaded after clicking folio'
         };
       }
 
@@ -501,32 +520,58 @@ class MiamiDadeCountyFloridaScraper extends DeedScraper {
         this.log(`ℹ️  No Sales tab found, checking current page for transaction data`);
       }
 
-      // Extract transaction information from the page
-      this.log('🔍 Extracting transaction data...');
+      // Extract transaction information from the page - look for clickable ORB-Page links
+      this.log('🔍 Extracting transaction data and ORB-Page links...');
 
       const transactions = await this.page.evaluate(() => {
         const results = [];
 
-        // Look for ORB (Official Record Book) references
-        // Miami-Dade uses format: ORB: XXXXX PG: XXXX
-        // or Book/Page format
-        const allText = document.body.innerText;
-        const lines = allText.split('\n');
+        // First, look for clickable links with ORB-Page format (e.g., "30585-4762")
+        const allLinks = Array.from(document.querySelectorAll('a'));
+        for (const link of allLinks) {
+          const text = (link.textContent || '').trim();
+          const href = link.href || '';
 
-        for (const line of lines) {
-          // Pattern 1: ORB: XXXXX PG: XXXX
-          const orbMatch = line.match(/ORB:?\s*(\d+)\s+PG:?\s*(\d+)/i);
-          if (orbMatch) {
-            const book = orbMatch[1];
-            const page = orbMatch[2];
+          // Pattern: XXXXX-XXXX (ORB-Page format like 30585-4762)
+          const orbPageMatch = text.match(/^(\d{5})-(\d{4})$/);
+          if (orbPageMatch) {
+            const book = orbPageMatch[1];
+            const page = orbPageMatch[2];
 
-            // Check if not already added
-            const exists = results.some(r => r.bookNumber === book && r.pageNumber === page);
+            const exists = results.some(r => r.officialRecordBook === book && r.pageNumber === page);
             if (!exists) {
               results.push({
                 officialRecordBook: book,
                 pageNumber: page,
-                type: 'orb',
+                type: 'orb_link',
+                clickable: true,
+                linkText: text,
+                linkHref: href,
+                source: 'Miami-Dade County Property Appraiser (clickable link)',
+                rawText: text
+              });
+            }
+          }
+        }
+
+        // Also look for ORB references in text
+        const allText = document.body.innerText;
+        const lines = allText.split('\n');
+
+        for (const line of lines) {
+          // Pattern 1: ORB: XXXXX PG: XXXX or ORB XXXXX-XXXX
+          const orbMatch = line.match(/ORB:?\s*(\d+)[-\s]+(?:PG:?\s*)?(\d+)/i);
+          if (orbMatch) {
+            const book = orbMatch[1];
+            const page = orbMatch[2];
+
+            const exists = results.some(r => r.officialRecordBook === book && r.pageNumber === page);
+            if (!exists) {
+              results.push({
+                officialRecordBook: book,
+                pageNumber: page,
+                type: 'orb_text',
+                clickable: false,
                 source: 'Miami-Dade County Property Appraiser',
                 rawText: line.trim().substring(0, 200)
               });
@@ -627,11 +672,251 @@ class MiamiDadeCountyFloridaScraper extends DeedScraper {
   }
 
   /**
-   * Download deed PDF from Miami-Dade County Clerk
-   * Search by ORB/Page or Document ID and download the PDF
+   * Download deed PDF from Miami-Dade County Property Appraiser
+   *
+   * New Workflow (from Property Appraiser page):
+   * 1. Click on ORB-Page link (e.g., "30585-4762")
+   * 2. Click on first entry in results
+   * 3. Click on "Document Image" button
+   * 4. Download the PDF
    */
   async downloadDeed(transaction) {
-    this.log('📄 Downloading deed from Miami-Dade County Clerk...');
+    this.log('📄 Downloading deed from Miami-Dade County Property Appraiser...');
+
+    try {
+      // If transaction has a clickable link, click it directly
+      if (transaction.clickable && transaction.linkText) {
+        this.log(`🔗 Clicking on ORB-Page link: ${transaction.linkText}`);
+
+        const orbLinkClicked = await this.page.evaluate((linkText) => {
+          const allLinks = Array.from(document.querySelectorAll('a'));
+          for (const link of allLinks) {
+            if (link.textContent?.trim() === linkText) {
+              link.click();
+              return true;
+            }
+          }
+          return false;
+        }, transaction.linkText);
+
+        if (!orbLinkClicked) {
+          throw new Error(`Could not find clickable ORB-Page link: ${transaction.linkText}`);
+        }
+
+        this.log(`✅ Clicked ORB-Page link`);
+        await this.randomWait(5000, 7000);
+      } else {
+        // If not clickable, navigate to clerk's website the old way
+        this.log('⚠️ Transaction not directly clickable, using clerk website search...');
+        return await this.downloadDeedFromClerk(transaction);
+      }
+
+      // After clicking ORB-Page link, we should be on a document list page
+      // Now click on the first entry
+      this.log('🔍 Looking for first document entry...');
+
+      const firstEntryClicked = await this.page.evaluate(() => {
+        // Look for clickable document entries - could be links or buttons
+        const candidates = [
+          ...Array.from(document.querySelectorAll('a')),
+          ...Array.from(document.querySelectorAll('tr')),
+          ...Array.from(document.querySelectorAll('[onclick]'))
+        ];
+
+        for (const elem of candidates) {
+          const text = (elem.textContent || '').toLowerCase();
+          const onclick = elem.getAttribute('onclick') || '';
+
+          // Look for entries that might be document records
+          if (text.includes('deed') ||
+              text.includes('warranty') ||
+              text.includes('doc') ||
+              onclick.includes('document') ||
+              onclick.includes('record')) {
+            elem.click();
+            return { clicked: true, text: text.substring(0, 100) };
+          }
+        }
+
+        // If no specific deed entry found, try clicking first table row link
+        const tableLinks = Array.from(document.querySelectorAll('table tr a'));
+        if (tableLinks.length > 0) {
+          tableLinks[0].click();
+          return { clicked: true, text: 'First table link' };
+        }
+
+        return { clicked: false };
+      });
+
+      if (!firstEntryClicked.clicked) {
+        this.log('⚠️ Could not find document entry to click, trying Document Image button directly...');
+      } else {
+        this.log(`✅ Clicked document entry: ${firstEntryClicked.text}`);
+        await this.randomWait(3000, 5000);
+      }
+
+      // Now look for "Document Image" button and click it
+      this.log('🔍 Looking for Document Image button...');
+
+      const documentImageClicked = await this.page.evaluate(() => {
+        const allElements = [
+          ...Array.from(document.querySelectorAll('button')),
+          ...Array.from(document.querySelectorAll('a')),
+          ...Array.from(document.querySelectorAll('input[type="button"]')),
+          ...Array.from(document.querySelectorAll('[onclick]'))
+        ];
+
+        for (const elem of allElements) {
+          const text = (elem.textContent || elem.value || '').toLowerCase();
+
+          if (text.includes('document image') ||
+              text.includes('view document') ||
+              text.includes('view image') ||
+              text.includes('show document')) {
+            elem.click();
+            return { clicked: true, text: text.substring(0, 100) };
+          }
+        }
+
+        return { clicked: false };
+      });
+
+      if (!documentImageClicked.clicked) {
+        throw new Error('Could not find Document Image button');
+      }
+
+      this.log(`✅ Clicked Document Image button`);
+      await this.randomWait(5000, 7000);
+
+      // The document should now open in a new window or navigate to PDF
+      // Check for new window/tab
+      this.log('⏳ Waiting for PDF to load...');
+
+      const pages = await this.browser.pages();
+      let pdfPage = null;
+
+      // Check if a new page/tab was opened
+      if (pages.length > 1) {
+        pdfPage = pages[pages.length - 1];
+        this.log('✅ Found new window/tab with PDF');
+      } else {
+        // PDF might have loaded in the same page
+        pdfPage = this.page;
+        this.log('ℹ️  PDF loaded in same page');
+      }
+
+      await this.randomWait(3000, 5000);
+
+      // Get PDF URL
+      const pdfUrl = pdfPage.url();
+      this.log(`📍 PDF URL: ${pdfUrl}`);
+
+      // Check if it's actually a PDF
+      if (!pdfUrl.toLowerCase().includes('.pdf') && !pdfUrl.includes('/pdf')) {
+        // Try to find PDF link or iframe
+        const pdfFound = await pdfPage.evaluate(() => {
+          // Look for iframe with PDF
+          const iframes = Array.from(document.querySelectorAll('iframe'));
+          for (const iframe of iframes) {
+            const src = iframe.src || '';
+            if (src.includes('.pdf') || src.includes('/pdf')) {
+              return { found: true, url: src };
+            }
+          }
+
+          // Look for PDF links
+          const links = Array.from(document.querySelectorAll('a'));
+          for (const link of links) {
+            const href = link.href || '';
+            if (href.includes('.pdf') || href.includes('/pdf')) {
+              return { found: true, url: href };
+            }
+          }
+
+          return { found: false };
+        });
+
+        if (pdfFound.found) {
+          this.log(`✅ Found PDF URL: ${pdfFound.url}`);
+          // Navigate to the PDF
+          await pdfPage.goto(pdfFound.url, { waitUntil: 'networkidle2', timeout: 30000 });
+          await this.randomWait(3000, 5000);
+        } else {
+          throw new Error('Could not locate PDF document');
+        }
+      }
+
+      // Download the PDF
+      this.log('📥 Downloading PDF...');
+
+      const pdfBuffer = await pdfPage.evaluate(async () => {
+        const response = await fetch(window.location.href);
+        if (!response.ok) {
+          throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+        }
+        const arrayBuffer = await response.arrayBuffer();
+        return Array.from(new Uint8Array(arrayBuffer));
+      });
+
+      const buffer = Buffer.from(pdfBuffer);
+
+      // Verify it's a PDF
+      const isPDF = buffer.slice(0, 4).toString() === '%PDF';
+      if (!isPDF) {
+        throw new Error('Downloaded file is not a valid PDF');
+      }
+
+      this.log(`✅ PDF downloaded successfully (${buffer.length} bytes)`);
+
+      // Close the PDF page if it's a new window
+      if (pages.length > 1 && pdfPage !== this.page) {
+        await pdfPage.close();
+      }
+
+      // Save PDF to disk
+      const path = require('path');
+      const fs = require('fs');
+      const relativePath = process.env.DEED_DOWNLOAD_PATH || './downloads';
+      const downloadPath = path.resolve(relativePath);
+
+      if (!fs.existsSync(downloadPath)) {
+        fs.mkdirSync(downloadPath, { recursive: true });
+        this.log(`📁 Created download directory: ${downloadPath}`);
+      }
+
+      const filename = `miami-dade_deed_${transaction.officialRecordBook}_${transaction.pageNumber}.pdf`;
+      const filepath = path.join(downloadPath, filename);
+
+      fs.writeFileSync(filepath, buffer);
+      this.log(`💾 Saved PDF to: ${filepath}`);
+
+      return {
+        success: true,
+        filename,
+        filepath,
+        downloadPath,
+        officialRecordBook: transaction.officialRecordBook,
+        pageNumber: transaction.pageNumber,
+        timestamp: new Date().toISOString(),
+        fileSize: buffer.length,
+        fileSizeKB: (buffer.length / 1024).toFixed(2)
+      };
+
+    } catch (error) {
+      this.log(`❌ Failed to download deed: ${error.message}`);
+      return {
+        success: false,
+        error: error.message
+      };
+    }
+  }
+
+  /**
+   * Fallback method: Download deed from Miami-Dade Clerk website
+   * Used when Property Appraiser link is not clickable
+   */
+  async downloadDeedFromClerk(transaction) {
+    this.log('📄 Downloading deed from Miami-Dade County Clerk website...');
 
     try {
       const clerkUrl = 'https://onlineservices.miamidadeclerk.gov/officialrecords/StandardSearch.aspx';
