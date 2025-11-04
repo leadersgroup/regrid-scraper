@@ -23,6 +23,7 @@ const path = require('path');
 // Import county implementations
 const OrangeCountyFloridaScraper = require('./county-implementations/orange-county-florida');
 const HillsboroughCountyFloridaScraper = require('./county-implementations/hillsborough-county-florida');
+const PolkCountyFloridaScraper = require('./county-implementations/polk-county-florida');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -82,6 +83,17 @@ app.get('/api/counties', (req, res) => {
           'CFN and Book/Page support'
         ],
         cost: 'Free (no CAPTCHA)'
+      },
+      {
+        name: 'Polk County',
+        state: 'FL',
+        stateCode: 'Florida',
+        features: [
+          'Full PDF download',
+          'Transaction history extraction',
+          'Book/Page support'
+        ],
+        cost: 'Free (no CAPTCHA)'
       }
     ]
   });
@@ -102,6 +114,12 @@ async function processDeedDownload(address, county, state, options = {}) {
     });
   } else if (detectedCounty === 'Hillsborough' && detectedState === 'FL') {
     scraper = new HillsboroughCountyFloridaScraper({
+      headless: options?.headless !== false, // Default to headless
+      timeout: options?.timeout || 120000,
+      verbose: options?.verbose || false
+    });
+  } else if (detectedCounty === 'Polk' && detectedState === 'FL') {
+    scraper = new PolkCountyFloridaScraper({
       headless: options?.headless !== false, // Default to headless
       timeout: options?.timeout || 120000,
       verbose: options?.verbose || false
