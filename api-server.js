@@ -95,6 +95,16 @@ app.get('/api/counties', (req, res) => {
       },
       {
         name: 'Duval County',
+        state: 'FL',
+        stateCode: 'Florida',
+        features: [
+          'Full PDF download',
+          'Transaction history extraction',
+          'Instrument Number and Book/Page support'
+        ],
+        cost: 'Free (no CAPTCHA)'
+      },
+      {
         name: 'Davidson County',
         state: 'TN',
         stateCode: 'Tennessee',
@@ -110,11 +120,63 @@ app.get('/api/counties', (req, res) => {
           mobileApp: 'Nashville - Davidson Co. ROD (Free on iOS/Android)',
           inPerson: '501 Broadway, Suite 301, Nashville, TN 37203'
         }
+      },
+      {
         name: 'Polk County',
+        state: 'FL',
+        stateCode: 'Florida',
+        features: [
+          'Full PDF download',
+          'Transaction history extraction',
+          'Book/Page support'
+        ],
+        cost: 'Free (no CAPTCHA)'
+      },
+      {
         name: 'Pinellas County',
+        state: 'FL',
+        stateCode: 'Florida',
+        features: [
+          'Full PDF download',
+          'Transaction history extraction',
+          'Document Number and Book/Page support'
+        ],
+        cost: 'Free (no CAPTCHA)'
+      },
+      {
         name: 'Brevard County',
+        state: 'FL',
+        stateCode: 'Florida',
+        features: [
+          'Full PDF download',
+          'Transaction history extraction',
+          'Instrument Number and Book/Page support'
+        ],
+        cost: 'Free (no CAPTCHA)'
+      },
+      {
         name: 'Lee County',
+        state: 'FL',
+        stateCode: 'Florida',
+        features: [
+          'Full PDF download',
+          'Transaction history extraction',
+          'Instrument number and Book/Page support'
+        ],
+        cost: 'Free (no CAPTCHA)'
+      },
+      {
         name: 'Palm Beach County',
+        state: 'FL',
+        stateCode: 'Florida',
+        features: [
+          'Full PDF download',
+          'Transaction history extraction',
+          'ORB/Book and Page support'
+        ],
+        cost: 'Free (no CAPTCHA)'
+      },
+      {
         name: 'Miami-Dade County',
         state: 'FL',
         stateCode: 'Florida',
@@ -122,11 +184,6 @@ app.get('/api/counties', (req, res) => {
           'Full PDF download',
           'Transaction history extraction',
           'Instrument Number and Book/Page support'
-          'Book/Page support'
-          'Document Number and Book/Page support'
-          'Instrument Number and Book/Page support'
-          'Instrument number and Book/Page support'
-          'ORB/Book and Page support'
         ],
         cost: 'Free (no CAPTCHA)'
       }
@@ -179,18 +236,46 @@ async function processDeedDownload(address, county, state, options = {}) {
     });
   } else if (detectedCounty === 'Duval' && detectedState === 'FL') {
     scraper = new DuvalCountyFloridaScraper({
+      headless: options?.headless !== false,
+      timeout: options?.timeout || 120000,
+      verbose: options?.verbose || false
+    });
   } else if (detectedCounty === 'Davidson' && detectedState === 'TN') {
     scraper = new DavidsonCountyTennesseeScraper({
+      headless: options?.headless !== false,
+      timeout: options?.timeout || 120000,
+      verbose: options?.verbose || false
+    });
   } else if (detectedCounty === 'Polk' && detectedState === 'FL') {
     scraper = new PolkCountyFloridaScraper({
+      headless: options?.headless !== false,
+      timeout: options?.timeout || 120000,
+      verbose: options?.verbose || false
+    });
   } else if (detectedCounty === 'Pinellas' && detectedState === 'FL') {
     scraper = new PinellasCountyFloridaScraper({
+      headless: options?.headless !== false,
+      timeout: options?.timeout || 120000,
+      verbose: options?.verbose || false
+    });
   } else if (detectedCounty === 'Brevard' && detectedState === 'FL') {
     scraper = new BrevardCountyFloridaScraper({
+      headless: options?.headless !== false,
+      timeout: options?.timeout || 120000,
+      verbose: options?.verbose || false
+    });
   } else if (detectedCounty === 'Lee' && detectedState === 'FL') {
     scraper = new LeeCountyFloridaScraper({
+      headless: options?.headless !== false,
+      timeout: options?.timeout || 120000,
+      verbose: options?.verbose || false
+    });
   } else if (detectedCounty === 'Palm Beach' && detectedState === 'FL') {
     scraper = new PalmBeachCountyFloridaScraper({
+      headless: options?.headless !== false,
+      timeout: options?.timeout || 120000,
+      verbose: options?.verbose || false
+    });
   } else if (detectedCounty === 'Miami-Dade' && detectedState === 'FL') {
     scraper = new MiamiDadeCountyFloridaScraper({
       headless: options?.headless !== false, // Default to headless
@@ -234,17 +319,6 @@ app.post('/api/getPriorDeed', async (req, res) => {
       });
     }
 
-    // Check if 2Captcha API key is configured (only required for Orange County)
-    const detectedCounty = county || 'Orange';
-    const detectedState = state || 'FL';
-    const requiresCaptcha = (detectedCounty === 'Orange' && detectedState === 'FL');
-
-    if (requiresCaptcha && !process.env.TWOCAPTCHA_TOKEN) {
-      return res.status(503).json({
-        success: false,
-        error: 'CAPTCHA solver not configured',
-        message: 'Set TWOCAPTCHA_TOKEN environment variable to enable deed downloads for Orange County, FL',
-        documentation: 'See CAPTCHA_SOLVING_SETUP.md for setup instructions'
     // Normalize county name for routing
     const normalizedCounty = normalizeCountyName(county) || 'Orange';
     const normalizedState = (state || 'FL').toUpperCase();
