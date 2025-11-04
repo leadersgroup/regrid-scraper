@@ -18,6 +18,23 @@ class HillsboroughCountyFloridaScraper extends DeedScraper {
     super(options);
     this.county = 'Hillsborough';
     this.state = 'FL';
+    this.debugLogs = []; // Collect debug logs for API response
+  }
+
+  /**
+   * Override log method to collect debug logs for API response
+   */
+  log(message) {
+    // Call parent log method (console.log if verbose)
+    super.log(message);
+
+    // Also collect debug logs for API response
+    if (message.includes('[DEBUG]')) {
+      this.debugLogs.push({
+        timestamp: new Date().toISOString(),
+        message: message
+      });
+    }
   }
 
   /**
@@ -654,14 +671,16 @@ class HillsboroughCountyFloridaScraper extends DeedScraper {
 
       return {
         success: transactions.length > 0,
-        transactions
+        transactions,
+        debugLogs: this.debugLogs // Include debug logs in response
       };
 
     } catch (error) {
       this.log(`❌ Failed to extract transaction records: ${error.message}`);
       return {
         success: false,
-        error: error.message
+        error: error.message,
+        debugLogs: this.debugLogs // Include debug logs even on error
       };
     }
   }
