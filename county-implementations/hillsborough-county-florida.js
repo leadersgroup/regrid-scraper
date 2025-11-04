@@ -22,19 +22,12 @@ class HillsboroughCountyFloridaScraper extends DeedScraper {
   }
 
   /**
-   * Override log method to collect debug logs for API response
+   * Override log method - just use parent implementation
+   * All logs will be visible in Railway logs
    */
   log(message) {
     // Call parent log method (console.log if verbose)
     super.log(message);
-
-    // Also collect debug logs for API response
-    if (message.includes('[DEBUG]')) {
-      this.debugLogs.push({
-        timestamp: new Date().toISOString(),
-        message: message
-      });
-    }
   }
 
   /**
@@ -338,11 +331,11 @@ class HillsboroughCountyFloridaScraper extends DeedScraper {
       await this.randomWait(1000, 2000);
 
       // Try using Puppeteer's native click instead of evaluate
-      this.log(`🔍 [DEBUG] About to click search button...`);
+      this.log(`🔍 [INFO] About to click search button...`);
       try {
         const searchButtonSelector = 'button[type="submit"]';
         await this.page.waitForSelector(searchButtonSelector, { timeout: 5000 });
-        this.log(`🔍 [DEBUG] Found search button: ${searchButtonSelector}`);
+        this.log(`🔍 [INFO] Found search button: ${searchButtonSelector}`);
         await this.page.click(searchButtonSelector);
         this.log(`✅ Clicked search button via Puppeteer`);
       } catch (clickError) {
@@ -360,7 +353,7 @@ class HillsboroughCountyFloridaScraper extends DeedScraper {
 
       // Log current URL before waiting
       const urlBefore = await this.page.url();
-      this.log(`🔍 [DEBUG] Current URL before wait: ${urlBefore}`);
+      this.log(`🔍 [INFO] Current URL before wait: ${urlBefore}`);
 
       // Then wait for URL to change indicating navigation to results page
       try {
@@ -373,11 +366,11 @@ class HillsboroughCountyFloridaScraper extends DeedScraper {
 
         const urlAfter = await this.page.url();
         this.log(`✅ Search results loaded (URL changed to results page)`);
-        this.log(`🔍 [DEBUG] New URL: ${urlAfter}`);
+        this.log(`🔍 [INFO] New URL: ${urlAfter}`);
       } catch (waitError) {
         const urlAfter = await this.page.url();
         this.log(`⚠️ Timeout waiting for URL to change (waited 45s), checking page content anyway...`);
-        this.log(`🔍 [DEBUG] URL after timeout: ${urlAfter}`);
+        this.log(`🔍 [INFO] URL after timeout: ${urlAfter}`);
       }
 
       // Additional wait for any animations/transitions to complete
@@ -392,7 +385,7 @@ class HillsboroughCountyFloridaScraper extends DeedScraper {
           hasResults: !!document.querySelector('table tbody tr')
         };
       });
-      this.log(`🔍 [DEBUG] Page state: ${JSON.stringify(pageInfo)}`);
+      this.log(`🔍 [INFO] Page state: ${JSON.stringify(pageInfo)}`);
 
       // Check if property was found by looking for results table
       const searchStatus = await this.page.evaluate(() => {
@@ -427,7 +420,7 @@ class HillsboroughCountyFloridaScraper extends DeedScraper {
         // Click on the folio number in the results table
         await this.randomWait(2000, 3000);
 
-        this.log(`🔍 [DEBUG] Looking for folio number link in results table...`);
+        this.log(`🔍 [INFO] Looking for folio number link in results table...`);
         const resultClicked = await this.page.evaluate(() => {
           // Look for the folio number link in the results table
           // Folio format: XXXXXX-XXXX (e.g., 000034-0200)
@@ -459,7 +452,7 @@ class HillsboroughCountyFloridaScraper extends DeedScraper {
           return { clicked: false };
         });
 
-        this.log(`🔍 [DEBUG] Folio click result: ${JSON.stringify(resultClicked)}`);
+        this.log(`🔍 [INFO] Folio click result: ${JSON.stringify(resultClicked)}`);
 
         if (resultClicked.clicked) {
           this.log(`✅ Clicked on folio ${resultClicked.folio} in results table`);
@@ -530,7 +523,7 @@ class HillsboroughCountyFloridaScraper extends DeedScraper {
       ];
 
       // Try to find and click Sales/Transfer tab
-      this.log(`🔍 [DEBUG] Searching for Sales/Transfer tab...`);
+      this.log(`🔍 [INFO] Searching for Sales/Transfer tab...`);
       const salesClicked = await this.page.evaluate(() => {
         const allElements = Array.from(document.querySelectorAll('a, button, div, span, li'));
 
@@ -558,7 +551,7 @@ class HillsboroughCountyFloridaScraper extends DeedScraper {
         return { clicked: false };
       });
 
-      this.log(`🔍 [DEBUG] Sales tab click result: ${JSON.stringify(salesClicked)}`);
+      this.log(`🔍 [INFO] Sales tab click result: ${JSON.stringify(salesClicked)}`);
 
       if (salesClicked && salesClicked.clicked) {
         this.log(`✅ Clicked on Sales/Transfer tab (${salesClicked.text})`);
@@ -650,8 +643,8 @@ class HillsboroughCountyFloridaScraper extends DeedScraper {
         return results;
       });
 
-      this.log(`🔍 [DEBUG] Extracted ${transactions.length} transactions from page`);
-      this.log(`🔍 [DEBUG] Transactions: ${JSON.stringify(transactions.map(t => ({
+      this.log(`🔍 [INFO] Extracted ${transactions.length} transactions from page`);
+      this.log(`🔍 [INFO] Transactions: ${JSON.stringify(transactions.map(t => ({
         type: t.type,
         documentId: t.documentId,
         book: t.bookNumber,
@@ -711,7 +704,7 @@ class HillsboroughCountyFloridaScraper extends DeedScraper {
       await this.randomWait(5000, 7000);
 
       // Set up listener for new page/popup BEFORE clicking the button
-      this.log(`🔍 [DEBUG] Setting up popup listener...`);
+      this.log(`🔍 [INFO] Setting up popup listener...`);
       const newPagePromise = new Promise(resolve => {
         this.browser.once('targetcreated', async target => {
           if (target.type() === 'page') {
@@ -734,7 +727,7 @@ class HillsboroughCountyFloridaScraper extends DeedScraper {
         return { clicked: false, buttonCount: 0 };
       });
 
-      this.log(`🔍 [DEBUG] Button click info: ${JSON.stringify(buttonInfo)}`);
+      this.log(`🔍 [INFO] Button click info: ${JSON.stringify(buttonInfo)}`);
       this.log('✅ Button clicked, waiting for new window...');
 
       // Wait for new window to open (with timeout)
@@ -746,7 +739,7 @@ class HillsboroughCountyFloridaScraper extends DeedScraper {
       ]);
 
       this.log('✅ New window opened with PDF viewer');
-      this.log(`🔍 [DEBUG] New window URL: ${newPage.url()}`);
+      this.log(`🔍 [INFO] New window URL: ${newPage.url()}`);
 
       // Wait for the PDF to load in the new window
       await this.randomWait(3000, 5000);
@@ -757,7 +750,7 @@ class HillsboroughCountyFloridaScraper extends DeedScraper {
 
       // Download the PDF using fetch in the new window's context
       this.log('📥 Downloading PDF...');
-      this.log(`🔍 [DEBUG] Fetching PDF from: ${pdfUrl}`);
+      this.log(`🔍 [INFO] Fetching PDF from: ${pdfUrl}`);
 
       const pdfArrayBuffer = await newPage.evaluate(async (url) => {
         const response = await fetch(url);
@@ -773,7 +766,7 @@ class HillsboroughCountyFloridaScraper extends DeedScraper {
 
       // Verify it's a PDF
       const isPDF = pdfBuffer.slice(0, 4).toString() === '%PDF';
-      this.log(`🔍 [DEBUG] PDF validation: isPDF=${isPDF}, size=${pdfBuffer.length} bytes`);
+      this.log(`🔍 [INFO] PDF validation: isPDF=${isPDF}, size=${pdfBuffer.length} bytes`);
 
       if (!isPDF) {
         throw new Error('Downloaded file is not a valid PDF');
