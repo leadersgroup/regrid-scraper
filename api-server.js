@@ -23,6 +23,7 @@ const path = require('path');
 // Import county implementations
 const OrangeCountyFloridaScraper = require('./county-implementations/orange-county-florida');
 const HillsboroughCountyFloridaScraper = require('./county-implementations/hillsborough-county-florida');
+const MiamiDadeCountyFloridaScraper = require('./county-implementations/miami-dade-county-florida');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -82,17 +83,52 @@ app.get('/api/counties', (req, res) => {
           'CFN and Book/Page support'
         ],
         cost: 'Free (no CAPTCHA)'
+      },
+      {
+        name: 'Miami-Dade County',
+        state: 'FL',
+        stateCode: 'Florida',
+        features: [
+          'Full PDF download',
+          'Transaction history extraction',
+          'ORB/Book and Page support'
+        ],
+        cost: 'Free (no CAPTCHA)'
       }
     ]
   });
 });
 
+// Helper function to normalize county names
+function normalizeCountyName(county) {
+  if (!county) return '';
+
+  // Convert to lowercase and trim
+  let normalized = county.toLowerCase().trim();
+
+  // Remove "county" suffix if present
+  normalized = normalized.replace(/\s+county$/i, '');
+
+  // Handle common variations
+  const countyMap = {
+    'miami-dade': 'Miami-Dade',
+    'miami dade': 'Miami-Dade',
+    'miamidade': 'Miami-Dade',
+    'orange': 'Orange',
+    'hillsborough': 'Hillsborough'
+  };
+
+  return countyMap[normalized] || county;
+}
+
 // Helper function to process deed download request
 async function processDeedDownload(address, county, state, options = {}) {
   // Initialize scraper based on county (default to Orange County, FL)
   let scraper;
-  const detectedCounty = county || 'Orange';
-  const detectedState = state || 'FL';
+  const detectedCounty = normalizeCountyName(county) || 'Orange';
+  const detectedState = (state || 'FL').toUpperCase();
+
+  console.log(`🔍 Routing request: County="${detectedCounty}", State="${detectedState}"`);
 
   if (detectedCounty === 'Orange' && detectedState === 'FL') {
     scraper = new OrangeCountyFloridaScraper({
@@ -102,6 +138,12 @@ async function processDeedDownload(address, county, state, options = {}) {
     });
   } else if (detectedCounty === 'Hillsborough' && detectedState === 'FL') {
     scraper = new HillsboroughCountyFloridaScraper({
+      headless: options?.headless !== false, // Default to headless
+      timeout: options?.timeout || 120000,
+      verbose: options?.verbose || false
+    });
+  } else if (detectedCounty === 'Miami-Dade' && detectedState === 'FL') {
+    scraper = new MiamiDadeCountyFloridaScraper({
       headless: options?.headless !== false, // Default to headless
       timeout: options?.timeout || 120000,
       verbose: options?.verbose || false
@@ -143,18 +185,26 @@ app.post('/api/getPriorDeed', async (req, res) => {
       });
     }
 
-    // Check if 2Captcha API key is configured
-    if (!process.env.TWOCAPTCHA_TOKEN) {
+    // Normalize county name for routing
+    const normalizedCounty = normalizeCountyName(county) || 'Orange';
+    const normalizedState = (state || 'FL').toUpperCase();
+
+    // Check if 2Captcha API key is configured (only required for Orange County)
+    const countiesRequiringCaptcha = ['Orange'];
+    if (countiesRequiringCaptcha.includes(normalizedCounty) && !process.env.TWOCAPTCHA_TOKEN) {
       return res.status(503).json({
         success: false,
         error: 'CAPTCHA solver not configured',
-        message: 'Set TWOCAPTCHA_TOKEN environment variable to enable deed downloads',
-        documentation: 'See CAPTCHA_SOLVING_SETUP.md for setup instructions'
+        message: `${normalizedCounty} County requires CAPTCHA solving. Set TWOCAPTCHA_TOKEN environment variable to enable deed downloads.`,
+        documentation: 'See CAPTCHA_SOLVING_SETUP.md for setup instructions',
+        hint: 'Hillsborough and Miami-Dade counties do not require CAPTCHA'
       });
     }
 
     console.log(`\n${'='.repeat(80)}`);
-    console.log(`📥 NEW REQUEST [/api/getPriorDeed]: ${address}`);
+    console.log(`📥 NEW REQUEST [/api/getPriorDeed]`);
+    console.log(`   Address: ${address}`);
+    console.log(`   County: ${normalizedCounty}, ${normalizedState}`);
     console.log(`${'='.repeat(80)}\n`);
 
     const result = await processDeedDownload(address, county, state);
