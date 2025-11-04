@@ -23,6 +23,7 @@ const path = require('path');
 // Import county implementations
 const OrangeCountyFloridaScraper = require('./county-implementations/orange-county-florida');
 const HillsboroughCountyFloridaScraper = require('./county-implementations/hillsborough-county-florida');
+const DavidsonCountyTennesseeScraper = require('./county-implementations/davidson-county-tennessee');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -82,6 +83,23 @@ app.get('/api/counties', (req, res) => {
           'CFN and Book/Page support'
         ],
         cost: 'Free (no CAPTCHA)'
+      },
+      {
+        name: 'Davidson County',
+        state: 'TN',
+        stateCode: 'Tennessee',
+        features: [
+          'Property assessor search',
+          'Transaction history extraction',
+          'Deed reference information (Instrument No, Book/Page)'
+        ],
+        cost: 'Free (property search)',
+        note: 'Deed PDF download requires subscription ($50/month) or free mobile app',
+        alternativeAccess: {
+          subscription: 'https://davidsonportal.com/ ($50/month)',
+          mobileApp: 'Nashville - Davidson Co. ROD (Free on iOS/Android)',
+          inPerson: '501 Broadway, Suite 301, Nashville, TN 37203'
+        }
       }
     ]
   });
@@ -102,6 +120,12 @@ async function processDeedDownload(address, county, state, options = {}) {
     });
   } else if (detectedCounty === 'Hillsborough' && detectedState === 'FL') {
     scraper = new HillsboroughCountyFloridaScraper({
+      headless: options?.headless !== false, // Default to headless
+      timeout: options?.timeout || 120000,
+      verbose: options?.verbose || false
+    });
+  } else if (detectedCounty === 'Davidson' && detectedState === 'TN') {
+    scraper = new DavidsonCountyTennesseeScraper({
       headless: options?.headless !== false, // Default to headless
       timeout: options?.timeout || 120000,
       verbose: options?.verbose || false
@@ -143,12 +167,16 @@ app.post('/api/getPriorDeed', async (req, res) => {
       });
     }
 
-    // Check if 2Captcha API key is configured
-    if (!process.env.TWOCAPTCHA_TOKEN) {
+    // Check if 2Captcha API key is configured (only required for Orange County)
+    const detectedCounty = county || 'Orange';
+    const detectedState = state || 'FL';
+    const requiresCaptcha = (detectedCounty === 'Orange' && detectedState === 'FL');
+
+    if (requiresCaptcha && !process.env.TWOCAPTCHA_TOKEN) {
       return res.status(503).json({
         success: false,
         error: 'CAPTCHA solver not configured',
-        message: 'Set TWOCAPTCHA_TOKEN environment variable to enable deed downloads',
+        message: 'Set TWOCAPTCHA_TOKEN environment variable to enable deed downloads for Orange County, FL',
         documentation: 'See CAPTCHA_SOLVING_SETUP.md for setup instructions'
       });
     }
