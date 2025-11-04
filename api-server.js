@@ -2,7 +2,7 @@
  * Deed Scraper REST API Server
  *
  * Provides API endpoints for downloading prior deed PDFs from Orange County, FL
- * and other supported counties.
+ * and other supported counties across multiple states.
  *
  * Usage:
  *   TWOCAPTCHA_TOKEN=your_api_key node api-server.js
@@ -11,6 +11,8 @@
  *   POST /api/deed/download - Download a deed PDF by address
  *   GET /api/health - Health check
  *   GET /api/counties - List supported counties
+ *
+ * Last updated: 2025-11-04
  */
 
 require('dotenv').config();
