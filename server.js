@@ -52,9 +52,51 @@ app.get('/api/test', (req, res) => {
   });
 });
 
+// Supported counties endpoint
+app.get('/api/counties', (req, res) => {
+  res.json({
+    success: true,
+    counties: [
+      {
+        name: 'Orange County',
+        state: 'FL',
+        stateCode: 'Florida',
+        features: [
+          'Automatic CAPTCHA solving',
+          'Full PDF download',
+          'Transaction history extraction'
+        ],
+        cost: '$0.001 per deed (with 2Captcha API)'
+      },
+      {
+        name: 'Hillsborough County',
+        state: 'FL',
+        stateCode: 'Florida',
+        features: [
+          'Full PDF download',
+          'Transaction history extraction',
+          'CFN and Book/Page support'
+        ],
+        cost: 'Free (no CAPTCHA)'
+      },
+      {
+        name: 'Duval County',
+        state: 'FL',
+        stateCode: 'Florida',
+        features: [
+          'Full PDF download',
+          'Transaction history extraction',
+          'Instrument Number and Book/Page support'
+        ],
+        cost: 'Free (no CAPTCHA)'
+      }
+    ],
+    timestamp: new Date().toISOString()
+  });
+});
+
 // Prior deed download endpoint
 app.post('/api/deed', async (req, res) => {
-  const DeedScraper = require('./deed-scraper');
   let scraper = null;
 
   try {
@@ -69,13 +111,44 @@ app.post('/api/deed', async (req, res) => {
     }
 
     console.log(`📄 Starting prior deed search for: ${address}`);
+    console.log(`📍 County: ${county || 'Not specified'}, State: ${state || 'Not specified'}`);
 
-    // Initialize deed scraper
-    scraper = new DeedScraper({
-      headless: true,
-      timeout: 60000,
-      verbose: true
-    });
+    // Determine which county scraper to use
+    const detectedCounty = county || 'Orange';
+    const detectedState = state || 'FL';
+
+    // Initialize county-specific scraper
+    if (detectedCounty === 'Orange' && detectedState === 'FL') {
+      const OrangeCountyFloridaScraper = require('./county-implementations/orange-county-florida');
+      scraper = new OrangeCountyFloridaScraper({
+        headless: true,
+        timeout: 120000,
+        verbose: true
+      });
+    } else if (detectedCounty === 'Hillsborough' && detectedState === 'FL') {
+      const HillsboroughCountyFloridaScraper = require('./county-implementations/hillsborough-county-florida');
+      scraper = new HillsboroughCountyFloridaScraper({
+        headless: true,
+        timeout: 120000,
+        verbose: true
+      });
+    } else if (detectedCounty === 'Duval' && detectedState === 'FL') {
+      const DuvalCountyFloridaScraper = require('./county-implementations/duval-county-florida');
+      scraper = new DuvalCountyFloridaScraper({
+        headless: true,
+        timeout: 120000,
+        verbose: true
+      });
+    } else {
+      // Fallback to base DeedScraper for unsupported counties
+      console.log(`⚠️  Using base DeedScraper for ${detectedCounty}, ${detectedState}`);
+      const DeedScraper = require('./deed-scraper');
+      scraper = new DeedScraper({
+        headless: true,
+        timeout: 60000,
+        verbose: true
+      });
+    }
 
     await scraper.initialize();
 
