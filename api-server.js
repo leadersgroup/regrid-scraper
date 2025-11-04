@@ -23,6 +23,7 @@ const path = require('path');
 // Import county implementations
 const OrangeCountyFloridaScraper = require('./county-implementations/orange-county-florida');
 const HillsboroughCountyFloridaScraper = require('./county-implementations/hillsborough-county-florida');
+const LeeCountyFloridaScraper = require('./county-implementations/lee-county-florida');
 const PalmBeachCountyFloridaScraper = require('./county-implementations/palm-beach-county-florida');
 const MiamiDadeCountyFloridaScraper = require('./county-implementations/miami-dade-county-florida');
 
@@ -86,6 +87,7 @@ app.get('/api/counties', (req, res) => {
         cost: 'Free (no CAPTCHA)'
       },
       {
+        name: 'Lee County',
         name: 'Palm Beach County',
         name: 'Miami-Dade County',
         state: 'FL',
@@ -93,6 +95,7 @@ app.get('/api/counties', (req, res) => {
         features: [
           'Full PDF download',
           'Transaction history extraction',
+          'Instrument Number and Book/Page support'
           'Instrument number and Book/Page support'
           'ORB/Book and Page support'
         ],
@@ -145,6 +148,8 @@ async function processDeedDownload(address, county, state, options = {}) {
       timeout: options?.timeout || 120000,
       verbose: options?.verbose || false
     });
+  } else if (detectedCounty === 'Lee' && detectedState === 'FL') {
+    scraper = new LeeCountyFloridaScraper({
   } else if (detectedCounty === 'Palm Beach' && detectedState === 'FL') {
     scraper = new PalmBeachCountyFloridaScraper({
   } else if (detectedCounty === 'Miami-Dade' && detectedState === 'FL') {
