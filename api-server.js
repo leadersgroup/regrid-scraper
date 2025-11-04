@@ -23,6 +23,7 @@ const path = require('path');
 // Import county implementations
 const OrangeCountyFloridaScraper = require('./county-implementations/orange-county-florida');
 const HillsboroughCountyFloridaScraper = require('./county-implementations/hillsborough-county-florida');
+const DuvalCountyFloridaScraper = require('./county-implementations/duval-county-florida');
 const DavidsonCountyTennesseeScraper = require('./county-implementations/davidson-county-tennessee');
 const PolkCountyFloridaScraper = require('./county-implementations/polk-county-florida');
 const PinellasCountyFloridaScraper = require('./county-implementations/pinellas-county-florida');
@@ -91,6 +92,7 @@ app.get('/api/counties', (req, res) => {
         cost: 'Free (no CAPTCHA)'
       },
       {
+        name: 'Duval County',
         name: 'Davidson County',
         state: 'TN',
         stateCode: 'Tennessee',
@@ -117,6 +119,7 @@ app.get('/api/counties', (req, res) => {
         features: [
           'Full PDF download',
           'Transaction history extraction',
+          'Instrument Number and Book/Page support'
           'Book/Page support'
           'Document Number and Book/Page support'
           'Instrument Number and Book/Page support'
@@ -172,6 +175,8 @@ async function processDeedDownload(address, county, state, options = {}) {
       timeout: options?.timeout || 120000,
       verbose: options?.verbose || false
     });
+  } else if (detectedCounty === 'Duval' && detectedState === 'FL') {
+    scraper = new DuvalCountyFloridaScraper({
   } else if (detectedCounty === 'Davidson' && detectedState === 'TN') {
     scraper = new DavidsonCountyTennesseeScraper({
   } else if (detectedCounty === 'Polk' && detectedState === 'FL') {
