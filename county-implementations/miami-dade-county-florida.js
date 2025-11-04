@@ -225,22 +225,57 @@ class MiamiDadeCountyFloridaScraper extends DeedScraper {
 
       this.log(`🏠 Searching for address: ${streetAddress}`);
 
-      // Look for property address input field
+      // Debug: Check what's on the page
+      const pageStructure = await this.page.evaluate(() => {
+        const inputs = Array.from(document.querySelectorAll('input')).map(inp => ({
+          type: inp.type,
+          id: inp.id,
+          name: inp.name,
+          placeholder: inp.placeholder,
+          visible: inp.offsetParent !== null
+        }));
+        const buttons = Array.from(document.querySelectorAll('button')).map(btn => ({
+          text: btn.textContent?.trim().substring(0, 30),
+          type: btn.type,
+          className: btn.className
+        }));
+        return { inputs, buttons, title: document.title };
+      });
+
+      this.log(`📋 Page has ${pageStructure.inputs.length} inputs, ${pageStructure.buttons.length} buttons`);
+      this.log(`📄 Page title: ${pageStructure.title}`);
+
+      // Look for property address input field with improved selectors
       const addressInputSelectors = [
+        'input#PropertyAddressSearch',
         'input#propertyAddressInput',
-        'input[name*="address"]',
-        'input[placeholder*="Address"]',
-        'input[id*="address"]',
+        'input[name="PropertyAddress"]',
+        'input[name*="address" i]',
+        'input[placeholder*="Address" i]',
+        'input[placeholder*="address" i]',
+        'input[id*="address" i]',
+        'input[id*="Address"]',
+        'input.form-control[type="text"]',
         'input[type="text"]'
       ];
 
       let addressInput = null;
       for (const selector of addressInputSelectors) {
         try {
-          await this.page.waitForSelector(selector, { timeout: 3000 });
-          addressInput = selector;
-          this.log(`✅ Found address input: ${selector}`);
-          break;
+          const elements = await this.page.$$(selector);
+          if (elements.length > 0) {
+            // Check if visible
+            const isVisible = await this.page.evaluate((sel) => {
+              const elem = document.querySelector(sel);
+              return elem && elem.offsetParent !== null;
+            }, selector);
+
+            if (isVisible) {
+              addressInput = selector;
+              this.log(`✅ Found visible address input: ${selector}`);
+              break;
+            }
+          }
         } catch (e) {
           // Try next selector
         }
@@ -248,9 +283,10 @@ class MiamiDadeCountyFloridaScraper extends DeedScraper {
 
       if (!addressInput) {
         this.log(`⚠️ Could not find address input field`);
+        this.log(`   Available inputs: ${JSON.stringify(pageStructure.inputs.slice(0, 5))}`);
         return {
           success: false,
-          message: 'Could not find address input'
+          message: 'Could not find address input field on Miami-Dade property search page'
         };
       }
 
@@ -259,18 +295,38 @@ class MiamiDadeCountyFloridaScraper extends DeedScraper {
       await this.page.type(addressInput, streetAddress, { delay: 100 });
       this.log(`✅ Entered address: ${streetAddress}`);
 
-      await this.randomWait(2000, 3000);
+      // Wait longer for autocomplete to appear
+      await this.randomWait(3000, 5000);
 
       // Look for autocomplete dropdown and click on the first result
-      const autocompleteClicked = await this.page.evaluate(() => {
-        // Look for autocomplete results
-        const autocompleteItems = Array.from(document.querySelectorAll('ul li, .autocomplete-item, .dropdown-item, .ui-menu-item, div[role="option"]'));
+      this.log('🔍 Looking for autocomplete suggestions...');
 
-        for (const item of autocompleteItems) {
-          const text = (item.innerText || item.textContent || '').trim();
-          if (text.length > 5) { // Must have some content
-            item.click();
-            return { clicked: true, text: text.substring(0, 100) };
+      const autocompleteClicked = await this.page.evaluate(() => {
+        // Look for autocomplete results with multiple selector strategies
+        const selectors = [
+          'ul.ui-autocomplete li',
+          'ul.autocomplete-results li',
+          '.dropdown-menu .dropdown-item',
+          'ul li',
+          '.autocomplete-item',
+          '.ui-menu-item',
+          'div[role="option"]',
+          '[role="listbox"] [role="option"]'
+        ];
+
+        for (const selector of selectors) {
+          const items = Array.from(document.querySelectorAll(selector));
+          if (items.length > 0) {
+            for (const item of items) {
+              // Check if visible and has text
+              if (item.offsetParent !== null) {
+                const text = (item.innerText || item.textContent || '').trim();
+                if (text.length > 5) {
+                  item.click();
+                  return { clicked: true, text: text.substring(0, 100), selector };
+                }
+              }
+            }
           }
         }
 
@@ -318,26 +374,67 @@ class MiamiDadeCountyFloridaScraper extends DeedScraper {
       this.log(`⏳ Waiting for property details to load...`);
       await this.randomWait(5000, 7000);
 
-      // Check if we're on a property detail page
-      const hasPropertyDetails = await this.page.evaluate(() => {
+      // Check if we're on a property detail page with improved detection
+      const propertyCheckResult = await this.page.evaluate(() => {
         const text = document.body.innerText.toLowerCase();
-        return text.includes('folio') ||
-               text.includes('property information') ||
-               text.includes('owner name') ||
-               text.includes('sales information');
+        const url = window.location.href;
+
+        // Check for property detail indicators
+        const hasPropertyInfo = text.includes('folio') ||
+                               text.includes('property information') ||
+                               text.includes('owner name') ||
+                               text.includes('owner:') ||
+                               text.includes('sales information') ||
+                               text.includes('sale date') ||
+                               text.includes('assessed value') ||
+                               text.includes('property details');
+
+        // Check for error messages
+        const hasError = text.includes('no results') ||
+                        text.includes('not found') ||
+                        text.includes('no matches') ||
+                        text.includes('no properties found');
+
+        // Check if URL changed (might indicate navigation to property page)
+        const urlChanged = url.includes('property') ||
+                          url.includes('folio') ||
+                          url.includes('details');
+
+        return {
+          hasPropertyInfo,
+          hasError,
+          urlChanged,
+          url,
+          textSample: text.substring(0, 300)
+        };
       });
 
-      if (hasPropertyDetails) {
+      this.log(`🔍 Property check result:`);
+      this.log(`   Has property info: ${propertyCheckResult.hasPropertyInfo}`);
+      this.log(`   Has error message: ${propertyCheckResult.hasError}`);
+      this.log(`   URL changed: ${propertyCheckResult.urlChanged}`);
+      this.log(`   Current URL: ${propertyCheckResult.url}`);
+
+      if (propertyCheckResult.hasPropertyInfo || propertyCheckResult.urlChanged) {
         this.log(`✅ Property details page loaded`);
         return {
           success: true,
-          message: 'Property found on assessor website'
+          message: 'Property found on assessor website',
+          url: propertyCheckResult.url
         };
-      } else {
-        this.log(`⚠️ Property not found or search failed`);
+      } else if (propertyCheckResult.hasError) {
+        this.log(`⚠️ Property not found - error message detected`);
+        this.log(`   Text sample: ${propertyCheckResult.textSample}`);
         return {
           success: false,
-          message: 'Property not found'
+          message: 'Property not found - no results from search'
+        };
+      } else {
+        this.log(`⚠️ Property search failed - no property details detected`);
+        this.log(`   Text sample: ${propertyCheckResult.textSample}`);
+        return {
+          success: false,
+          message: 'Could not verify property details loaded'
         };
       }
 
