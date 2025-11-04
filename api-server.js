@@ -24,6 +24,12 @@ const path = require('path');
 const OrangeCountyFloridaScraper = require('./county-implementations/orange-county-florida');
 const HillsboroughCountyFloridaScraper = require('./county-implementations/hillsborough-county-florida');
 const DuvalCountyFloridaScraper = require('./county-implementations/duval-county-florida');
+const DavidsonCountyTennesseeScraper = require('./county-implementations/davidson-county-tennessee');
+const PolkCountyFloridaScraper = require('./county-implementations/polk-county-florida');
+const PinellasCountyFloridaScraper = require('./county-implementations/pinellas-county-florida');
+const BrevardCountyFloridaScraper = require('./county-implementations/brevard-county-florida');
+const LeeCountyFloridaScraper = require('./county-implementations/lee-county-florida');
+const PalmBeachCountyFloridaScraper = require('./county-implementations/palm-beach-county-florida');
 const MiamiDadeCountyFloridaScraper = require('./county-implementations/miami-dade-county-florida');
 
 const app = express();
@@ -87,6 +93,26 @@ app.get('/api/counties', (req, res) => {
       },
       {
         name: 'Duval County',
+        name: 'Davidson County',
+        state: 'TN',
+        stateCode: 'Tennessee',
+        features: [
+          'Property assessor search',
+          'Transaction history extraction',
+          'Deed reference information (Instrument No, Book/Page)'
+        ],
+        cost: 'Free (property search)',
+        note: 'Deed PDF download requires subscription ($50/month) or free mobile app',
+        alternativeAccess: {
+          subscription: 'https://davidsonportal.com/ ($50/month)',
+          mobileApp: 'Nashville - Davidson Co. ROD (Free on iOS/Android)',
+          inPerson: '501 Broadway, Suite 301, Nashville, TN 37203'
+        }
+        name: 'Polk County',
+        name: 'Pinellas County',
+        name: 'Brevard County',
+        name: 'Lee County',
+        name: 'Palm Beach County',
         name: 'Miami-Dade County',
         state: 'FL',
         stateCode: 'Florida',
@@ -94,6 +120,11 @@ app.get('/api/counties', (req, res) => {
           'Full PDF download',
           'Transaction history extraction',
           'Instrument Number and Book/Page support'
+          'Book/Page support'
+          'Document Number and Book/Page support'
+          'Instrument Number and Book/Page support'
+          'Instrument number and Book/Page support'
+          'ORB/Book and Page support'
         ],
         cost: 'Free (no CAPTCHA)'
       }
@@ -146,6 +177,18 @@ async function processDeedDownload(address, county, state, options = {}) {
     });
   } else if (detectedCounty === 'Duval' && detectedState === 'FL') {
     scraper = new DuvalCountyFloridaScraper({
+  } else if (detectedCounty === 'Davidson' && detectedState === 'TN') {
+    scraper = new DavidsonCountyTennesseeScraper({
+  } else if (detectedCounty === 'Polk' && detectedState === 'FL') {
+    scraper = new PolkCountyFloridaScraper({
+  } else if (detectedCounty === 'Pinellas' && detectedState === 'FL') {
+    scraper = new PinellasCountyFloridaScraper({
+  } else if (detectedCounty === 'Brevard' && detectedState === 'FL') {
+    scraper = new BrevardCountyFloridaScraper({
+  } else if (detectedCounty === 'Lee' && detectedState === 'FL') {
+    scraper = new LeeCountyFloridaScraper({
+  } else if (detectedCounty === 'Palm Beach' && detectedState === 'FL') {
+    scraper = new PalmBeachCountyFloridaScraper({
   } else if (detectedCounty === 'Miami-Dade' && detectedState === 'FL') {
     scraper = new MiamiDadeCountyFloridaScraper({
       headless: options?.headless !== false, // Default to headless
@@ -189,6 +232,17 @@ app.post('/api/getPriorDeed', async (req, res) => {
       });
     }
 
+    // Check if 2Captcha API key is configured (only required for Orange County)
+    const detectedCounty = county || 'Orange';
+    const detectedState = state || 'FL';
+    const requiresCaptcha = (detectedCounty === 'Orange' && detectedState === 'FL');
+
+    if (requiresCaptcha && !process.env.TWOCAPTCHA_TOKEN) {
+      return res.status(503).json({
+        success: false,
+        error: 'CAPTCHA solver not configured',
+        message: 'Set TWOCAPTCHA_TOKEN environment variable to enable deed downloads for Orange County, FL',
+        documentation: 'See CAPTCHA_SOLVING_SETUP.md for setup instructions'
     // Normalize county name for routing
     const normalizedCounty = normalizeCountyName(county) || 'Orange';
     const normalizedState = (state || 'FL').toUpperCase();

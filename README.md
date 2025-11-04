@@ -1,7 +1,7 @@
 # README.md
 # 🏠 Deed Scraper API - Automated Property Deed Downloads
 
-A production-ready REST API that automatically downloads property deed PDFs from county clerk websites with automatic CAPTCHA solving. Built for Orange County, Florida with support for additional counties coming soon.
+A production-ready REST API that automatically downloads property deed PDFs from county clerk websites with automatic CAPTCHA solving. Currently supports Orange County, Hillsborough County, and Pinellas County, Florida with more counties coming soon.
 
 ## ✨ Features
 
@@ -258,11 +258,23 @@ docker run -d -p 3000:3000 \
   - Full automation with CAPTCHA solving
   - PDF download
   - Transaction history
+  - Cost: $0.001 per deed (with 2Captcha)
+
+- ✅ **Hillsborough County, Florida**
+  - Full PDF download
+  - Transaction history extraction
+  - CFN and Book/Page support
+  - Cost: Free (no CAPTCHA)
+
+- ✅ **Pinellas County, Florida**
+  - Full PDF download
+  - Transaction history extraction
+  - Document Number and Book/Page support
+  - Cost: Free (no CAPTCHA)
 
 ### Coming Soon
 - Miami-Dade County, FL
 - Broward County, FL
-- Hillsborough County, FL
 
 ## 🔧 Configuration
 
