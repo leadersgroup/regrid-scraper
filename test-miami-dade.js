@@ -9,11 +9,11 @@ const MiamiDadeCountyFloridaScraper = require('./county-implementations/miami-da
 async function testMiamiDadeCounty() {
   console.log('🧪 Testing Miami-Dade County FL deed scraper...\n');
 
-  // TODO: Replace with an actual test address
-  const testAddress = '1234 Main St, Miami, FL 33131';
+  // Real Miami-Dade County address - Stephen P. Clark Center (government building)
+  const testAddress = '111 NW 1 St, Miami, FL 33128';
 
   const scraper = new MiamiDadeCountyFloridaScraper({
-    headless: false, // Set to true for headless testing
+    headless: true, // Set to false for non-headless testing
     timeout: 120000,
     verbose: true
   });
