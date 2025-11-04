@@ -228,6 +228,9 @@ class HillsboroughCountyFloridaScraper extends DeedScraper {
       const fullAddress = this.currentAddress || '';
       let streetAddress = fullAddress.split(',')[0].trim();
 
+      // Convert to uppercase - Hillsborough County expects uppercase addresses
+      streetAddress = streetAddress.toUpperCase();
+
       // Further simplify: remove street suffix (RD, ROAD, ST, STREET, etc.)
       // Just use street number + street name
       // Example: "19620 PINE TREE RD" -> "19620 PINE TREE"
