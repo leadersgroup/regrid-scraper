@@ -2,7 +2,7 @@
  * Miami-Dade County, Florida - Deed Scraper Implementation
  *
  * County Resources:
- * - Property Appraiser: https://www.miamidadepa.gov/pa/home.page (Correct URL)
+ * - Property Appraiser: https://www.miamidadepa.gov/pa/real-estate/property-search.page
  * - Workflow: Search address → Click folio → Sales Information tab → Click ORB-Page → Document Image → Download PDF
  * - Clerk of Courts (Official Records): https://onlineservices.miamidadeclerk.gov/officialrecords/
  */
@@ -120,7 +120,7 @@ class MiamiDadeCountyFloridaScraper extends DeedScraper {
 
       // STEP 2: Search Property Appraiser for property
       this.log(`📋 Step 2: Searching county property assessor for: ${this.county} County, ${this.state}`);
-      this.log(`🌐 Navigating to assessor: https://www.miamidadepa.gov/pa/home.page`);
+      this.log(`🌐 Navigating to assessor: https://www.miamidadepa.gov/pa/real-estate/property-search.page`);
 
       const assessorResult = await this.searchAssessorSite(null, null);
 
@@ -144,7 +144,7 @@ class MiamiDadeCountyFloridaScraper extends DeedScraper {
       result.steps.step2 = {
         success: transactionResult.success,
         transactions: transactionResult.transactions || [],
-        assessorUrl: 'https://www.miamidadepa.gov/pa/home.page',
+        assessorUrl: 'https://www.miamidadepa.gov/pa/real-estate/property-search.page',
         folio: assessorResult.folio,
         originalAddress: address,
         county: 'Miami-Dade',
@@ -195,14 +195,14 @@ class MiamiDadeCountyFloridaScraper extends DeedScraper {
    */
   getAssessorUrl(county, state) {
     if (county === 'Miami-Dade' && state === 'FL') {
-      return 'https://www.miamidadepa.gov/pa/home.page';
+      return 'https://www.miamidadepa.gov/pa/real-estate/property-search.page';
     }
     return null;
   }
 
   /**
    * Search Miami-Dade County Property Appraiser by address
-   * URL: https://www.miamidadepa.gov/pa/home.page
+   * URL: https://www.miamidadepa.gov/pa/real-estate/property-search.page
    *
    * Workflow:
    * 1. Search by address
@@ -823,6 +823,44 @@ class MiamiDadeCountyFloridaScraper extends DeedScraper {
 
         this.log(`✅ Clicked ORB-Page link`);
         await this.randomWait(5000, 7000);
+
+        // Check if a new tab/window was opened
+        const pages = await this.browser.pages();
+        this.log(`📋 Browser has ${pages.length} page(s) open`);
+
+        // If a new page was opened, switch to it
+        let clerkPage = null;
+        if (pages.length > 1) {
+          // Find the clerk's website page
+          for (const page of pages) {
+            const url = page.url();
+            if (url.includes('miamidadeclerk.gov')) {
+              clerkPage = page;
+              this.log(`🌐 Found Clerk's website in new tab: ${url}`);
+              break;
+            }
+          }
+        }
+
+        // If we found the clerk page in a new tab, use it
+        if (clerkPage) {
+          const oldPage = this.page;
+          this.page = clerkPage; // Switch to clerk page
+          const result = await this.downloadDeedFromClerkPage(transaction);
+          await clerkPage.close(); // Close the clerk tab
+          this.page = oldPage; // Switch back to original page
+          return result;
+        }
+
+        // Check if current page navigated to clerk's website
+        const currentUrl = this.page.url();
+        this.log(`📍 Current URL: ${currentUrl}`);
+
+        // If the ORB link took us to the clerk's website, handle it there
+        if (currentUrl.includes('miamidadeclerk.gov')) {
+          this.log('🌐 Navigated to Clerk\'s website, using clerk download workflow...');
+          return await this.downloadDeedFromClerkPage(transaction);
+        }
       } else {
         // If not clickable, navigate to clerk's website the old way
         this.log('⚠️ Transaction not directly clickable, using clerk website search...');
@@ -1022,6 +1060,1292 @@ class MiamiDadeCountyFloridaScraper extends DeedScraper {
 
     } catch (error) {
       this.log(`❌ Failed to download deed: ${error.message}`);
+      return {
+        success: false,
+        error: error.message
+      };
+    }
+  }
+
+  /**
+   * Download deed when already on the Clerk's search results page
+   * This is called after clicking an ORB link from the Property Appraiser
+   */
+  async downloadDeedFromClerkPage(transaction) {
+    this.log('📄 Downloading deed from Clerk\'s search results page...');
+
+    try {
+      // Wait longer for clerk's page to fully load (it may use AJAX)
+      this.log('⏳ Waiting for clerk page to load completely...');
+      await this.randomWait(8000, 10000);
+
+      // Check what's on the page
+      const pageInfo = await this.page.evaluate(() => {
+        const links = Array.from(document.querySelectorAll('a'));
+        const buttons = Array.from(document.querySelectorAll('button, input[type="button"]'));
+        const images = Array.from(document.querySelectorAll('img'));
+
+        return {
+          url: window.location.href,
+          title: document.title,
+          linkCount: links.length,
+          buttonCount: buttons.length,
+          imageCount: images.length,
+          bodyText: document.body.innerText.substring(0, 500),
+          allLinks: links.map(link => ({
+            text: (link.textContent || '').trim().substring(0, 60),
+            href: (link.href || '').substring(0, 120),
+            hasImage: link.querySelector('img') !== null,
+            imageAlt: link.querySelector('img')?.alt || ''
+          })),
+          allButtons: buttons.map(btn => ({
+            text: (btn.textContent || btn.value || '').trim().substring(0, 60),
+            type: btn.type,
+            value: btn.value || ''
+          }))
+        };
+      });
+
+      this.log(`📋 Clerk page info: ${pageInfo.title}`);
+      this.log(`   ${pageInfo.linkCount} links, ${pageInfo.buttonCount} buttons`);
+      this.log(`📋 ALL LINKS on clerk page:`);
+      pageInfo.allLinks.forEach((link, i) => {
+        this.log(`   ${i + 1}. "${link.text}" hasImg=${link.hasImage} imgAlt="${link.imageAlt}" -> ${link.href}`);
+      });
+      this.log(`📋 ALL BUTTONS on clerk page:`);
+      pageInfo.allButtons.forEach((btn, i) => {
+        this.log(`   ${i + 1}. "${btn.text}" type=${btn.type} value="${btn.value}"`);
+      });
+
+      // IMPORTANT: Look for "Document Image" button (it's OUTSIDE the table, below it)
+      const documentImageSearch = await this.page.evaluate(() => {
+        // Search for clickable elements with "document", "image", "view" etc
+        const allClickable = [
+          ...Array.from(document.querySelectorAll('a')),
+          ...Array.from(document.querySelectorAll('button')),
+          ...Array.from(document.querySelectorAll('input[type="button"]')),
+          ...Array.from(document.querySelectorAll('input[type="submit"]')),
+          ...Array.from(document.querySelectorAll('[onclick]')),
+          ...Array.from(document.querySelectorAll('[role="button"]'))
+        ];
+
+        const matches = [];
+
+        for (const elem of allClickable) {
+          const text = (elem.textContent || elem.innerText || elem.value || '').trim();
+          const lowerText = text.toLowerCase();
+
+          // Look for elements with "document", "image", "view" keywords
+          if ((lowerText.includes('document') || lowerText.includes('image') ||
+               lowerText.includes('view') || lowerText.includes('pdf')) &&
+              text.length > 0 && text.length < 200) {
+
+            // Get more details about positioning
+            const rect = elem.getBoundingClientRect();
+            const isVisible = elem.offsetParent !== null;
+
+            matches.push({
+              tag: elem.tagName,
+              type: elem.type || '',
+              text: text.substring(0, 100),
+              className: elem.className,
+              id: elem.id,
+              isLink: elem.tagName === 'A',
+              href: elem.href || '',
+              isButton: elem.tagName === 'BUTTON' || elem.type === 'button' || elem.type === 'submit',
+              onclick: (elem.getAttribute('onclick') || '').substring(0, 100),
+              ariaLabel: elem.getAttribute('aria-label') || '',
+              isVisible,
+              top: Math.round(rect.top),
+              left: Math.round(rect.left)
+            });
+          }
+        }
+
+        return { matches };
+      });
+
+      this.log(`🔍 Document/Image/View button search: found ${documentImageSearch.matches.length} clickable elements`);
+      if (documentImageSearch.matches.length > 0) {
+        this.log(`📋 Clickable elements with document/image/view keywords:`);
+        documentImageSearch.matches.forEach((elem, i) => {
+          this.log(`   ${i + 1}. <${elem.tag}${elem.type ? ` type="${elem.type}"` : ''}> "${elem.text}"`);
+          this.log(`      visible=${elem.isVisible} isLink=${elem.isLink} isButton=${elem.isButton}`);
+          this.log(`      class="${elem.className}" id="${elem.id}"`);
+          this.log(`      href="${elem.href}" onclick="${elem.onclick}"`);
+        });
+      }
+
+      // Log page structure for debugging
+      const pageStructureInfo = await this.page.evaluate(() => {
+        const allLinks = Array.from(document.querySelectorAll('a'));
+        const tables = Array.from(document.querySelectorAll('table'));
+        const divs = Array.from(document.querySelectorAll('div[class*="result"], div[class*="search"], div[class*="document"]'));
+        const imgs = Array.from(document.querySelectorAll('img'));
+
+        return {
+          links: allLinks.slice(0, 10).map(link => ({
+            text: (link.textContent || '').trim().substring(0, 50),
+            href: (link.href || '').substring(0, 100),
+            hasImage: link.querySelector('img') !== null,
+            imageAlt: link.querySelector('img')?.alt || '',
+            imageSrc: (link.querySelector('img')?.src || '').substring(0, 80)
+          })),
+          tableCount: tables.length,
+          resultDivCount: divs.length,
+          imageCount: imgs.length,
+          images: imgs.map(img => ({
+            alt: img.alt,
+            src: (img.src || '').substring(0, 80),
+            parentTag: img.parentElement?.tagName,
+            parentHref: img.parentElement?.href || '',
+            inTable: img.closest('table') !== null
+          }))
+        };
+      });
+
+      this.log(`📋 Page structure:`);
+      this.log(`   Tables: ${pageStructureInfo.tableCount}, Result divs: ${pageStructureInfo.resultDivCount}, Images: ${pageStructureInfo.imageCount}`);
+
+      if (pageStructureInfo.images.length > 0) {
+        this.log(`📋 All images on page:`);
+        pageStructureInfo.images.forEach((img, i) => {
+          this.log(`   ${i + 1}. alt="${img.alt}" parent=${img.parentTag} inTable=${img.inTable} href="${img.parentHref.substring(0, 60)}"`);
+        });
+      }
+
+      if (pageStructureInfo.links.length > 0) {
+        this.log(`📋 Links with images:`);
+        pageStructureInfo.links.filter(link => link.hasImage).forEach((link, i) => {
+          this.log(`   ${i + 1}. text="${link.text}" img-alt="${link.imageAlt}"`);
+        });
+      }
+
+      // Check table contents if table exists
+      if (pageStructureInfo.tableCount > 0) {
+        const tableInfo = await this.page.evaluate(() => {
+          const table = document.querySelector('table');
+          if (!table) return null;
+
+          const rows = Array.from(table.querySelectorAll('tr'));
+          const links = Array.from(table.querySelectorAll('a'));
+          const images = Array.from(table.querySelectorAll('img'));
+
+          // Check each row for clickable elements
+          const rowInfo = rows.slice(0, 3).map((row, idx) => {
+            const cells = Array.from(row.querySelectorAll('td, th'));
+            return {
+              rowIndex: idx,
+              cellCount: cells.length,
+              cells: cells.map((cell, cellIdx) => ({
+                cellIndex: cellIdx,
+                text: (cell.innerText || '').trim().substring(0, 50),
+                hasLink: cell.querySelector('a') !== null,
+                hasImage: cell.querySelector('img') !== null,
+                hasCheckbox: cell.querySelector('input[type="checkbox"]') !== null,
+                hasRadio: cell.querySelector('input[type="radio"]') !== null,
+                hasButton: cell.querySelector('button, input[type="button"]') !== null,
+                linkHref: cell.querySelector('a')?.href || '',
+                imageAlt: cell.querySelector('img')?.alt || '',
+                onclick: cell.getAttribute('onclick') || '',
+                innerHTML: cell.innerHTML.substring(0, 150)
+              }))
+            };
+          });
+
+          return {
+            rowCount: rows.length,
+            linkCount: links.length,
+            imageCount: images.length,
+            tableText: table.innerText.substring(0, 500),
+            links: links.map(link => ({
+              text: (link.textContent || '').trim().substring(0, 50),
+              href: (link.href || '').substring(0, 100),
+              hasImage: link.querySelector('img') !== null,
+              imageAlt: link.querySelector('img')?.alt || ''
+            })),
+            images: images.map(img => ({
+              alt: img.alt,
+              src: (img.src || '').substring(0, 80),
+              parentTag: img.parentElement?.tagName,
+              parentHref: img.parentElement?.href || ''
+            })),
+            rowInfo
+          };
+        });
+
+        if (tableInfo) {
+          this.log(`📋 Table details:`);
+          this.log(`   Rows: ${tableInfo.rowCount}, Links: ${tableInfo.linkCount}, Images: ${tableInfo.imageCount}`);
+          this.log(`   Table text: ${tableInfo.tableText}`);
+          if (tableInfo.links.length > 0) {
+            this.log(`   Table links (ALL):`);
+            tableInfo.links.forEach((link, i) => {
+              this.log(`     ${i + 1}. "${link.text}" hasImage=${link.hasImage} imgAlt="${link.imageAlt}" -> ${link.href}`);
+            });
+          }
+          if (tableInfo.images.length > 0) {
+            this.log(`   Table images (ALL):`);
+            tableInfo.images.forEach((img, i) => {
+              this.log(`     ${i + 1}. alt="${img.alt}" parent=${img.parentTag} href="${img.parentHref.substring(0, 60)}"`);
+            });
+          }
+          if (tableInfo.rowInfo.length > 0) {
+            this.log(`   First 3 rows detail (ALL CELLS):`);
+            tableInfo.rowInfo.forEach(row => {
+              this.log(`     Row ${row.rowIndex}: ${row.cellCount} cells`);
+              row.cells.forEach(cell => {
+                this.log(`       Cell ${cell.cellIndex}: "${cell.text}"`);
+                this.log(`         link=${cell.hasLink} image=${cell.hasImage} checkbox=${cell.hasCheckbox} radio=${cell.hasRadio} button=${cell.hasButton}`);
+                this.log(`         onclick="${cell.onclick.substring(0, 40)}" html="${cell.innerHTML.substring(0, 80)}"`);
+              });
+            });
+          }
+        }
+      }
+
+      // Check main body text for useful info
+      const bodyText = pageInfo.bodyText;
+      this.log(`📋 Body text sample: ${bodyText.substring(0, 200)}`);
+
+      // Check if there's an error or "no results" message
+      if (bodyText.toLowerCase().includes('no records') ||
+          bodyText.toLowerCase().includes('no results') ||
+          bodyText.toLowerCase().includes('not found')) {
+        this.log('⚠️ Clerk page shows "no results" message');
+        throw new Error('Clerk search returned no results');
+      }
+
+      // BEFORE clicking table: Check if Document Image button already exists
+      const beforeClickCheck = await this.page.evaluate(() => {
+        const allText = document.body.innerText;
+        return {
+          hasDocumentImage: allText.toLowerCase().includes('document image'),
+          bodyPreview: allText.substring(0, 1000)
+        };
+      });
+
+      this.log(`📋 Before clicking table - page contains "document image": ${beforeClickCheck.hasDocumentImage}`);
+
+      // Look for clickable elements in the table (clerk's file number, etc.)
+      this.log('🔍 Looking for clickable document entries...');
+
+      const tableEntryClicked = await this.page.evaluate(() => {
+        // Look for clickable elements in table cells (td, th, span, div)
+        const table = document.querySelector('table');
+        if (!table) return { clicked: false, reason: 'No table found' };
+
+        // Try clicking on first table row (excluding header)
+        const rows = Array.from(table.querySelectorAll('tr'));
+        for (let i = 1; i < rows.length; i++) { // Start from 1 to skip header
+          const row = rows[i];
+          const cells = Array.from(row.querySelectorAll('td'));
+
+          // STRATEGY 1: Try clicking on Clerk's File Number FIRST (Cell 0)
+          // This should navigate to/expand the detail card where "Document Image" button appears
+          if (cells.length >= 1) {
+            const clerkFileCell = cells[0]; // Cell 0 is Clerk's File Number
+            const cellText = clerkFileCell.innerText?.trim() || '';
+
+            // Check if this looks like a clerk's file number (format: YYYY R XXXXXX)
+            if (cellText.match(/^\d{4}\s+R\s+\d+$/)) {
+              // Try different click methods
+              // First, try clicking any link or button inside the cell
+              const linkOrButton = clerkFileCell.querySelector('a, button, [role="button"]');
+              if (linkOrButton) {
+                linkOrButton.click();
+                return { clicked: true, method: 'clerk-file-number-link', text: cellText };
+              }
+
+              // Try clicking the entire row (some tables have row click handlers)
+              const row = clerkFileCell.closest('tr');
+              if (row) {
+                row.click();
+                return { clicked: true, method: 'clerk-file-number-row', text: cellText };
+              }
+
+              // Fallback: Try clicking the cell directly
+              clerkFileCell.click();
+              return { clicked: true, method: 'clerk-file-number-cell', text: cellText };
+            }
+          }
+
+          // STRATEGY 2: Try clicking on Rec Book/Page (Cell 3) as fallback
+          if (cells.length >= 4) {
+            const bookPageCell = cells[3]; // Cell 3 is Rec Book/Page
+            const bookPageText = bookPageCell.innerText?.trim() || '';
+
+            // Check if this looks like a book/page number (format: XXXXX/XXXX)
+            if (bookPageText.match(/^\d+\/\d+$/)) {
+              // Try clicking the cell directly
+              bookPageCell.click();
+              return { clicked: true, method: 'rec-book-page-cell', text: bookPageText };
+            }
+          }
+
+          // STRATEGY 3: General search for clickable elements
+          for (let j = 0; j < cells.length; j++) {
+            const cell = cells[j];
+            const cellText = cell.innerText?.trim() || '';
+
+            // Check if this looks like a clerk's file number
+            if (cellText.match(/^\d{4}\s+R\s+\d+$/)) {
+              // Try clicking the cell directly
+              cell.click();
+              return { clicked: true, method: 'clerk-file-number-cell-fallback', text: cellText };
+            }
+
+            // Check if cell itself is clickable
+            if (cell.onclick || cell.getAttribute('onclick')) {
+              cell.click();
+              return { clicked: true, method: 'cell-onclick', text: cellText.substring(0, 50) };
+            }
+
+            // Check for links within cell
+            const link = cell.querySelector('a');
+            if (link) {
+              link.click();
+              return { clicked: true, method: 'cell-link', text: link.innerText.substring(0, 50) };
+            }
+
+            // Check for clickable spans/divs
+            const clickableElement = cell.querySelector('[onclick], [role="button"], button');
+            if (clickableElement) {
+              clickableElement.click();
+              return { clicked: true, method: 'clickable-element', text: clickableElement.innerText.substring(0, 50) };
+            }
+          }
+
+          // If first row, try clicking it even without explicit onclick handler
+          // (JavaScript event listeners might be attached)
+          if (i === 1) {
+            const firstCell = cells[0];
+            if (firstCell) {
+              firstCell.click();
+              return { clicked: true, method: 'first-cell-click', text: firstCell.innerText.substring(0, 50) };
+            }
+          }
+
+          // Try clicking the row itself
+          if (row.onclick || row.getAttribute('onclick')) {
+            row.click();
+            return { clicked: true, method: 'row-onclick', text: row.innerText.substring(0, 100) };
+          }
+        }
+
+        return { clicked: false, reason: 'No clickable elements in table' };
+      });
+
+      if (tableEntryClicked.clicked) {
+        this.log(`✅ Clicked table entry (${tableEntryClicked.method}): ${tableEntryClicked.text}`);
+
+        // IMPORTANT: Clicking on CFN (Clerk's File Number) opens a NEW PAGE
+        // We need to wait for navigation to complete
+        this.log('⏳ Waiting for navigation to new page...');
+
+        try {
+          // Wait for navigation with a reasonable timeout
+          await this.page.waitForNavigation({
+            waitUntil: 'networkidle2',
+            timeout: 15000
+          });
+          this.log('✅ Navigation completed');
+        } catch (navError) {
+          this.log(`⚠️ Navigation wait timed out (page might have updated without URL change): ${navError.message}`);
+        }
+
+        // Give extra time for page to fully render
+        await this.randomWait(3000, 5000);
+
+        // Check the new URL
+        const newUrl = this.page.url();
+        this.log(`📍 Current URL after click: ${newUrl}`);
+
+        // Scroll down to make sure all content is visible (the button might be below the fold)
+        this.log('📜 Scrolling down to reveal all content...');
+        await this.page.evaluate(() => {
+          window.scrollTo(0, document.body.scrollHeight);
+        });
+        await this.randomWait(2000, 3000);
+
+        // Also try scrolling to the middle
+        await this.page.evaluate(() => {
+          window.scrollTo(0, document.body.scrollHeight / 2);
+        });
+        await this.randomWait(1000, 2000);
+
+        // Now look for "Document Image" button on the detail page
+        this.log('🔍 Looking for "Document Image" button on detail page...');
+
+        // FIRST: Dump ALL page HTML to understand structure
+        const pageStructure = await this.page.evaluate(() => {
+          // Get main content area (likely contains the results)
+          const mainContent = document.querySelector('main') || document.querySelector('#main') || document.body;
+
+          // Get full HTML of main content (first 5000 chars)
+          const mainHTML = mainContent.innerHTML.substring(0, 5000);
+
+          // Look for ALL divs that might contain the clerk's file number
+          const allDivs = Array.from(document.querySelectorAll('div'));
+          const divsWithCFN = allDivs.filter(div => {
+            const text = div.innerText || '';
+            // Look specifically for the div that has ONLY the clerk file number info (not the whole page)
+            return (text.includes('2017 R 358201') || text.includes('Clerk\'s File Number:')) &&
+                   text.length < 2000; // Exclude huge divs (root, body, etc.)
+          }).slice(0, 8).map(div => ({
+            className: div.className,
+            id: div.id,
+            innerHTML: div.innerHTML.substring(0, 3000),
+            text: div.innerText.substring(0, 500),
+            hasClickables: div.querySelectorAll('a, button, [onclick], img').length
+          }));
+
+          return { mainHTML, divsWithCFN };
+        });
+
+        this.log(`\n📋 Main content HTML (first 1000 chars):`);
+        this.log(pageStructure.mainHTML.substring(0, 1000));
+
+        this.log(`\n📋 Found ${pageStructure.divsWithCFN.length} divs containing clerk's file number (text < 2000 chars)`);
+        pageStructure.divsWithCFN.forEach((div, i) => {
+          this.log(`\n   Div ${i + 1}:`);
+          this.log(`   Class: "${div.className}" ID: "${div.id}" Clickables: ${div.hasClickables}`);
+          this.log(`   Text: ${div.text.substring(0, 300)}`);
+          this.log(`   HTML: ${div.innerHTML.substring(0, 1500)}`);
+        });
+
+        // IMPORTANT: After clicking table row, page switches to Card View
+        // We need to click ON the card itself to open the detail page with "Document Image" button
+        this.log('\n🔍 Checking if we need to click on a card to open detail view...');
+
+        const cardClicked = await this.page.evaluate(() => {
+          // Look for card divs (class "TitleSearchTab" based on diagnostic output)
+          const cardDivs = document.querySelectorAll('.TitleSearchTab');
+
+          if (cardDivs.length > 0) {
+            // Found cards! Let's examine the first card structure
+            const firstCard = cardDivs[0];
+
+            // Log the card HTML to see what's inside
+            const cardHTML = firstCard.innerHTML;
+
+            // Look for ANY links within the card
+            const links = firstCard.querySelectorAll('a');
+            const linkInfo = Array.from(links).map(link => ({
+              text: (link.textContent || '').trim().substring(0, 50),
+              href: link.href || '',
+              className: link.className
+            }));
+
+            // STRATEGY 1: Try to click on the CFN text itself (might navigate to detail page)
+            // Look for text containing "Clerk's File Number: 2017 R 358201, Group:"
+            const cfnParagraphs = firstCard.querySelectorAll('p');
+            for (const p of cfnParagraphs) {
+              const text = p.innerText || '';
+              if (text.includes('Clerk\'s File Number:') && text.includes('Group:')) {
+                p.click();
+                return {
+                  clicked: true,
+                  method: 'cfn-text-click',
+                  count: cardDivs.length,
+                  text: text.substring(0, 100),
+                  cardHTML: cardHTML.substring(0, 4000),
+                  linkCount: links.length,
+                  linkInfo
+                };
+              }
+            }
+
+            // STRATEGY 2: Try the expand button
+            const expandButton = firstCard.querySelector('.TitleSearchTabExpand') ||
+                                 firstCard.querySelector('[title="View Details"]') ||
+                                 firstCard.querySelector('svg');
+
+            if (expandButton) {
+              expandButton.click();
+              return {
+                clicked: true,
+                method: 'expand-button',
+                count: cardDivs.length,
+                text: firstCard.innerText.substring(0, 100),
+                cardHTML: cardHTML.substring(0, 4000),
+                linkCount: links.length,
+                linkInfo
+              };
+            }
+
+            // STRATEGY 3: Fallback - click the card itself
+            firstCard.click();
+            return {
+              clicked: true,
+              method: 'card-div',
+              count: cardDivs.length,
+              text: firstCard.innerText.substring(0, 100),
+              cardHTML: cardHTML.substring(0, 4000),
+              linkCount: links.length,
+              linkInfo
+            };
+          }
+
+          return { clicked: false, count: 0 };
+        });
+
+        if (cardClicked.clicked) {
+          this.log(`✅ Clicked on card (1 of ${cardClicked.count}) using method: ${cardClicked.method}`);
+          this.log(`   Card text: ${cardClicked.text}`);
+
+          // IMPORTANT: Clicking card opens a NEW WINDOW/TAB with URL pattern: /recordpage?qs=...
+          this.log('⏳ Waiting for new window to open...');
+          await this.randomWait(2000, 3000);
+
+          // Check if new page opened
+          const pages = await this.browser.pages();
+          this.log(`📋 Browser has ${pages.length} page(s) open`);
+
+          // Find the recordpage tab (should be the newest one)
+          let recordPage = null;
+          for (const p of pages) {
+            const url = p.url();
+            if (url.includes('/recordpage')) {
+              recordPage = p;
+              this.log(`🌐 Found record detail page: ${url}`);
+              break;
+            }
+          }
+
+          if (!recordPage) {
+            // Maybe it loaded in the same tab
+            const currentUrl = this.page.url();
+            this.log(`📍 Current URL: ${currentUrl}`);
+            if (currentUrl.includes('/recordpage')) {
+              recordPage = this.page;
+              this.log(`✅ Record page loaded in same tab`);
+            } else {
+              throw new Error('Record detail page did not open after clicking card');
+            }
+          }
+
+          // Switch to the record page
+          await recordPage.bringToFront();
+          this.page = recordPage;
+
+          // Wait for page to fully load
+          this.log('⏳ Waiting for record page to fully load...');
+          await this.randomWait(3000, 5000);
+        } else {
+          this.log(`⚠️ No cards found (found ${cardClicked.count} cards)`);
+        }
+
+        const documentImageButton = await this.page.evaluate(() => {
+          // Search for ANY element containing "Document Image" (case insensitive)
+          const allClickable = [
+            ...Array.from(document.querySelectorAll('a')),
+            ...Array.from(document.querySelectorAll('button')),
+            ...Array.from(document.querySelectorAll('input[type="button"]')),
+            ...Array.from(document.querySelectorAll('input[type="submit"]')),
+            ...Array.from(document.querySelectorAll('[onclick]')),
+            ...Array.from(document.querySelectorAll('[role="button"]')),
+            ...Array.from(document.querySelectorAll('div')),
+            ...Array.from(document.querySelectorAll('span'))
+          ];
+
+          for (const elem of allClickable) {
+            const text = (elem.textContent || elem.innerText || elem.value || '').trim();
+            const lowerText = text.toLowerCase();
+
+            // Look for "Document Image" text specifically
+            if (lowerText.includes('document image') || lowerText === 'document image') {
+              const isVisible = elem.offsetParent !== null;
+              return {
+                found: true,
+                tag: elem.tagName,
+                text: text.substring(0, 100),
+                className: elem.className,
+                id: elem.id,
+                isLink: elem.tagName === 'A',
+                href: elem.href || '',
+                isButton: elem.tagName === 'BUTTON' || elem.type === 'button',
+                onclick: (elem.getAttribute('onclick') || '').substring(0, 100),
+                isVisible
+              };
+            }
+          }
+
+          // Also check for variations
+          for (const elem of allClickable) {
+            const text = (elem.textContent || elem.innerText || elem.value || '').trim();
+            const lowerText = text.toLowerCase();
+
+            if ((lowerText.includes('document') && lowerText.includes('image')) ||
+                lowerText.includes('view document') ||
+                lowerText.includes('view image')) {
+              const isVisible = elem.offsetParent !== null;
+              return {
+                found: true,
+                tag: elem.tagName,
+                text: text.substring(0, 100),
+                className: elem.className,
+                id: elem.id,
+                isLink: elem.tagName === 'A',
+                href: elem.href || '',
+                isButton: elem.tagName === 'BUTTON' || elem.type === 'button',
+                onclick: (elem.getAttribute('onclick') || '').substring(0, 100),
+                isVisible
+              };
+            }
+          }
+
+          return { found: false };
+        });
+
+        if (documentImageButton.found) {
+          this.log(`✅ Found "Document Image" button!`);
+          this.log(`   Tag: <${documentImageButton.tag}> Text: "${documentImageButton.text}"`);
+          this.log(`   Visible: ${documentImageButton.isVisible}, Link: ${documentImageButton.isLink}, Button: ${documentImageButton.isButton}`);
+          this.log(`   Class: "${documentImageButton.className}" ID: "${documentImageButton.id}"`);
+          this.log(`   Onclick: "${documentImageButton.onclick}"`);
+
+          // Click the "Document Image" button
+          this.log('🖱️  Clicking "Document Image" button...');
+
+          // Try to find and click using Puppeteer's click (which handles visibility better)
+          let clicked = false;
+          try {
+            // Look for link with "Document Image" text
+            const docImageLink = await this.page.$x("//a[contains(text(), 'Document Image')]");
+            if (docImageLink.length > 0) {
+              // Scroll into view and click
+              await docImageLink[0].evaluate(el => el.scrollIntoView());
+              await this.randomWait(500, 1000);
+              await docImageLink[0].click();
+              clicked = true;
+              this.log('✅ Clicked using XPath selector');
+            }
+          } catch (err) {
+            this.log(`⚠️ XPath click failed: ${err.message}, trying JavaScript click...`);
+          }
+
+          // Fallback to JavaScript click
+          if (!clicked) {
+            clicked = await this.page.evaluate((btnText) => {
+              const allClickable = [
+                ...Array.from(document.querySelectorAll('a')),
+                ...Array.from(document.querySelectorAll('button')),
+                ...Array.from(document.querySelectorAll('input[type="button"]')),
+                ...Array.from(document.querySelectorAll('[onclick]')),
+                ...Array.from(document.querySelectorAll('div')),
+                ...Array.from(document.querySelectorAll('span'))
+              ];
+
+              for (const elem of allClickable) {
+                const text = (elem.textContent || elem.innerText || elem.value || '').trim();
+                const lowerText = text.toLowerCase();
+
+                if (lowerText.includes('document image') || lowerText === 'document image') {
+                  elem.click();
+                  return true;
+                }
+              }
+              return false;
+            }, documentImageButton.text);
+          }
+
+          if (clicked) {
+            this.log('✅ Clicked "Document Image" button successfully');
+
+            // Wait for PDF to load (clicking Document Image should display PDF in iframe or new view)
+            this.log('⏳ Waiting for PDF to load after clicking Document Image...');
+
+            // Check if a new tab opened after clicking Document Image
+            await this.randomWait(2000, 3000);
+            const pagesAfterClick = await this.browser.pages();
+            this.log(`📋 Browser now has ${pagesAfterClick.length} page(s) open after clicking Document Image`);
+
+            // Check for new PDF tab
+            let pdfTab = null;
+            for (const p of pagesAfterClick) {
+              const url = p.url();
+              this.log(`   Page: ${url}`);
+              if (url.includes('.pdf') || url.includes('/pdf') || url.includes('blob:')) {
+                pdfTab = p;
+                this.log(`🌐 Found PDF in new tab: ${url}`);
+                break;
+              }
+            }
+
+            if (pdfTab) {
+              // Switch to PDF tab and download
+              await pdfTab.bringToFront();
+              this.page = pdfTab;
+              this.log('✅ Switched to PDF tab');
+              return await this.findAndDownloadPDF(transaction);
+            }
+
+            // Wait for iframe or PDF to appear (try multiple times)
+            let pdfFound = false;
+            let pdfSrc = null;
+            for (let attempt = 0; attempt < 10; attempt++) {
+              await this.randomWait(1000, 2000);
+
+              const checkResult = await this.page.evaluate(() => {
+                // Check for iframe with PDF or blob
+                const iframes = document.querySelectorAll('iframe');
+                for (const iframe of iframes) {
+                  const src = iframe.src || '';
+                  if (src && (src.includes('.pdf') || src.includes('blob:') || src.includes('/pdf') || src.includes('document'))) {
+                    return { found: true, type: 'iframe', src: src.substring(0, 200) };
+                  }
+                }
+
+                // Check for object/embed tags
+                const objects = document.querySelectorAll('object, embed');
+                for (const obj of objects) {
+                  const data = obj.data || obj.src || '';
+                  if (data && (data.includes('.pdf') || data.includes('blob:') || data.includes('/pdf'))) {
+                    return { found: true, type: 'object', src: data.substring(0, 200) };
+                  }
+                }
+
+                return { found: false };
+              });
+
+              if (checkResult.found) {
+                pdfFound = true;
+                pdfSrc = checkResult.src;
+                this.log(`✅ PDF appeared in ${checkResult.type} after ${attempt + 1} attempts`);
+                this.log(`   Source: ${pdfSrc}`);
+                break;
+              }
+
+              this.log(`   Attempt ${attempt + 1}/10: No PDF found yet, waiting...`);
+            }
+
+            if (!pdfFound) {
+              this.log(`⚠️ No PDF iframe/object appeared after 10 attempts`);
+              this.log(`   The PDF might load in a different way or require additional interaction`);
+            }
+
+            // Now look for and download the PDF
+            return await this.findAndDownloadPDF(transaction);
+          } else {
+            throw new Error('Failed to click "Document Image" button');
+          }
+        } else {
+          this.log('⚠️ "Document Image" button not found with initial search');
+          this.log('   Searching ALL clickable elements on page...');
+
+          const allClickableElements = await this.page.evaluate(() => {
+            const allClickable = [
+              ...Array.from(document.querySelectorAll('a')),
+              ...Array.from(document.querySelectorAll('button')),
+              ...Array.from(document.querySelectorAll('input[type="button"]')),
+              ...Array.from(document.querySelectorAll('input[type="submit"]')),
+              ...Array.from(document.querySelectorAll('[onclick]'))
+            ];
+
+            return {
+              url: window.location.href,
+              title: document.title,
+              bodyText: document.body.innerText.substring(0, 1500),
+              clickableCount: allClickable.length,
+              clickable: allClickable.slice(0, 30).map(elem => ({
+                tag: elem.tagName,
+                type: elem.type || '',
+                text: (elem.textContent || elem.innerText || elem.value || '').trim().substring(0, 80),
+                className: elem.className.substring(0, 50),
+                id: elem.id,
+                href: (elem.href || '').substring(0, 100),
+                isVisible: elem.offsetParent !== null
+              }))
+            };
+          });
+
+          this.log(`   Page title: ${allClickableElements.title}`);
+          this.log(`   Total clickable elements: ${allClickableElements.clickableCount}`);
+          this.log(`   First 30 clickable elements:`);
+          allClickableElements.clickable.forEach((elem, i) => {
+            this.log(`     ${i + 1}. <${elem.tag}${elem.type ? ` type="${elem.type}"` : ''}> "${elem.text}" visible=${elem.isVisible}`);
+            if (elem.href) this.log(`        href="${elem.href}"`);
+          });
+
+          this.log(`\n   Page content (first 800 chars):`);
+          this.log(`   ${allClickableElements.bodyText.substring(0, 800)}`);
+
+          throw new Error('Could not find "Document Image" button on clerk detail page');
+        }
+      }
+
+      this.log(`⚠️ Could not click table entry: ${tableEntryClicked.reason}`);
+
+      // Fallback: Look for PDF link or view button directly
+      const pdfLinkFound = await this.page.evaluate(() => {
+        // Look for direct PDF links first
+        const allLinks = Array.from(document.querySelectorAll('a'));
+        const foundLinks = [];
+
+        for (const link of allLinks) {
+          const href = link.href || '';
+          const text = (link.textContent || '').toLowerCase().trim();
+
+          // Collect info about all interesting links
+          if (text.length > 0 && text.length < 100) {
+            foundLinks.push({ text: text.substring(0, 50), href: href.substring(0, 100) });
+          }
+
+          // Direct PDF link
+          if (href.includes('.pdf') || href.includes('/pdf')) {
+            return { found: true, type: 'pdf-link', url: href, foundLinks };
+          }
+
+          // View/Image buttons that might open PDF
+          if (text.includes('view') || text.includes('image') || text.includes('document')) {
+            return { found: true, type: 'view-link', url: href, text: text.substring(0, 50), foundLinks };
+          }
+
+          // Check for thumbnail images or clickable icons
+          if (href.includes('ViewDocument') || href.includes('GetDocument')) {
+            return { found: true, type: 'document-link', url: href, foundLinks };
+          }
+        }
+
+        // Look for image thumbnails or icons that might be clickable
+        const images = Array.from(document.querySelectorAll('img'));
+        for (const img of images) {
+          const parent = img.parentElement;
+          const alt = (img.alt || '').toLowerCase();
+
+          // Check if image itself or parent is clickable
+          if (parent && parent.tagName === 'A') {
+            const href = parent.href || '';
+            // Look for view/document links or thumbnail images
+            if (href && (href.includes('view') || href.includes('document') || href.includes('image') ||
+                        alt.includes('view') || alt.includes('thumbnail') || alt.includes('document'))) {
+              return { found: true, type: 'image-link', url: href, alt, foundLinks };
+            }
+          }
+
+          // Also check for any image with "thumbnail" or "document" in alt
+          if (alt.includes('thumbnail') || alt.includes('document') || alt.includes('image')) {
+            // Try clicking the image itself
+            if (parent && parent.tagName === 'A') {
+              return { found: true, type: 'thumbnail-link', url: parent.href, alt, foundLinks };
+            }
+          }
+        }
+
+        // Look for any clickable elements in tables (common for search results)
+        const tableLinks = Array.from(document.querySelectorAll('table a'));
+        if (tableLinks.length > 0) {
+          // Get first table link
+          const firstLink = tableLinks[0];
+          const href = firstLink.href || '';
+          const text = (firstLink.textContent || '').trim();
+          if (href && text) {
+            return { found: true, type: 'table-link', url: href, text: text.substring(0, 50), foundLinks };
+          }
+        }
+
+        return { found: false, foundLinks };
+      });
+
+      if (!pdfLinkFound.found) {
+        this.log('⚠️ No PDF or view link found on clerk\'s search results');
+        throw new Error('Could not find PDF link on clerk search results page');
+      }
+
+      this.log(`✅ Found ${pdfLinkFound.type}: ${pdfLinkFound.url || pdfLinkFound.text}`);
+
+      // Navigate to the PDF or view page
+      if (pdfLinkFound.url) {
+        await this.page.goto(pdfLinkFound.url, { waitUntil: 'networkidle2', timeout: 30000 });
+        await this.randomWait(3000, 5000);
+      }
+
+      // Now try to download the PDF
+      const pdfUrl = this.page.url();
+      this.log(`📍 PDF URL: ${pdfUrl}`);
+
+      // If we're not directly at a PDF, look for one
+      if (!pdfUrl.includes('.pdf')) {
+        const pdfFound = await this.page.evaluate(() => {
+          // Look for iframe with PDF
+          const iframes = Array.from(document.querySelectorAll('iframe'));
+          for (const iframe of iframes) {
+            const src = iframe.src || '';
+            if (src.includes('.pdf') || src.includes('/pdf')) {
+              return { found: true, url: src };
+            }
+          }
+
+          // Look for PDF links
+          const links = Array.from(document.querySelectorAll('a'));
+          for (const link of links) {
+            const href = link.href || '';
+            if (href.includes('.pdf')) {
+              return { found: true, url: href };
+            }
+          }
+
+          return { found: false };
+        });
+
+        if (!pdfFound.found) {
+          throw new Error('Could not locate PDF on clerk page');
+        }
+
+        this.log(`✅ Found PDF: ${pdfFound.url}`);
+        await this.page.goto(pdfFound.url, { waitUntil: 'networkidle2', timeout: 30000 });
+        await this.randomWait(2000, 3000);
+      }
+
+      // Download the PDF
+      this.log('📥 Downloading PDF...');
+      const pdfBuffer = await this.page.evaluate(async () => {
+        const response = await fetch(window.location.href);
+        if (!response.ok) {
+          throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+        }
+        const arrayBuffer = await response.arrayBuffer();
+        return Array.from(new Uint8Array(arrayBuffer));
+      });
+
+      const buffer = Buffer.from(pdfBuffer);
+
+      // Verify it's a PDF
+      const isPDF = buffer.slice(0, 4).toString() === '%PDF';
+      if (!isPDF) {
+        throw new Error('Downloaded file is not a valid PDF');
+      }
+
+      this.log(`✅ PDF downloaded successfully (${buffer.length} bytes)`);
+
+      // Save PDF to disk
+      const path = require('path');
+      const fs = require('fs');
+      const relativePath = process.env.DEED_DOWNLOAD_PATH || './downloads';
+      const downloadPath = path.resolve(relativePath);
+
+      if (!fs.existsSync(downloadPath)) {
+        fs.mkdirSync(downloadPath, { recursive: true });
+        this.log(`📁 Created download directory: ${downloadPath}`);
+      }
+
+      const filename = `miami-dade_deed_${transaction.officialRecordBook}_${transaction.pageNumber}.pdf`;
+      const filepath = path.join(downloadPath, filename);
+
+      fs.writeFileSync(filepath, buffer);
+      this.log(`💾 Saved PDF to: ${filepath}`);
+
+      return {
+        success: true,
+        filename,
+        filepath,
+        downloadPath,
+        officialRecordBook: transaction.officialRecordBook,
+        pageNumber: transaction.pageNumber,
+        timestamp: new Date().toISOString(),
+        fileSize: buffer.length,
+        fileSizeKB: (buffer.length / 1024).toFixed(2)
+      };
+
+    } catch (error) {
+      this.log(`❌ Failed to download from clerk page: ${error.message}`);
+      return {
+        success: false,
+        error: error.message
+      };
+    }
+  }
+
+  /**
+   * Helper method to find and download PDF from current page
+   */
+  async findAndDownloadPDF(transaction) {
+    this.log('🔍 Looking for PDF or document view button...');
+
+    try {
+      await this.randomWait(3000, 5000);
+
+      // STRATEGY: Like Orange County, look for iframe with embedded PDF first
+      this.log('🔍 Checking for PDF in iframe (Orange County method)...');
+
+      const iframeDownload = await this.page.evaluate(() => {
+        const iframes = document.querySelectorAll('iframe');
+        for (const iframe of iframes) {
+          if (iframe.src && (iframe.src.includes('pdf') || iframe.src.includes('document') || iframe.src.includes('.pdf'))) {
+            // Found PDF iframe, return the src
+            return { found: true, src: iframe.src };
+          }
+        }
+        return { found: false };
+      });
+
+      if (iframeDownload.found) {
+        this.log(`📄 Found PDF in iframe: ${iframeDownload.src}`);
+
+        // Download PDF using Orange County's method: Node.js https with cookies
+        const path = require('path');
+        const fs = require('fs');
+        const relativePath = process.env.DEED_DOWNLOAD_PATH || './downloads';
+        const downloadPath = path.resolve(relativePath);
+
+        // Ensure download directory exists
+        if (!fs.existsSync(downloadPath)) {
+          fs.mkdirSync(downloadPath, { recursive: true });
+          this.log(`📁 Created download directory: ${downloadPath}`);
+        }
+
+        const filename = `miami-dade_deed_${transaction.officialRecordBook}_${transaction.pageNumber}_${Date.now()}.pdf`;
+        const filepath = path.join(downloadPath, filename);
+
+        // Get cookies from current page session
+        const cookies = await this.page.cookies();
+        const cookieString = cookies.map(c => `${c.name}=${c.value}`).join('; ');
+        this.log(`📋 Using ${cookies.length} cookies from session`);
+
+        // Download PDF using Node.js https module (Orange County method)
+        const https = require('https');
+        const url = require('url');
+        const pdfUrl = iframeDownload.src;
+        const parsedUrl = url.parse(pdfUrl);
+
+        this.log(`🔄 Downloading PDF using https module with session cookies...`);
+
+        return await new Promise((resolve, reject) => {
+          const options = {
+            hostname: parsedUrl.hostname,
+            port: parsedUrl.port || 443,
+            path: parsedUrl.path,
+            method: 'GET',
+            headers: {
+              'Cookie': cookieString,
+              'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+              'Accept': 'application/pdf,*/*',
+              'Referer': this.page.url(),
+              'Accept-Language': 'en-US,en;q=0.9'
+            },
+            timeout: 60000
+          };
+
+          this.log(`🌐 GET ${pdfUrl}`);
+
+          const req = https.request(options, (res) => {
+            this.log(`📥 Response: ${res.statusCode} ${res.statusMessage}`);
+            this.log(`   Content-Type: ${res.headers['content-type']}`);
+            this.log(`   Content-Length: ${res.headers['content-length']}`);
+
+            if (res.statusCode === 200) {
+              const chunks = [];
+
+              res.on('data', (chunk) => {
+                chunks.push(chunk);
+              });
+
+              res.on('end', () => {
+                const pdfBuffer = Buffer.concat(chunks);
+
+                // Verify it's actually a PDF
+                const header = pdfBuffer.slice(0, 5).toString();
+                if (header !== '%PDF-') {
+                  this.log(`❌ Response is not a PDF (header: ${header})`);
+                  this.log(`   First 100 bytes: ${pdfBuffer.slice(0, 100).toString()}`);
+                  reject(new Error('Downloaded content is not a PDF file'));
+                  return;
+                }
+
+                // Save the PDF
+                fs.writeFileSync(filepath, pdfBuffer);
+
+                this.log(`✅ PDF downloaded and saved to: ${filepath}`);
+                this.log(`📄 File size: ${(pdfBuffer.length / 1024).toFixed(2)} KB`);
+
+                // Convert to base64 for API response
+                const pdfBase64 = pdfBuffer.toString('base64');
+
+                resolve({
+                  success: true,
+                  filename,
+                  downloadPath: downloadPath,
+                  filepath,
+                  officialRecordBook: transaction.officialRecordBook,
+                  pageNumber: transaction.pageNumber,
+                  timestamp: new Date().toISOString(),
+                  fileSize: pdfBuffer.length,
+                  fileSizeKB: (pdfBuffer.length / 1024).toFixed(2),
+                  pdfBase64: pdfBase64
+                });
+              });
+            } else if (res.statusCode === 302 || res.statusCode === 301) {
+              reject(new Error(`Redirect to: ${res.headers.location}`));
+            } else {
+              reject(new Error(`HTTP ${res.statusCode}: ${res.statusMessage}`));
+            }
+          });
+
+          req.on('error', (err) => {
+            this.log(`❌ Request error: ${err.message}`);
+            reject(err);
+          });
+
+          req.on('timeout', () => {
+            req.destroy();
+            reject(new Error('Request timeout after 60 seconds'));
+          });
+
+          req.end();
+        });
+      }
+
+      // FALLBACK: If no iframe, look for PDF link, view button, or document image button
+      this.log('🔍 No iframe found, looking for PDF link or view button...');
+
+      const pdfLinkFound = await this.page.evaluate(() => {
+        const allElements = [
+          ...Array.from(document.querySelectorAll('a')),
+          ...Array.from(document.querySelectorAll('button')),
+          ...Array.from(document.querySelectorAll('input[type="button"]')),
+          ...Array.from(document.querySelectorAll('[onclick]')),
+          ...Array.from(document.querySelectorAll('img'))
+        ];
+
+        for (const elem of allElements) {
+          const href = elem.href || elem.src || '';
+          const text = (elem.textContent || elem.alt || elem.value || '').toLowerCase();
+          const onclick = elem.getAttribute('onclick') || '';
+
+          // Direct PDF link
+          if (href.includes('.pdf')) {
+            return { found: true, type: 'pdf-link', url: href };
+          }
+
+          // Document image / view buttons
+          if (text.includes('document image') || text.includes('view document') ||
+              text.includes('view image') || text.includes('show document') ||
+              onclick.includes('document') || onclick.includes('image')) {
+            return { found: true, type: 'view-button', element: elem.tagName, text: text.substring(0, 50) };
+          }
+
+          // Thumbnail images
+          if (elem.tagName === 'IMG' && (text.includes('thumbnail') || text.includes('document'))) {
+            const parent = elem.parentElement;
+            if (parent && parent.tagName === 'A') {
+              return { found: true, type: 'thumbnail', url: parent.href };
+            }
+          }
+        }
+
+        return { found: false };
+      });
+
+      if (!pdfLinkFound.found) {
+        // Miami-Dade County Clerk appears to require registration/login to view document images
+        // The search results page shows metadata but no direct links to PDFs
+        this.log('⚠️ IMPORTANT: Miami-Dade County Clerk search results show no PDF or document view links');
+        this.log('   This typically means the clerk requires user registration/login or payment to access documents');
+        this.log(`   Current page URL: ${this.page.url()}`);
+        this.log('   Recommendation: Check if Miami-Dade offers a developer API for deed access');
+        throw new Error('Miami-Dade Clerk: No PDF or document view button found. May require registration/login or payment to access deed documents.');
+      }
+
+      this.log(`✅ Found ${pdfLinkFound.type}`);
+
+      // If we found a view button (not direct link), click it
+      if (pdfLinkFound.type === 'view-button') {
+        await this.page.evaluate((text) => {
+          const allElements = [
+            ...Array.from(document.querySelectorAll('button')),
+            ...Array.from(document.querySelectorAll('a')),
+            ...Array.from(document.querySelectorAll('input[type="button"]')),
+            ...Array.from(document.querySelectorAll('[onclick]'))
+          ];
+
+          for (const elem of allElements) {
+            const elemText = (elem.textContent || elem.value || '').toLowerCase();
+            if (elemText.includes('document image') || elemText.includes('view document')) {
+              elem.click();
+              return true;
+            }
+          }
+          return false;
+        }, pdfLinkFound.text);
+
+        this.log('✅ Clicked view/document button');
+        await this.randomWait(5000, 7000);
+      } else if (pdfLinkFound.url) {
+        // Navigate to PDF URL
+        await this.page.goto(pdfLinkFound.url, { waitUntil: 'networkidle2', timeout: 30000 });
+        await this.randomWait(3000, 5000);
+      }
+
+      // Check for new window/tab
+      const pages = await this.browser.pages();
+      let pdfPage = this.page;
+
+      if (pages.length > this.browser.pages().length) {
+        pdfPage = pages[pages.length - 1];
+        this.log('✅ Found new window with PDF');
+      }
+
+      // Get PDF URL
+      const pdfUrl = pdfPage.url();
+      this.log(`📍 PDF URL: ${pdfUrl}`);
+
+      // Download PDF
+      this.log('📥 Downloading PDF...');
+      const pdfBuffer = await pdfPage.evaluate(async () => {
+        const response = await fetch(window.location.href);
+        if (!response.ok) {
+          throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+        }
+        const arrayBuffer = await response.arrayBuffer();
+        return Array.from(new Uint8Array(arrayBuffer));
+      });
+
+      const buffer = Buffer.from(pdfBuffer);
+
+      // Verify it's a PDF
+      const isPDF = buffer.slice(0, 4).toString() === '%PDF';
+      if (!isPDF) {
+        throw new Error('Downloaded file is not a valid PDF');
+      }
+
+      this.log(`✅ PDF downloaded successfully (${buffer.length} bytes)`);
+
+      // Save PDF
+      const path = require('path');
+      const fs = require('fs');
+      const relativePath = process.env.DEED_DOWNLOAD_PATH || './downloads';
+      const downloadPath = path.resolve(relativePath);
+
+      if (!fs.existsSync(downloadPath)) {
+        fs.mkdirSync(downloadPath, { recursive: true });
+      }
+
+      const filename = `miami-dade_deed_${transaction.officialRecordBook}_${transaction.pageNumber}.pdf`;
+      const filepath = path.join(downloadPath, filename);
+
+      fs.writeFileSync(filepath, buffer);
+      this.log(`💾 Saved PDF to: ${filepath}`);
+
+      // Close PDF page if it's different
+      if (pdfPage !== this.page) {
+        await pdfPage.close();
+      }
+
+      return {
+        success: true,
+        filename,
+        filepath,
+        downloadPath,
+        officialRecordBook: transaction.officialRecordBook,
+        pageNumber: transaction.pageNumber,
+        timestamp: new Date().toISOString(),
+        fileSize: buffer.length,
+        fileSizeKB: (buffer.length / 1024).toFixed(2)
+      };
+
+    } catch (error) {
+      this.log(`❌ Failed to find/download PDF: ${error.message}`);
       return {
         success: false,
         error: error.message
