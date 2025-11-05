@@ -1705,6 +1705,28 @@ class MiamiDadeCountyFloridaScraper extends DeedScraper {
           this.log(`   Class: "${documentImageButton.className}" ID: "${documentImageButton.id}"`);
           this.log(`   Onclick: "${documentImageButton.onclick}"`);
 
+          // Set up network request monitoring BEFORE clicking
+          this.log('📡 Setting up network monitoring to capture PDF requests...');
+          const pdfRequests = [];
+
+          const requestHandler = (request) => {
+            const url = request.url();
+            const resourceType = request.resourceType();
+
+            // Capture any requests that might be PDF-related
+            if (url.includes('.pdf') || url.includes('/pdf') || url.includes('document') ||
+                url.includes('Image') || url.includes('blob') || resourceType === 'document') {
+              pdfRequests.push({
+                url,
+                resourceType,
+                method: request.method()
+              });
+              this.log(`📥 Captured request: ${resourceType} - ${url.substring(0, 150)}`);
+            }
+          };
+
+          this.page.on('request', requestHandler);
+
           // Click the "Document Image" button
           this.log('🖱️  Clicking "Document Image" button...');
 
@@ -1781,10 +1803,12 @@ class MiamiDadeCountyFloridaScraper extends DeedScraper {
               return await this.findAndDownloadPDF(transaction);
             }
 
-            // Wait for iframe or PDF to appear (try multiple times)
+            // Wait for PDF viewer to appear on the right side
+            // The PDF loads in a dynamic React component, not a traditional iframe
             let pdfFound = false;
             let pdfSrc = null;
-            for (let attempt = 0; attempt < 10; attempt++) {
+
+            for (let attempt = 0; attempt < 15; attempt++) {
               await this.randomWait(1000, 2000);
 
               const checkResult = await this.page.evaluate(() => {
@@ -1792,37 +1816,80 @@ class MiamiDadeCountyFloridaScraper extends DeedScraper {
                 const iframes = document.querySelectorAll('iframe');
                 for (const iframe of iframes) {
                   const src = iframe.src || '';
-                  if (src && (src.includes('.pdf') || src.includes('blob:') || src.includes('/pdf') || src.includes('document'))) {
-                    return { found: true, type: 'iframe', src: src.substring(0, 200) };
+                  if (src && (src.includes('.pdf') || src.includes('blob:') || src.includes('/pdf') || src.includes('document') || src.includes('Image'))) {
+                    return { found: true, type: 'iframe', src: src.substring(0, 300), iframeCount: iframes.length };
                   }
                 }
 
-                // Check for object/embed tags
+                // Check for object/embed tags (PDF.js viewer)
                 const objects = document.querySelectorAll('object, embed');
                 for (const obj of objects) {
                   const data = obj.data || obj.src || '';
                   if (data && (data.includes('.pdf') || data.includes('blob:') || data.includes('/pdf'))) {
-                    return { found: true, type: 'object', src: data.substring(0, 200) };
+                    return { found: true, type: 'object', src: data.substring(0, 300) };
                   }
                 }
 
-                return { found: false };
+                // Check for canvas elements (PDF.js renders PDFs to canvas)
+                const canvases = document.querySelectorAll('canvas');
+                if (canvases.length > 0) {
+                  return { found: true, type: 'canvas', src: 'PDF rendered in canvas', canvasCount: canvases.length };
+                }
+
+                // Check for PDF viewer containers
+                const pdfContainers = document.querySelectorAll('[class*="pdf"], [id*="pdf"], [class*="document"], [id*="document"], [class*="viewer"], [id*="viewer"]');
+                if (pdfContainers.length > 0) {
+                  const container = pdfContainers[0];
+                  const hasContent = container.children.length > 0 || container.innerHTML.length > 100;
+                  if (hasContent) {
+                    return {
+                      found: true,
+                      type: 'pdf-container',
+                      src: `Container: ${container.className || container.id}`,
+                      containerCount: pdfContainers.length
+                    };
+                  }
+                }
+
+                return { found: false, iframeCount: iframes.length, canvasCount: canvases.length };
               });
 
               if (checkResult.found) {
                 pdfFound = true;
                 pdfSrc = checkResult.src;
-                this.log(`✅ PDF appeared in ${checkResult.type} after ${attempt + 1} attempts`);
+                this.log(`✅ PDF appeared as ${checkResult.type} after ${attempt + 1} attempts`);
                 this.log(`   Source: ${pdfSrc}`);
+                if (checkResult.canvasCount) this.log(`   Canvas count: ${checkResult.canvasCount}`);
+                if (checkResult.iframeCount) this.log(`   Iframe count: ${checkResult.iframeCount}`);
                 break;
               }
 
-              this.log(`   Attempt ${attempt + 1}/10: No PDF found yet, waiting...`);
+              this.log(`   Attempt ${attempt + 1}/15: No PDF found yet (iframes: ${checkResult.iframeCount || 0}, canvas: ${checkResult.canvasCount || 0})`);
             }
 
             if (!pdfFound) {
-              this.log(`⚠️ No PDF iframe/object appeared after 10 attempts`);
-              this.log(`   The PDF might load in a different way or require additional interaction`);
+              this.log(`⚠️ No PDF viewer appeared after 15 attempts`);
+              this.log(`   The PDF might load in a different way - will check captured network requests`);
+            }
+
+            // Stop listening to network requests
+            this.page.off('request', requestHandler);
+
+            // Check if we captured any PDF requests
+            if (pdfRequests.length > 0) {
+              this.log(`📋 Found ${pdfRequests.length} PDF-related network request(s):`);
+              pdfRequests.forEach((req, i) => {
+                this.log(`   ${i + 1}. [${req.method}] ${req.resourceType}: ${req.url.substring(0, 120)}`);
+              });
+
+              // Try to use the first PDF request URL
+              const pdfRequest = pdfRequests.find(r => r.url.includes('.pdf') || r.url.includes('/pdf/')) || pdfRequests[0];
+              this.log(`✅ Will try to download from captured request: ${pdfRequest.url.substring(0, 150)}`);
+
+              // Try to download the PDF from the captured URL
+              transaction.pdfUrl = pdfRequest.url;
+            } else {
+              this.log(`⚠️ No PDF requests were captured during network monitoring`);
             }
 
             // Now look for and download the PDF
@@ -2066,7 +2133,118 @@ class MiamiDadeCountyFloridaScraper extends DeedScraper {
     try {
       await this.randomWait(3000, 5000);
 
-      // STRATEGY: Like Orange County, look for iframe with embedded PDF first
+      // PRIORITY 1: If we captured a PDF URL from network monitoring, use it directly
+      if (transaction.pdfUrl) {
+        this.log(`🎯 Using PDF URL from network capture: ${transaction.pdfUrl.substring(0, 150)}`);
+
+        // Download using the Orange County method (HTTPS with cookies)
+        const path = require('path');
+        const fs = require('fs');
+        const relativePath = process.env.DEED_DOWNLOAD_PATH || './downloads';
+        const downloadPath = path.resolve(relativePath);
+
+        if (!fs.existsSync(downloadPath)) {
+          fs.mkdirSync(downloadPath, { recursive: true });
+          this.log(`📁 Created download directory: ${downloadPath}`);
+        }
+
+        const filename = `miami-dade_deed_${transaction.officialRecordBook}_${transaction.pageNumber}_${Date.now()}.pdf`;
+        const filepath = path.join(downloadPath, filename);
+
+        const cookies = await this.page.cookies();
+        const cookieString = cookies.map(c => `${c.name}=${c.value}`).join('; ');
+
+        const https = require('https');
+        const url = require('url');
+        const parsedUrl = url.parse(transaction.pdfUrl);
+
+        this.log(`🔄 Downloading PDF from captured URL...`);
+
+        return await new Promise((resolve, reject) => {
+          const options = {
+            hostname: parsedUrl.hostname,
+            port: parsedUrl.port || 443,
+            path: parsedUrl.path,
+            method: 'GET',
+            headers: {
+              'Cookie': cookieString,
+              'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36',
+              'Accept': 'application/pdf,image/*,*/*',
+              'Referer': this.page.url(),
+              'Accept-Language': 'en-US,en;q=0.9'
+            },
+            timeout: 60000
+          };
+
+          const req = https.request(options, (res) => {
+            this.log(`📥 Response: ${res.statusCode} ${res.statusMessage}`);
+            this.log(`   Content-Type: ${res.headers['content-type']}`);
+
+            if (res.statusCode === 200) {
+              const chunks = [];
+              res.on('data', (chunk) => chunks.push(chunk));
+              res.on('end', () => {
+                const buffer = Buffer.concat(chunks);
+
+                // Check if it's a PDF or image
+                const header = buffer.slice(0, 5).toString();
+                const isPDF = header === '%PDF-';
+                const isPNG = buffer[0] === 0x89 && buffer[1] === 0x50;
+                const isJPEG = buffer[0] === 0xFF && buffer[1] === 0xD8;
+
+                if (isPDF) {
+                  fs.writeFileSync(filepath, buffer);
+                  this.log(`✅ PDF downloaded: ${filepath} (${(buffer.length / 1024).toFixed(2)} KB)`);
+
+                  resolve({
+                    success: true,
+                    filename,
+                    downloadPath,
+                    filepath,
+                    officialRecordBook: transaction.officialRecordBook,
+                    pageNumber: transaction.pageNumber,
+                    fileSize: buffer.length,
+                    pdfBase64: buffer.toString('base64')
+                  });
+                } else if (isPNG || isJPEG) {
+                  const imageExt = isPNG ? 'png' : 'jpg';
+                  const imageFilename = filename.replace('.pdf', `.${imageExt}`);
+                  const imageFilepath = path.join(downloadPath, imageFilename);
+                  fs.writeFileSync(imageFilepath, buffer);
+                  this.log(`✅ Image downloaded: ${imageFilepath} (${(buffer.length / 1024).toFixed(2)} KB)`);
+                  this.log(`ℹ️  Note: Downloaded image file, not PDF. May need conversion.`);
+
+                  resolve({
+                    success: true,
+                    filename: imageFilename,
+                    downloadPath,
+                    filepath: imageFilepath,
+                    isImage: true,
+                    imageType: imageExt,
+                    fileSize: buffer.length,
+                    message: 'Downloaded as image file (not PDF)'
+                  });
+                } else {
+                  this.log(`❌ Response is not a PDF or image (header: ${header}, first bytes: ${buffer.slice(0, 20).toString('hex')})`);
+                  reject(new Error('Downloaded content is not a PDF or image'));
+                }
+              });
+            } else {
+              reject(new Error(`HTTP ${res.statusCode}: ${res.statusMessage}`));
+            }
+          });
+
+          req.on('error', (err) => reject(err));
+          req.on('timeout', () => {
+            req.destroy();
+            reject(new Error('Request timeout'));
+          });
+
+          req.end();
+        });
+      }
+
+      // STRATEGY 2: Like Orange County, look for iframe with embedded PDF first
       this.log('🔍 Checking for PDF in iframe (Orange County method)...');
 
       const iframeDownload = await this.page.evaluate(() => {
@@ -2196,8 +2374,11 @@ class MiamiDadeCountyFloridaScraper extends DeedScraper {
         });
       }
 
-      // FALLBACK: If no iframe, look for PDF link, view button, or document image button
-      this.log('🔍 No iframe found, looking for PDF link or view button...');
+      // FALLBACK: If no iframe, look for download button or PDF source after Document Image is clicked
+      this.log('🔍 No iframe found, looking for download button or PDF source...');
+
+      // Wait a bit more for PDF viewer to fully render
+      await this.randomWait(2000, 3000);
 
       const pdfLinkFound = await this.page.evaluate(() => {
         const allElements = [
@@ -2205,32 +2386,45 @@ class MiamiDadeCountyFloridaScraper extends DeedScraper {
           ...Array.from(document.querySelectorAll('button')),
           ...Array.from(document.querySelectorAll('input[type="button"]')),
           ...Array.from(document.querySelectorAll('[onclick]')),
-          ...Array.from(document.querySelectorAll('img'))
+          ...Array.from(document.querySelectorAll('img')),
+          ...Array.from(document.querySelectorAll('[class*="download"]')),
+          ...Array.from(document.querySelectorAll('[id*="download"]')),
+          ...Array.from(document.querySelectorAll('[title*="download"]'))
         ];
 
         for (const elem of allElements) {
           const href = elem.href || elem.src || '';
-          const text = (elem.textContent || elem.alt || elem.value || '').toLowerCase();
+          const text = (elem.textContent || elem.alt || elem.value || elem.title || '').toLowerCase();
           const onclick = elem.getAttribute('onclick') || '';
+          const className = elem.className || '';
+          const id = elem.id || '';
 
           // Direct PDF link
-          if (href.includes('.pdf')) {
-            return { found: true, type: 'pdf-link', url: href };
+          if (href.includes('.pdf') || href.includes('/pdf/') || href.includes('documentimage')) {
+            elem.click();
+            return { found: true, type: 'pdf-link', url: href, clicked: true };
           }
 
-          // Document image / view buttons
-          if (text.includes('document image') || text.includes('view document') ||
-              text.includes('view image') || text.includes('show document') ||
-              onclick.includes('document') || onclick.includes('image')) {
-            return { found: true, type: 'view-button', element: elem.tagName, text: text.substring(0, 50) };
+          // Download button patterns
+          if (text.includes('download') || text.includes('save') ||
+              className.includes('download') || id.includes('download') ||
+              onclick.includes('download')) {
+            elem.click();
+            return { found: true, type: 'download-button', text: text.substring(0, 50), clicked: true };
           }
 
-          // Thumbnail images
-          if (elem.tagName === 'IMG' && (text.includes('thumbnail') || text.includes('document'))) {
-            const parent = elem.parentElement;
-            if (parent && parent.tagName === 'A') {
-              return { found: true, type: 'thumbnail', url: parent.href };
-            }
+          // Print button (can use to get PDF)
+          if (text.includes('print') && !text.includes('record info')) {
+            return { found: true, type: 'print-button', element: elem, text: text.substring(0, 50), clicked: false };
+          }
+        }
+
+        // Check for PDF.js viewer
+        const pdfJsViewer = document.querySelector('[class*="pdfViewer"], [id*="viewer"], [data-pdf-url]');
+        if (pdfJsViewer) {
+          const pdfUrl = pdfJsViewer.getAttribute('data-pdf-url') || pdfJsViewer.getAttribute('src');
+          if (pdfUrl) {
+            return { found: true, type: 'pdfjs-viewer', url: pdfUrl };
           }
         }
 
@@ -2238,42 +2432,59 @@ class MiamiDadeCountyFloridaScraper extends DeedScraper {
       });
 
       if (!pdfLinkFound.found) {
-        // Miami-Dade County Clerk appears to require registration/login to view document images
-        // The search results page shows metadata but no direct links to PDFs
-        this.log('⚠️ IMPORTANT: Miami-Dade County Clerk search results show no PDF or document view links');
-        this.log('   This typically means the clerk requires user registration/login or payment to access documents');
-        this.log(`   Current page URL: ${this.page.url()}`);
-        this.log('   Recommendation: Check if Miami-Dade offers a developer API for deed access');
-        throw new Error('Miami-Dade Clerk: No PDF or document view button found. May require registration/login or payment to access deed documents.');
+        // Try looking for network requests that fetched PDF data
+        this.log('⚠️ No download button found, checking page source for PDF URLs...');
+
+        const pageSource = await this.page.evaluate(() => {
+          // Look in page HTML for any URLs containing PDF or document image endpoints
+          const html = document.documentElement.innerHTML;
+          const pdfUrls = [];
+
+          // Common PDF URL patterns
+          const patterns = [
+            /https?:\/\/[^\s"']+\.pdf/gi,
+            /https?:\/\/[^\s"']+\/pdf\/[^\s"']*/gi,
+            /https?:\/\/[^\s"']+documentimage[^\s"']*/gi,
+            /https?:\/\/[^\s"']+document\/[^\s"']*/gi,
+            /blob:[^\s"']+/gi
+          ];
+
+          patterns.forEach(pattern => {
+            const matches = html.match(pattern);
+            if (matches) {
+              pdfUrls.push(...matches);
+            }
+          });
+
+          return {
+            found: pdfUrls.length > 0,
+            urls: pdfUrls.slice(0, 5),  // Return first 5 URLs
+            pageHasContent: html.length
+          };
+        });
+
+        if (pageSource.found && pageSource.urls.length > 0) {
+          this.log(`✅ Found ${pageSource.urls.length} potential PDF URL(s) in page source:`);
+          pageSource.urls.forEach((url, i) => {
+            this.log(`   ${i + 1}. ${url.substring(0, 100)}`);
+          });
+          pdfLinkFound.found = true;
+          pdfLinkFound.type = 'source-url';
+          pdfLinkFound.url = pageSource.urls[0];  // Try first URL
+        } else {
+          // Miami-Dade County Clerk appears to require registration/login or uses client-side rendering
+          this.log('⚠️ IMPORTANT: Could not find PDF download button or source URL');
+          this.log('   The PDF viewer may use client-side rendering or require authentication');
+          this.log(`   Current page URL: ${this.page.url()}`);
+          throw new Error('Miami-Dade Clerk: Cannot find PDF download method. The PDF viewer may be using client-side rendering.');
+        }
       }
 
       this.log(`✅ Found ${pdfLinkFound.type}`);
 
-      // If we found a view button (not direct link), click it
-      if (pdfLinkFound.type === 'view-button') {
-        await this.page.evaluate((text) => {
-          const allElements = [
-            ...Array.from(document.querySelectorAll('button')),
-            ...Array.from(document.querySelectorAll('a')),
-            ...Array.from(document.querySelectorAll('input[type="button"]')),
-            ...Array.from(document.querySelectorAll('[onclick]'))
-          ];
-
-          for (const elem of allElements) {
-            const elemText = (elem.textContent || elem.value || '').toLowerCase();
-            if (elemText.includes('document image') || elemText.includes('view document')) {
-              elem.click();
-              return true;
-            }
-          }
-          return false;
-        }, pdfLinkFound.text);
-
-        this.log('✅ Clicked view/document button');
-        await this.randomWait(5000, 7000);
-      } else if (pdfLinkFound.url) {
-        // Navigate to PDF URL
-        await this.page.goto(pdfLinkFound.url, { waitUntil: 'networkidle2', timeout: 30000 });
+      // If we clicked something, wait for response
+      if (pdfLinkFound.clicked) {
+        this.log(`✅ Clicked ${pdfLinkFound.type}, waiting for download/navigation...`);
         await this.randomWait(3000, 5000);
       }
 
