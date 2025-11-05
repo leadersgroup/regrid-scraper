@@ -374,7 +374,7 @@ class PalmBeachCountyFloridaScraper extends DeedScraper {
   }
 
   /**
-   * Navigate to Sales/Transfer tab and extract document ID/instrument number
+   * Navigate to Sales Information section and extract OR Book/Page
    */
   async extractTransactionRecords() {
     this.log('📋 Extracting transaction records from Property Appraiser...');
@@ -382,121 +382,96 @@ class PalmBeachCountyFloridaScraper extends DeedScraper {
     try {
       await this.randomWait(2000, 3000);
 
-      // Look for Sales/Transfer information tabs or sections
-      this.log('🔍 Looking for Sales/Transfer information...');
+      // Look for Sales Information section
+      this.log('🔍 Looking for Sales Information section...');
 
-      const salesClicked = await this.page.evaluate(() => {
-        const allElements = Array.from(document.querySelectorAll('a, button, div, span, li, [role="tab"]'));
-
+      // Scroll to find Sales Information section
+      await this.page.evaluate(() => {
+        const allElements = Array.from(document.querySelectorAll('*'));
         for (const el of allElements) {
-          const text = el.textContent?.trim() || '';
-
-          if (text.match(/^(SALES|Sales|TRANSFERS?|Transfers?|SALE HISTORY|Sale History|TRANSFER HISTORY|Transfer History)$/)) {
-            if (el.tagName === 'A' || el.tagName === 'BUTTON') {
-              el.click();
-              return { clicked: true, element: el.tagName, text: text };
-            }
-
-            const clickableParent = el.closest('a, button, [onclick], [role="tab"]');
-            if (clickableParent) {
-              clickableParent.click();
-              return { clicked: true, element: clickableParent.tagName, text: text };
-            }
+          const text = el.textContent || '';
+          if (text.includes('Sales Information') || text.includes('SALES INFORMATION')) {
+            el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            break;
           }
         }
-
-        return { clicked: false };
       });
 
-      if (salesClicked && salesClicked.clicked) {
-        this.log(`✅ Clicked on Sales/Transfer tab (${salesClicked.text})`);
-        await this.randomWait(5000, 7000);
+      await this.randomWait(2000, 3000);
 
-        // Scroll to ensure content is loaded
-        await this.page.evaluate(() => {
-          window.scrollBy(0, 1000);
-        });
-        await this.randomWait(2000, 3000);
-      } else {
-        this.log(`ℹ️  No Sales tab found, checking current page for transaction data`);
-      }
-
-      // Extract transaction information from the page
-      this.log('🔍 Extracting transaction data...');
+      // Extract OR Book/Page links from Sales Information section
+      this.log('🔍 Extracting OR Book/Page from Sales Information section...');
 
       const transactions = await this.page.evaluate(() => {
         const results = [];
 
-        // Look for patterns in the page text
+        // Find Sales Information section
         const allText = document.body.innerText;
-        const lines = allText.split('\n');
+        const allElements = Array.from(document.querySelectorAll('*'));
 
-        // Look for instrument numbers, document IDs, or book/page references
-        // Palm Beach County uses instrument numbers (format: YYYYNNNNNNN - year + sequence)
-        for (const line of lines) {
-          // Instrument number pattern: year (2000-2099) followed by 7+ digits
-          const instrumentMatch = line.match(/\b(20\d{2}\d{7,})\b/);
-          if (instrumentMatch) {
-            const instrumentNum = instrumentMatch[1];
-            // Avoid duplicates
-            if (!results.some(r => r.instrumentNumber === instrumentNum)) {
+        // Look for elements containing "OR Book/Page" or similar
+        for (const el of allElements) {
+          const text = (el.textContent || '').trim();
+
+          // Look for OR Book/Page pattern (e.g., "33358 / 1920")
+          const orBookPageMatch = text.match(/^(\d{4,6})\s*\/\s*(\d{3,5})$/);
+          if (orBookPageMatch) {
+            const bookNumber = orBookPageMatch[1];
+            const pageNumber = orBookPageMatch[2];
+
+            // Check if this is a clickable link
+            const link = el.closest('a');
+            if (link) {
               results.push({
-                instrumentNumber: instrumentNum,
-                type: 'instrument',
-                source: 'Palm Beach County Property Appraiser',
-                rawText: line.trim().substring(0, 200)
+                bookNumber,
+                pageNumber,
+                type: 'or_book_page',
+                source: 'Palm Beach County Property Appraiser - Sales Information',
+                href: link.href || '',
+                text: text
               });
-            }
-          }
-
-          // Book/Page pattern
-          const bookPageMatch = line.match(/(?:Book|BK)[:\s]+(\d+)[,\s]+(?:Page|PG)[:\s]+(\d+)/i);
-          if (bookPageMatch && bookPageMatch[1] && bookPageMatch[2]) {
-            const bookNum = bookPageMatch[1];
-            const pageNum = bookPageMatch[2];
-
-            // Avoid duplicates
-            const exists = results.some(r =>
-              r.type === 'book_page' && r.bookNumber === bookNum && r.pageNumber === pageNum
-            );
-
-            if (!exists && parseInt(bookNum) > 100) { // Filter out plat books
+            } else {
               results.push({
-                bookNumber: bookNum,
-                pageNumber: pageNum,
-                type: 'book_page',
-                source: 'Palm Beach County Property Appraiser',
-                rawText: line.trim().substring(0, 200)
+                bookNumber,
+                pageNumber,
+                type: 'or_book_page',
+                source: 'Palm Beach County Property Appraiser - Sales Information',
+                text: text
               });
             }
           }
         }
 
-        // Look for links to clerk's office
-        const allLinks = Array.from(document.querySelectorAll('a[href*="mypalmbeachclerk"], a[href*="erec"]'));
+        // Also look for links with Book/Page in them
+        const allLinks = Array.from(document.querySelectorAll('a'));
         for (const link of allLinks) {
+          const text = (link.textContent || '').trim();
           const href = link.href || '';
-          results.push({
-            clerkUrl: href,
-            type: 'clerk_link',
-            source: 'Palm Beach County Property Appraiser',
-            displayText: link.textContent.trim()
-          });
+
+          // Check if link text contains book/page pattern
+          const bookPageMatch = text.match(/(\d{4,6})\s*\/\s*(\d{3,5})/);
+          if (bookPageMatch && !results.some(r => r.bookNumber === bookPageMatch[1] && r.pageNumber === bookPageMatch[2])) {
+            results.push({
+              bookNumber: bookPageMatch[1],
+              pageNumber: bookPageMatch[2],
+              type: 'or_book_page',
+              source: 'Palm Beach County Property Appraiser',
+              href: href,
+              text: text
+            });
+          }
         }
 
         return results;
       });
 
-      this.log(`✅ Found ${transactions.length} transaction record(s)`);
+      this.log(`✅ Found ${transactions.length} OR Book/Page record(s)`);
 
       // Log what we found
       for (const trans of transactions) {
-        if (trans.type === 'instrument') {
-          this.log(`   Instrument: ${trans.instrumentNumber}`);
-        } else if (trans.type === 'book_page') {
-          this.log(`   Book/Page: ${trans.bookNumber}/${trans.pageNumber}`);
-        } else if (trans.type === 'clerk_link') {
-          this.log(`   Clerk URL: ${trans.clerkUrl}`);
+        this.log(`   OR Book/Page: ${trans.bookNumber}/${trans.pageNumber}`);
+        if (trans.href) {
+          this.log(`      Link: ${trans.href.substring(0, 100)}`);
         }
       }
 
@@ -518,14 +493,16 @@ class PalmBeachCountyFloridaScraper extends DeedScraper {
 
   /**
    * Download deed PDF from Palm Beach County Clerk
-   * Navigate to clerk page, search for document, and download PDF
+   * Click on OR Book/Page link and download PDF using Orange County method
    */
   async downloadDeed(transaction) {
     this.log('📄 Downloading deed from Palm Beach County Clerk...');
 
     try {
-      const clerkUrl = 'https://erec.mypalmbeachclerk.com/';
-      this.log(`🌐 Navigating to Clerk's Office: ${clerkUrl}`);
+      const bookNumber = transaction.bookNumber;
+      const pageNumber = transaction.pageNumber;
+
+      this.log(`🔍 Transaction details: OR Book/Page=${bookNumber}/${pageNumber}`);
 
       // Navigate to the clerk's official records search
       await this.page.goto(clerkUrl, {
