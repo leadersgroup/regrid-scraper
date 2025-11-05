@@ -256,12 +256,20 @@ class PalmBeachCountyFloridaScraper extends DeedScraper {
         };
       }
 
+      // Strip "#" from unit numbers (e.g., "100 Sunrise Ave #513" -> "100 Sunrise Ave 513")
+      // The property search doesn't work with "#" in unit numbers
+      const cleanedAddress = streetAddress.replace(/#/g, '');
+
+      if (cleanedAddress !== streetAddress) {
+        this.log(`ℹ️  Cleaned address: "${streetAddress}" -> "${cleanedAddress}" (removed #)`);
+      }
+
       // Enter street address
       await this.page.click(addressInput);
       await this.randomWait(200, 400);
-      await this.page.type(addressInput, streetAddress, { delay: 100 });
+      await this.page.type(addressInput, cleanedAddress, { delay: 100 });
 
-      this.log(`✅ Entered address: ${streetAddress}`);
+      this.log(`✅ Entered address: ${cleanedAddress}`);
 
       // Wait for autocomplete popup to appear
       await this.randomWait(2000, 3000);
@@ -296,7 +304,7 @@ class PalmBeachCountyFloridaScraper extends DeedScraper {
             }
 
             return { clicked: false };
-          }, streetAddress),
+          }, cleanedAddress),
           new Promise(resolve => setTimeout(() => resolve({ clicked: false, timeout: true }), 5000))
         ]);
       } catch (e) {
