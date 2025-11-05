@@ -370,23 +370,30 @@ app.post('/api/getPriorDeed', async (req, res) => {
 
     // If successful and PDF was downloaded, include base64 for immediate download
     if (result.success && result.download?.success) {
-      const pdfPath = path.join(
-        result.download.downloadPath,
-        result.download.filename
-      );
-
-      // Check if file exists and convert to base64
-      if (fs.existsSync(pdfPath)) {
-        const pdfBuffer = fs.readFileSync(pdfPath);
-        const pdfBase64 = pdfBuffer.toString('base64');
-
-        console.log(`📦 Including PDF as base64 (${pdfBuffer.length} bytes)`);
-
-        // Add base64 to response
-        result.download.pdfBase64 = pdfBase64;
+      // Check if pdfBase64 is already provided (e.g., from in-memory download)
+      if (result.download.pdfBase64) {
+        console.log(`📦 PDF base64 already provided (${Buffer.from(result.download.pdfBase64, 'base64').length} bytes)`);
         result.download.contentType = 'application/pdf';
-      } else {
-        console.log(`⚠️  PDF file not found: ${pdfPath}`);
+      } else if (result.download.downloadPath && result.download.filename) {
+        // Otherwise, read from disk
+        const pdfPath = path.join(
+          result.download.downloadPath,
+          result.download.filename
+        );
+
+        // Check if file exists and convert to base64
+        if (fs.existsSync(pdfPath)) {
+          const pdfBuffer = fs.readFileSync(pdfPath);
+          const pdfBase64 = pdfBuffer.toString('base64');
+
+          console.log(`📦 Including PDF as base64 (${pdfBuffer.length} bytes)`);
+
+          // Add base64 to response
+          result.download.pdfBase64 = pdfBase64;
+          result.download.contentType = 'application/pdf';
+        } else {
+          console.log(`⚠️  PDF file not found: ${pdfPath}`);
+        }
       }
     }
 

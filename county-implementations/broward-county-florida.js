@@ -1025,6 +1025,7 @@ class BrowardCountyFloridaScraper extends DeedScraper {
                   success: true,
                   pdfBase64: pdfBase64,
                   filename: `broward_deed_${bookPage || instrumentNumber}.pdf`.replace(/\//g, '_'),
+                  downloadPath: '', // In-memory download, no file saved to disk
                   source: 'Broward County - Official Records',
                   bookPage: bookPage,
                   instrumentNumber: instrumentNumber,
