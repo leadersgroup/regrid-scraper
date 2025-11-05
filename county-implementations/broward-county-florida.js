@@ -230,7 +230,7 @@ class BrowardCountyFloridaScraper extends DeedScraper {
     const parsed = {
       houseNumber: match[1],
       direction: match[2] || '',
-      streetName: match[3].trim(),
+      streetName: match[3].trim().replace(/(\d+)(ST|ND|RD|TH)$/i, '$1'), // Remove ordinal suffix from street name
       streetType: match[4].toUpperCase(),
       unit,
       city
