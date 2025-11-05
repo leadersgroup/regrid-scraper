@@ -611,35 +611,61 @@ class PalmBeachCountyFloridaScraper extends DeedScraper {
       const pdfRequests = [];
       const requestHandler = (request) => {
         const url = request.url();
-        if (url.includes('GetDocumentImage')) {
+        if (url.includes('GetDocumentImage') || url.includes('Document/') || url.includes('documentId=')) {
           pdfRequests.push(url);
-          this.log(`📥 Captured: ${url.substring(0, 120)}`);
+          this.log(`📥 Captured request: ${url}`);
         }
       };
 
       this.page.on('request', requestHandler);
 
-      // Scroll down to trigger lazy-loaded images
+      // More aggressive scrolling to trigger all lazy-loaded images
+      this.log('🔄 Scrolling to trigger image loads...');
+
+      // Scroll to bottom
       await this.page.evaluate(() => {
         window.scrollTo(0, document.body.scrollHeight);
       });
       await this.randomWait(2000, 3000);
 
-      // Scroll back up
+      // Scroll to top
       await this.page.evaluate(() => {
         window.scrollTo(0, 0);
       });
       await this.randomWait(2000, 3000);
 
+      // Scroll to middle
+      await this.page.evaluate(() => {
+        window.scrollTo(0, document.body.scrollHeight / 2);
+      });
+      await this.randomWait(2000, 3000);
+
       this.page.off('request', requestHandler);
+
+      this.log(`📊 Captured ${pdfRequests.length} total requests`);
+      if (pdfRequests.length > 0) {
+        this.log('   Requests captured:');
+        pdfRequests.forEach((url, idx) => {
+          this.log(`   ${idx + 1}. ${url}`);
+        });
+      }
 
       // Find document ID from captured requests
       let documentId = null;
       if (pdfRequests.length > 0) {
-        const match = pdfRequests[0].match(/documentId=(\d+)/);
-        if (match) {
-          documentId = match[1];
-          this.log(`✅ Found document ID from network: ${documentId}`);
+        // Try to find document ID from GetDocumentImage requests
+        for (const url of pdfRequests) {
+          const match = url.match(/documentId=(\d+)/);
+          if (match && match[1]) {
+            const id = match[1];
+            // Document IDs should be large numbers (at least 7 digits) to filter out index/page numbers
+            // Real document IDs like "24424937" are 8 digits, while index/page numbers like "16" are 1-2 digits
+            if (id.length >= 7 && parseInt(id) > 0) {
+              documentId = id;
+              this.log(`✅ Found document ID from network: ${documentId}`);
+              break;
+            }
+          }
         }
       }
 
@@ -647,32 +673,70 @@ class PalmBeachCountyFloridaScraper extends DeedScraper {
       if (!documentId) {
         this.log('🔍 Looking for document ID in page JavaScript...');
         documentId = await this.page.evaluate(() => {
-          // Check all script tags
+          // Check all script tags with multiple patterns
           const scripts = Array.from(document.querySelectorAll('script'));
+          const allMatches = [];
+
           for (const script of scripts) {
             const text = script.textContent || '';
-            const match = text.match(/documentId["\s:=]+(\d+)/);
-            if (match) {
-              return match[1];
+
+            // Try multiple patterns
+            const patterns = [
+              /documentId["\s:=]+(\d+)/g,
+              /DocumentId["\s:=]+(\d+)/g,
+              /document_id["\s:=]+(\d+)/g,
+              /"docId"[:\s]+(\d+)/g,
+              /GetDocumentImage[^?]*\?[^"']*documentId=(\d+)/g,
+              /var\s+docId\s*=\s*(\d+)/g,
+              /var\s+documentId\s*=\s*(\d+)/g
+            ];
+
+            for (const pattern of patterns) {
+              let match;
+              while ((match = pattern.exec(text)) !== null) {
+                const id = match[1];
+                // Only consider IDs with at least 7 digits (real document IDs like "24424937")
+                // Filter out small numbers like "16", "0", etc.
+                if (id && id.length >= 7 && parseInt(id) > 0) {
+                  allMatches.push(id);
+                }
+              }
             }
           }
 
+          // Return the first valid match
+          if (allMatches.length > 0) {
+            return allMatches[0];
+          }
+
           // Check data attributes
-          const elements = Array.from(document.querySelectorAll('[data-document-id], [data-documentid]'));
+          const elements = Array.from(document.querySelectorAll('[data-document-id], [data-documentid], [data-doc-id]'));
           for (const el of elements) {
-            const id = el.getAttribute('data-document-id') || el.getAttribute('data-documentid');
-            if (id) return id;
+            const id = el.getAttribute('data-document-id') || el.getAttribute('data-documentid') || el.getAttribute('data-doc-id');
+            if (id && id.length >= 7 && parseInt(id) > 0) return id;
           }
 
           // Check window object
-          if (window.documentId) return window.documentId.toString();
-          if (window.DocumentId) return window.DocumentId.toString();
+          const windowIds = [
+            window.documentId,
+            window.DocumentId,
+            window.docId
+          ];
+
+          for (const id of windowIds) {
+            if (id) {
+              const idStr = id.toString();
+              if (idStr !== '0' && idStr.length >= 7 && parseInt(idStr) > 0) {
+                return idStr;
+              }
+            }
+          }
 
           return null;
         });
 
         if (documentId) {
-          this.log(`✅ Found document ID from page: ${documentId}`);
+          this.log(`✅ Found document ID from page JavaScript: ${documentId}`);
         }
       }
 
