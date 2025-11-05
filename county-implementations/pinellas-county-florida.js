@@ -239,14 +239,13 @@ class PinellasCountyFloridaScraper extends DeedScraper {
 
       this.log(`🔍 Searching for: ${streetAddress}`);
 
-      // Look for search input field
+      // Look for the PROPERTY search input field (NOT the website search box!)
+      // The property search has placeholder: "Address or Street Name (Ex: 255 Capri Cir N 23)"
       const searchInputSelectors = [
-        'input[type="search"]',
-        'input[placeholder*="Search"]',
-        'input[placeholder*="search"]',
-        'input[name*="search"]',
-        'input[id*="search"]',
-        'input[type="text"]'
+        '#txtSearchProperty-selectized',
+        '#txtSearchProperty',
+        'input[placeholder*="Address or Street"]',
+        'input[placeholder*="Capri"]'
       ];
 
       let searchInput = null;
@@ -254,7 +253,7 @@ class PinellasCountyFloridaScraper extends DeedScraper {
         try {
           await this.page.waitForSelector(selector, { timeout: 3000 });
           searchInput = selector;
-          this.log(`✅ Found search input: ${selector}`);
+          this.log(`✅ Found property search input: ${selector}`);
           break;
         } catch (e) {
           // Try next selector
@@ -262,10 +261,11 @@ class PinellasCountyFloridaScraper extends DeedScraper {
       }
 
       if (!searchInput) {
-        this.log(`⚠️ Could not find search input field`);
+        this.log(`⚠️ Could not find property search input field`);
+        this.log(`   Make sure you're not using the website search box!`);
         return {
           success: false,
-          message: 'Could not find search input'
+          message: 'Could not find property search input'
         };
       }
 
