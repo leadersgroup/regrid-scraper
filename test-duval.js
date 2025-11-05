@@ -8,11 +8,11 @@ const DuvalCountyFloridaScraper = require('./county-implementations/duval-county
 async function testDuvalCounty() {
   console.log('🧪 Testing Duval County FL deed scraper...\n');
 
-  // Use a known public building address in Jacksonville for testing
-  const testAddress = '231 E Forsyth St, Jacksonville, FL 32202';
+  // Use the example address from user's workflow
+  const testAddress = '18470 WARE AVE, Jacksonville, FL, USA';
 
   const scraper = new DuvalCountyFloridaScraper({
-    headless: true, // Headless mode for automated testing
+    headless: false, // Non-headless mode for debugging
     timeout: 120000,
     verbose: true
   });

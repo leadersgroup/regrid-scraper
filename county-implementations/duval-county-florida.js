@@ -105,9 +105,9 @@ class DuvalCountyFloridaScraper extends DeedScraper {
   parseAddress(fullAddress) {
     this.log(`🔍 Parsing address: ${fullAddress}`);
 
-    // Extract components using regex
-    // Pattern: [Street #] [Direction?] [Street Name] [Street Type?] [Unit?], [City], [State] [Zip]
-    const addressPattern = /^(\d+)\s+([NSEW]|[NSEW][NSEW])?\s*([^,]+?)\s*(?:#\s*(\S+))?\s*,?\s*([^,]+)?,\s*([A-Z]{2})/i;
+    // First, extract the main components: number, street part, city, state
+    // Pattern: [Street #] [Street Part] [Unit?], [City], [State] [Zip]
+    const addressPattern = /^(\d+)\s+([^,#]+?)(?:#\s*(\S+))?\s*,\s*([^,]+),\s*([A-Z]{2})/i;
 
     const match = fullAddress.match(addressPattern);
 
@@ -116,35 +116,50 @@ class DuvalCountyFloridaScraper extends DeedScraper {
       return null;
     }
 
-    // Extract street name and type
-    const streetPart = match[3].trim();
+    const houseNumber = match[1];
+    const streetPart = match[2].trim();
+    const unit = match[3] || '';
+    const city = match[4]?.trim() || '';
 
-    // Common street types to extract
+    // Now parse the street part into: [Direction?] [Street Name] [Street Type?]
+    // Common street types
     const streetTypes = ['AVE', 'AVENUE', 'ST', 'STREET', 'RD', 'ROAD', 'DR', 'DRIVE', 'LN', 'LANE',
                         'CT', 'COURT', 'CIR', 'CIRCLE', 'BLVD', 'BOULEVARD', 'WAY', 'PL', 'PLACE',
                         'TER', 'TERRACE', 'PKWY', 'PARKWAY', 'HWY', 'HIGHWAY'];
 
+    const words = streetPart.split(/\s+/);
+    let direction = '';
     let streetName = streetPart;
     let streetType = '';
-    let direction = match[2] || '';
 
-    // Try to extract street type from the end
-    const words = streetPart.split(/\s+/);
-    if (words.length > 1) {
+    // Check if first word is a direction (only if it's a standalone word matching direction pattern)
+    const firstWord = words[0].toUpperCase();
+    if (words.length > 1 && /^(N|S|E|W|NE|NW|SE|SW)$/.test(firstWord)) {
+      direction = firstWord;
+      // Remove direction from words
+      words.shift();
+    }
+
+    // Check if last word is a street type
+    if (words.length > 0) {
       const lastWord = words[words.length - 1].toUpperCase();
       if (streetTypes.includes(lastWord)) {
         streetType = lastWord;
-        streetName = words.slice(0, -1).join(' ');
+        // Remove street type from words
+        words.pop();
       }
     }
 
+    // Remaining words are the street name
+    streetName = words.join(' ');
+
     const parsed = {
-      houseNumber: match[1],
+      houseNumber: houseNumber,
       direction: direction,
       streetName: streetName.trim(),
       streetType: streetType,
-      unit: match[4] || '',
-      city: match[5]?.trim() || ''
+      unit: unit,
+      city: city
     };
 
     this.log(`✅ Parsed address:`, JSON.stringify(parsed, null, 2));
@@ -181,35 +196,35 @@ class DuvalCountyFloridaScraper extends DeedScraper {
       this.log(`📝 Entering address components...`);
 
       // Street Number
-      const streetNumSelector = '#txtStreetNumber';
+      const streetNumSelector = '#ctl00_cphBody_tbStreetNumber';
       await this.page.waitForSelector(streetNumSelector, { timeout: 10000 });
       await this.page.click(streetNumSelector);
       await this.page.type(streetNumSelector, parsedAddr.houseNumber, { delay: 100 });
       this.log(`   Street #: ${parsedAddr.houseNumber}`);
 
       // Street Name
-      const streetNameSelector = '#txtStreetName';
+      const streetNameSelector = '#ctl00_cphBody_tbStreetName';
       await this.page.click(streetNameSelector);
       await this.page.type(streetNameSelector, parsedAddr.streetName, { delay: 100 });
       this.log(`   Street Name: ${parsedAddr.streetName}`);
 
-      // Street Type (optional)
+      // Street Suffix/Type (optional)
       if (parsedAddr.streetType) {
-        const streetTypeSelector = '#ddlStreetType';
+        const streetTypeSelector = '#ctl00_cphBody_ddStreetSuffix';
         await this.page.select(streetTypeSelector, parsedAddr.streetType);
         this.log(`   Street Type: ${parsedAddr.streetType}`);
       }
 
-      // Street Direction (optional)
+      // Street Prefix/Direction (optional)
       if (parsedAddr.direction) {
-        const directionSelector = '#ddlStreetDirection';
+        const directionSelector = '#ctl00_cphBody_ddStreetPrefix';
         await this.page.select(directionSelector, parsedAddr.direction);
         this.log(`   Direction: ${parsedAddr.direction}`);
       }
 
       // Unit # (optional)
       if (parsedAddr.unit) {
-        const unitSelector = '#txtUnit';
+        const unitSelector = '#ctl00_cphBody_tbStreetUnit';
         await this.page.click(unitSelector);
         await this.page.type(unitSelector, parsedAddr.unit, { delay: 100 });
         this.log(`   Unit: ${parsedAddr.unit}`);
@@ -217,12 +232,16 @@ class DuvalCountyFloridaScraper extends DeedScraper {
 
       // Click Search button
       this.log(`🔍 Clicking Search button...`);
-      const searchButtonSelector = '#btnSearch';
+      const searchButtonSelector = '#ctl00_cphBody_bSearch';
       await this.page.click(searchButtonSelector);
 
-      // Wait for results page
-      await this.page.waitForNavigation({ waitUntil: 'networkidle2', timeout: 30000 });
-      await this.randomWait(2000, 3000);
+      // Wait for results page (use domcontentloaded instead of networkidle2 for faster response)
+      try {
+        await this.page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 60000 });
+      } catch (error) {
+        this.log(`⚠️ Navigation timeout, checking current URL anyway...`);
+      }
+      await this.randomWait(3000, 5000);
 
       const currentUrl = this.page.url();
       this.log(`📍 Current URL: ${currentUrl}`);
@@ -399,26 +418,12 @@ class DuvalCountyFloridaScraper extends DeedScraper {
 
       this.page.on('request', requestHandler);
 
-      // Click the book/page link
-      this.log(`🔗 Clicking book/page link: ${bookNumber}-${pageNumber}`);
+      // Navigate directly to the Clerk's website using the href URL
+      this.log(`🔗 Navigating to Clerk's website: ${transaction.href}`);
 
-      const linkClicked = await this.page.evaluate((bookPage) => {
-        const allLinks = Array.from(document.querySelectorAll('a'));
-        for (const link of allLinks) {
-          const text = (link.textContent || '').trim();
-          if (text === bookPage) {
-            link.click();
-            return true;
-          }
-        }
-        return false;
-      }, `${bookNumber}-${pageNumber}`);
+      await this.page.goto(transaction.href, { waitUntil: 'networkidle2', timeout: 60000 });
+      this.log(`✅ Navigated to Clerk's website`);
 
-      if (!linkClicked) {
-        throw new Error(`Could not find clickable link for Book/Page ${bookNumber}-${pageNumber}`);
-      }
-
-      this.log(`✅ Clicked on book/page link`);
       await this.randomWait(3000, 5000);
 
       // Remove the request handler
@@ -439,9 +444,17 @@ class DuvalCountyFloridaScraper extends DeedScraper {
 
       // Priority 1: Use captured PDF request from network monitoring
       if (pdfRequests.length > 0) {
-        const pdfRequest = pdfRequests.find(r => r.url.includes('.pdf')) || pdfRequests[pdfRequests.length - 1];
-        pdfUrl = pdfRequest.url;
-        this.log(`✅ Found PDF URL from network: ${pdfUrl.substring(0, 150)}`);
+        // Look for Duval County Clerk PDF URL: /Image/DocumentPdfAllPages/{token}
+        const duvalPdfRequest = pdfRequests.find(r => r.url.includes('/DocumentPdfAllPages/'));
+        if (duvalPdfRequest) {
+          pdfUrl = duvalPdfRequest.url;
+          this.log(`✅ Found Duval County PDF URL from network: ${pdfUrl.substring(0, 150)}`);
+        } else {
+          // Fallback to any PDF-like request
+          const pdfRequest = pdfRequests.find(r => r.url.includes('.pdf') || r.url.includes('/pdf')) || pdfRequests[pdfRequests.length - 1];
+          pdfUrl = pdfRequest.url;
+          this.log(`✅ Found PDF URL from network: ${pdfUrl.substring(0, 150)}`);
+        }
       }
 
       // Priority 2: Look for PDF in iframe
