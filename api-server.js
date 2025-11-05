@@ -33,6 +33,7 @@ const BrevardCountyFloridaScraper = require('./county-implementations/brevard-co
 const LeeCountyFloridaScraper = require('./county-implementations/lee-county-florida');
 const PalmBeachCountyFloridaScraper = require('./county-implementations/palm-beach-county-florida');
 const MiamiDadeCountyFloridaScraper = require('./county-implementations/miami-dade-county-florida');
+const BrowardCountyFloridaScraper = require('./county-implementations/broward-county-florida');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -186,6 +187,18 @@ app.get('/api/counties', (req, res) => {
           'Instrument Number and Book/Page support'
         ],
         cost: 'Free (no CAPTCHA)'
+      },
+      {
+        name: 'Broward County',
+        state: 'FL',
+        stateCode: 'Florida',
+        features: [
+          'Full PDF download',
+          'Transaction history extraction',
+          'CIN and Book/Page support',
+          'Direct address search'
+        ],
+        cost: 'Free (no CAPTCHA)'
       }
     ]
   });
@@ -207,7 +220,8 @@ function normalizeCountyName(county) {
     'miami dade': 'Miami-Dade',
     'miamidade': 'Miami-Dade',
     'orange': 'Orange',
-    'hillsborough': 'Hillsborough'
+    'hillsborough': 'Hillsborough',
+    'broward': 'Broward'
   };
 
   return countyMap[normalized] || county;
@@ -278,6 +292,12 @@ async function processDeedDownload(address, county, state, options = {}) {
     });
   } else if (detectedCounty === 'Miami-Dade' && detectedState === 'FL') {
     scraper = new MiamiDadeCountyFloridaScraper({
+      headless: options?.headless !== false, // Default to headless
+      timeout: options?.timeout || 120000,
+      verbose: options?.verbose || false
+    });
+  } else if (detectedCounty === 'Broward' && detectedState === 'FL') {
+    scraper = new BrowardCountyFloridaScraper({
       headless: options?.headless !== false, // Default to headless
       timeout: options?.timeout || 120000,
       verbose: options?.verbose || false

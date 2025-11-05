@@ -92,6 +92,13 @@ app.post('/webhook/scrapePriorDeed', verifyApiKey, async (req, res) => {
         timeout: 120000,
         verbose: true
       });
+    } else if (detectedCounty === 'Broward' && detectedState === 'FL') {
+      const BrowardCountyFloridaScraper = require('./county-implementations/broward-county-florida');
+      scraper = new BrowardCountyFloridaScraper({
+        headless: true,
+        timeout: 120000,
+        verbose: true
+      });
     } else if (detectedCounty === 'Orange' && detectedState === 'FL') {
       const OrangeCountyFloridaScraper = require('./county-implementations/orange-county-florida');
       scraper = new OrangeCountyFloridaScraper({
