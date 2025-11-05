@@ -199,16 +199,34 @@ class PinellasCountyFloridaScraper extends DeedScraper {
   }
 
   /**
+   * Extract search address (remove city and state)
+   * User workflow: search by address without city name and state name
+   * Example: "11074 110TH WAY, Largo, FL" -> "11074 110TH WAY"
+   */
+  extractSearchAddress(fullAddress) {
+    // Remove city, state, zip - just keep street address
+    const streetAddress = fullAddress.split(',')[0].trim();
+    this.log(`🏠 Extracted search address: "${streetAddress}" from "${fullAddress}"`);
+    return streetAddress;
+  }
+
+  /**
    * Search Pinellas County Property Appraiser by address
-   * URL: https://www.pcpao.gov/quick-search
+   * URL: https://www.pcpao.gov/
+   *
+   * User workflow:
+   * 1. Navigate to https://www.pcpao.gov/
+   * 2. Search by address WITHOUT city/state (e.g., "11074 110TH WAY")
+   * 3. Autocomplete popup appears - verify same as search, click on it
+   * 4. Wait for results to load
    */
   async searchAssessorSite(parcelId, ownerName) {
     this.log(`🔍 Searching Pinellas County FL Property Appraiser`);
-    this.log(`   Using address search`);
+    this.log(`   Using address search (without city/state)`);
 
     try {
-      // Navigate to property search page
-      await this.page.goto('https://www.pcpao.gov/quick-search', {
+      // Navigate to main property search page
+      await this.page.goto('https://www.pcpao.gov/', {
         waitUntil: 'networkidle2',
         timeout: this.timeout
       });
@@ -217,151 +235,149 @@ class PinellasCountyFloridaScraper extends DeedScraper {
 
       // Extract just the street address (remove city, state, zip)
       const fullAddress = this.currentAddress || '';
-      let streetAddress = fullAddress.split(',')[0].trim();
+      const streetAddress = this.extractSearchAddress(fullAddress);
 
-      this.log(`🏠 Searching for address: ${streetAddress}`);
+      this.log(`🔍 Searching for: ${streetAddress}`);
 
-      // Look for address input field
-      const addressInputSelectors = [
-        'input[placeholder*="address"]',
-        'input[placeholder*="Address"]',
-        'input[name*="address"]',
-        'input[id*="address"]',
+      // Look for search input field
+      const searchInputSelectors = [
         'input[type="search"]',
+        'input[placeholder*="Search"]',
+        'input[placeholder*="search"]',
+        'input[name*="search"]',
+        'input[id*="search"]',
         'input[type="text"]'
       ];
 
-      let addressInput = null;
-      for (const selector of addressInputSelectors) {
+      let searchInput = null;
+      for (const selector of searchInputSelectors) {
         try {
           await this.page.waitForSelector(selector, { timeout: 3000 });
-          addressInput = selector;
-          this.log(`✅ Found address input: ${selector}`);
+          searchInput = selector;
+          this.log(`✅ Found search input: ${selector}`);
           break;
         } catch (e) {
           // Try next selector
         }
       }
 
-      if (!addressInput) {
-        this.log(`⚠️ Could not find address input field`);
+      if (!searchInput) {
+        this.log(`⚠️ Could not find search input field`);
         return {
           success: false,
-          message: 'Could not find address input'
+          message: 'Could not find search input'
         };
       }
 
-      // Clear and enter address
-      await this.page.click(addressInput, { clickCount: 3 });
-      await this.page.type(addressInput, streetAddress);
-      await this.randomWait(2000, 3000);
+      // Clear and type address to trigger autocomplete
+      await this.page.click(searchInput, { clickCount: 3 });
+      await this.page.type(searchInput, streetAddress, { delay: 100 });
 
       this.log(`✅ Entered address: ${streetAddress}`);
+      this.log(`⏳ Waiting for autocomplete suggestions...`);
 
-      // Press Enter or click search button
-      try {
-        const searchButtonSelector = 'button[type="submit"], button:contains("Search"), input[type="submit"]';
-        await this.page.waitForSelector('button[type="submit"]', { timeout: 5000 });
-        await this.page.click('button[type="submit"]');
-        this.log(`✅ Clicked search button`);
-      } catch (clickError) {
-        // Fallback: Press Enter key
-        this.log(`⚠️  Could not click search button, trying Enter key`);
-        await this.page.keyboard.press('Enter');
-        this.log(`⌨️  Pressed Enter to search`);
+      await this.randomWait(2000, 3000);
+
+      // Wait for autocomplete dropdown to appear
+      const autocompleteSelectors = [
+        '.autocomplete-suggestion',
+        '.ui-menu-item',
+        '.suggestion',
+        '[role="option"]',
+        '.search-result'
+      ];
+
+      let autocompleteVisible = false;
+      for (const selector of autocompleteSelectors) {
+        try {
+          await this.page.waitForSelector(selector, { timeout: 3000, visible: true });
+          autocompleteVisible = true;
+          this.log(`✅ Found autocomplete dropdown: ${selector}`);
+          break;
+        } catch (e) {
+          // Try next selector
+        }
       }
 
-      // Wait for search results to load
-      this.log(`⏳ Waiting for search results to load...`);
-      await this.randomWait(5000, 7000);
+      if (!autocompleteVisible) {
+        this.log(`⚠️ No autocomplete dropdown found, trying Enter key...`);
+        await this.page.keyboard.press('Enter');
+        await this.randomWait(3000, 5000);
+      } else {
+        // Click on the first autocomplete suggestion that matches our search
+        this.log(`🔍 Looking for matching autocomplete suggestion...`);
 
-      // Wait for results table or detail page
+        const suggestionClicked = await this.page.evaluate((searchAddr) => {
+          // Try different autocomplete selectors
+          const selectors = [
+            '.autocomplete-suggestion',
+            '.ui-menu-item',
+            '.suggestion',
+            '[role="option"]',
+            '.search-result'
+          ];
+
+          for (const selector of selectors) {
+            const suggestions = Array.from(document.querySelectorAll(selector));
+
+            for (const suggestion of suggestions) {
+              const text = (suggestion.innerText || suggestion.textContent || '').trim().toUpperCase();
+              const searchUpper = searchAddr.toUpperCase();
+
+              // Verify it matches our search address
+              if (text.includes(searchUpper) || searchUpper.includes(text.substring(0, 20))) {
+                suggestion.click();
+                return { clicked: true, text: text.substring(0, 100) };
+              }
+            }
+          }
+
+          return { clicked: false };
+        }, streetAddress);
+
+        if (suggestionClicked.clicked) {
+          this.log(`✅ Clicked autocomplete suggestion: ${suggestionClicked.text}`);
+          await this.randomWait(3000, 5000);
+        } else {
+          this.log(`⚠️ Could not find matching suggestion, trying Enter key...`);
+          await this.page.keyboard.press('Enter');
+          await this.randomWait(3000, 5000);
+        }
+      }
+
+      // Wait for property detail page to load
+      this.log(`⏳ Waiting for property detail page...`);
+
       try {
         await this.page.waitForFunction(() => {
           const text = document.body.innerText.toLowerCase();
           return text.includes('parcel') ||
-                 text.includes('owner') ||
+                 text.includes('miscellaneous') ||
                  text.includes('deed') ||
-                 text.includes('sale');
+                 text.includes('owner');
         }, { timeout: 30000 });
-        this.log(`✅ Search results loaded`);
+        this.log(`✅ Property detail page loaded`);
       } catch (waitError) {
-        this.log(`⚠️ Timeout waiting for results`);
+        this.log(`⚠️ Timeout waiting for property detail page`);
       }
 
       await this.randomWait(3000, 5000);
 
       // Check if property was found
-      const searchStatus = await this.page.evaluate(() => {
-        const text = document.body.innerText.toLowerCase();
+      const currentUrl = this.page.url();
+      this.log(`📍 Current URL: ${currentUrl}`);
 
-        const hasNoResults = text.includes('no results') ||
-                            text.includes('not found') ||
-                            text.includes('no records') ||
-                            text.includes('no properties');
-
-        const hasResults = text.includes('parcel') ||
-                          text.includes('owner name') ||
-                          text.includes('property address');
-
+      const pageContent = await this.page.evaluate(() => {
         return {
-          hasNoResults,
-          hasResults,
-          url: window.location.href
+          text: document.body.innerText,
+          hasParcelInfo: document.body.innerText.toLowerCase().includes('parcel'),
+          hasMiscellaneous: document.body.innerText.toLowerCase().includes('miscellaneous'),
+          hasDeed: document.body.innerText.toLowerCase().includes('deed')
         };
       });
 
-      this.log(`🔍 Search result analysis:`);
-      this.log(`   Current URL: ${searchStatus.url}`);
-      this.log(`   Has results: ${searchStatus.hasResults}`);
-      this.log(`   Has "no results" message: ${searchStatus.hasNoResults}`);
-
-      if (!searchStatus.hasNoResults && searchStatus.hasResults) {
+      if (pageContent.hasParcelInfo || pageContent.hasMiscellaneous || pageContent.hasDeed) {
         this.log(`✅ Property found`);
-
-        // If we're on a results table, click the first result
-        const resultClicked = await this.page.evaluate(() => {
-          // Look for clickable parcel link
-          const links = Array.from(document.querySelectorAll('a'));
-          for (const link of links) {
-            const text = (link.innerText || '').trim();
-            // Pinellas parcel format: XX-XX-XX-XXXXX-XXX-XXXX
-            if (/\d{2}-\d{2}-\d{2}-\d{5}-\d{3}-\d{4}/.test(text)) {
-              link.click();
-              return { clicked: true, parcel: text };
-            }
-          }
-
-          // Alternative: look for any result row
-          const rows = Array.from(document.querySelectorAll('tr'));
-          for (const row of rows) {
-            const link = row.querySelector('a');
-            if (link && row.innerText.toLowerCase().includes('parcel')) {
-              link.click();
-              return { clicked: true, parcel: link.innerText };
-            }
-          }
-
-          return { clicked: false };
-        });
-
-        if (resultClicked.clicked) {
-          this.log(`✅ Clicked on parcel ${resultClicked.parcel}`);
-          await this.randomWait(5000, 7000);
-
-          // Wait for property detail page
-          await this.page.waitForFunction(() => {
-            const text = document.body.innerText.toLowerCase();
-            return text.includes('sales') ||
-                   text.includes('deed') ||
-                   text.includes('transfer');
-          }, { timeout: 15000 }).catch(() => {
-            this.log(`⚠️ Timeout waiting for property detail page`);
-          });
-
-          this.log(`✅ Property detail page loaded`);
-        }
-
         return {
           success: true,
           message: 'Property found on assessor website'
@@ -385,6 +401,10 @@ class PinellasCountyFloridaScraper extends DeedScraper {
 
   /**
    * Extract transaction records from Property Appraiser page
+   *
+   * User workflow:
+   * 5. Locate "Miscellaneous Parcel Info" table
+   * 6. Click on first entry in "last recorded deed" (e.g., 22450/0430)
    */
   async extractTransactionRecords() {
     this.log('📋 Extracting transaction records from Property Appraiser...');
@@ -392,8 +412,8 @@ class PinellasCountyFloridaScraper extends DeedScraper {
     try {
       await this.randomWait(2000, 3000);
 
-      // Look for Sales/Transfer section
-      this.log('🔍 Looking for Sales/Transfer information...');
+      // Look for "Miscellaneous Parcel Info" table
+      this.log('🔍 Looking for "Miscellaneous Parcel Info" table...');
 
       // Scroll down to ensure all content is loaded
       await this.page.evaluate(() => {
@@ -401,108 +421,123 @@ class PinellasCountyFloridaScraper extends DeedScraper {
       });
       await this.randomWait(2000, 3000);
 
-      // Extract deed information from the page
-      this.log('🔍 Extracting deed data...');
+      // Extract deed information from "Miscellaneous Parcel Info" section
+      this.log('🔍 Extracting "last recorded deed" from table...');
 
       const transactions = await this.page.evaluate(() => {
         const results = [];
 
-        // Look for "Last Deed" section
+        // Method 1: Look for "Miscellaneous Parcel Info" table
         const allText = document.body.innerText;
         const lines = allText.split('\n');
 
-        let inDeedSection = false;
-        let currentDeed = {};
+        let inMiscSection = false;
+        let foundDeed = null;
 
         for (let i = 0; i < lines.length; i++) {
           const line = lines[i].trim();
 
-          // Detect deed section
-          if (line.toLowerCase().includes('last deed') ||
-              line.toLowerCase().includes('sale date') ||
-              line.toLowerCase().includes('grantor')) {
-            inDeedSection = true;
+          // Detect "Miscellaneous Parcel Info" section
+          if (line.toLowerCase().includes('miscellaneous') && line.toLowerCase().includes('parcel')) {
+            inMiscSection = true;
           }
 
-          if (inDeedSection) {
-            // Extract grantor
-            if (line.toLowerCase().includes('grantor')) {
+          if (inMiscSection) {
+            // Look for "last recorded deed" label
+            if (line.toLowerCase().includes('last recorded deed') || line.toLowerCase().includes('last deed')) {
+              // Next line should contain book/page in format: 22450/0430
               const nextLine = lines[i + 1]?.trim();
-              if (nextLine) currentDeed.grantor = nextLine;
+              if (nextLine) {
+                // Match pattern: XXXXX/XXXX (book/page format)
+                const bookPageMatch = nextLine.match(/(\d{5})\/(\d{4})/);
+                if (bookPageMatch) {
+                  foundDeed = {
+                    bookNumber: bookPageMatch[1],
+                    pageNumber: bookPageMatch[2],
+                    bookPage: `${bookPageMatch[1]}/${bookPageMatch[2]}`,
+                    source: 'Pinellas County Property Appraiser - Miscellaneous Parcel Info'
+                  };
+                  break;
+                }
+              }
             }
 
-            // Extract grantee
-            if (line.toLowerCase().includes('grantee')) {
-              const nextLine = lines[i + 1]?.trim();
-              if (nextLine) currentDeed.grantee = nextLine;
-            }
-
-            // Extract sale date
-            if (line.toLowerCase().includes('sale date')) {
-              const nextLine = lines[i + 1]?.trim();
-              if (nextLine) currentDeed.saleDate = nextLine;
-            }
-
-            // Extract book/page
-            const bookPageMatch = line.match(/book[:\s]+(\d+)[,\s]+page[:\s]+(\d+)/i);
+            // Alternative: look for any book/page pattern in this section
+            const bookPageMatch = line.match(/(\d{5})\/(\d{4})/);
             if (bookPageMatch) {
-              currentDeed.bookNumber = bookPageMatch[1];
-              currentDeed.pageNumber = bookPageMatch[2];
-              currentDeed.bookPage = `Book ${bookPageMatch[1]}, Page ${bookPageMatch[2]}`;
-            }
-
-            // Extract document number (OR Book format)
-            const docMatch = line.match(/\b(\d{10,})\b/);
-            if (docMatch) {
-              currentDeed.documentNumber = docMatch[1];
-            }
-
-            // If we have enough info, save and reset
-            if (currentDeed.grantor && currentDeed.grantee) {
-              results.push({
-                ...currentDeed,
-                type: currentDeed.documentNumber ? 'document_number' : 'book_page',
-                source: 'Pinellas County Property Appraiser'
-              });
-              currentDeed = {};
-              inDeedSection = false;
+              foundDeed = {
+                bookNumber: bookPageMatch[1],
+                pageNumber: bookPageMatch[2],
+                bookPage: `${bookPageMatch[1]}/${bookPageMatch[2]}`,
+                source: 'Pinellas County Property Appraiser - Miscellaneous Parcel Info'
+              };
+              break;
             }
           }
         }
 
-        // Look for links to clerk records
-        const clerkLinks = Array.from(document.querySelectorAll('a[href*="clerk"], a[href*="official"]'));
-        for (const link of clerkLinks) {
-          const href = link.href;
-          const text = link.innerText || '';
+        if (foundDeed) {
+          results.push(foundDeed);
+        }
 
-          // Extract document identifiers from links
-          const docMatch = href.match(/(?:doc|instrument|cfn)[=\/](\d+)/i);
-          if (docMatch) {
-            results.push({
-              documentNumber: docMatch[1],
-              type: 'document_number',
-              source: 'Pinellas County Property Appraiser',
-              clerkUrl: href,
-              displayText: text
-            });
+        // Method 2: Look for clickable link with book/page pattern
+        const links = Array.from(document.querySelectorAll('a'));
+        for (const link of links) {
+          const text = (link.innerText || '').trim();
+          const href = link.href || '';
+
+          // Match pattern: XXXXX/XXXX (book/page format)
+          const bookPageMatch = text.match(/(\d{5})\/(\d{4})/);
+          if (bookPageMatch) {
+            const existing = results.find(r => r.bookNumber === bookPageMatch[1] && r.pageNumber === bookPageMatch[2]);
+            if (!existing) {
+              results.push({
+                bookNumber: bookPageMatch[1],
+                pageNumber: bookPageMatch[2],
+                bookPage: `${bookPageMatch[1]}/${bookPageMatch[2]}`,
+                href: href,
+                source: 'Pinellas County Property Appraiser'
+              });
+            }
+          }
+        }
+
+        // Method 3: Look for any table with deed information
+        const tables = Array.from(document.querySelectorAll('table'));
+        for (const table of tables) {
+          const tableText = table.innerText;
+
+          if (tableText.toLowerCase().includes('deed') || tableText.toLowerCase().includes('miscellaneous')) {
+            const rows = Array.from(table.querySelectorAll('tr'));
+
+            for (const row of rows) {
+              const rowText = row.innerText;
+
+              // Look for book/page pattern
+              const bookPageMatch = rowText.match(/(\d{5})\/(\d{4})/);
+              if (bookPageMatch) {
+                const existing = results.find(r => r.bookNumber === bookPageMatch[1] && r.pageNumber === bookPageMatch[2]);
+                if (!existing) {
+                  results.push({
+                    bookNumber: bookPageMatch[1],
+                    pageNumber: bookPageMatch[2],
+                    bookPage: `${bookPageMatch[1]}/${bookPageMatch[2]}`,
+                    source: 'Pinellas County Property Appraiser - Table'
+                  });
+                }
+              }
+            }
           }
         }
 
         return results;
       });
 
-      this.log(`🔍 Extracted ${transactions.length} transaction(s)`);
+      this.log(`🔍 Extracted ${transactions.length} deed record(s)`);
 
       for (const trans of transactions) {
-        if (trans.type === 'document_number') {
-          this.log(`   Doc #: ${trans.documentNumber}`);
-        } else if (trans.type === 'book_page') {
-          this.log(`   ${trans.bookPage}`);
-        }
-        if (trans.grantor) this.log(`   Grantor: ${trans.grantor}`);
-        if (trans.grantee) this.log(`   Grantee: ${trans.grantee}`);
-        if (trans.saleDate) this.log(`   Sale Date: ${trans.saleDate}`);
+        this.log(`   📄 Book/Page: ${trans.bookPage} (Book: ${trans.bookNumber}, Page: ${trans.pageNumber})`);
+        if (trans.href) this.log(`      Link: ${trans.href}`);
       }
 
       return {
@@ -520,151 +555,89 @@ class PinellasCountyFloridaScraper extends DeedScraper {
   }
 
   /**
-   * Download deed PDF from Pinellas County Clerk
-   * Navigate to clerk website and download the document
+   * Download deed PDF from Pinellas County using direct API URL
+   *
+   * User workflow:
+   * 7. PDF loads at: https://www.pcpao.gov/dal/dalapi/getCocDeedBkPg?bk=22450&pg=430
+   * Note: Can construct URL directly with book/page numbers
    */
   async downloadDeed(transaction) {
-    this.log('📄 Downloading deed from Pinellas County Clerk...');
+    this.log('📄 Downloading deed from Pinellas County...');
 
     try {
-      const clerkUrl = 'https://officialrecords.mypinellasclerk.org/';
-      this.log(`🌐 Navigating to Clerk: ${clerkUrl}`);
-
-      // Navigate to the clerk's website
-      await this.page.goto(clerkUrl, {
-        waitUntil: 'networkidle2',
-        timeout: this.timeout
-      });
-
-      await this.randomWait(3000, 5000);
-
-      // Accept disclaimer if present
-      const disclaimerAccepted = await this.page.evaluate(() => {
-        const buttons = Array.from(document.querySelectorAll('button, input[type="submit"], input[type="button"]'));
-        for (const button of buttons) {
-          const text = (button.innerText || button.value || '').toLowerCase();
-          if (text.includes('accept') || text.includes('agree') || text.includes('continue')) {
-            button.click();
-            return true;
-          }
-        }
-        return false;
-      });
-
-      if (disclaimerAccepted) {
-        this.log('✅ Accepted disclaimer');
-        await this.randomWait(3000, 5000);
+      if (!transaction.bookNumber || !transaction.pageNumber) {
+        throw new Error('Missing book number or page number for PDF download');
       }
 
-      // Search for the document
-      if (transaction.documentNumber) {
-        this.log(`🔍 Searching by document number: ${transaction.documentNumber}`);
-        await this.searchByDocumentNumber(transaction.documentNumber);
-      } else if (transaction.bookNumber && transaction.pageNumber) {
-        this.log(`🔍 Searching by Book/Page: ${transaction.bookNumber}/${transaction.pageNumber}`);
-        await this.searchByBookPage(transaction.bookNumber, transaction.pageNumber);
-      } else if (transaction.grantor && transaction.grantee) {
-        this.log(`🔍 Searching by names: ${transaction.grantor} to ${transaction.grantee}`);
-        await this.searchByNames(transaction.grantor, transaction.grantee);
-      } else {
-        throw new Error('No valid search criteria available');
-      }
+      // Construct direct PDF URL using book and page numbers
+      // Format: https://www.pcpao.gov/dal/dalapi/getCocDeedBkPg?bk={book}&pg={page}
+      const pdfUrl = `https://www.pcpao.gov/dal/dalapi/getCocDeedBkPg?bk=${transaction.bookNumber}&pg=${transaction.pageNumber}`;
 
-      // After search, click on the result to view document
-      await this.randomWait(3000, 5000);
+      this.log(`🔗 Constructed PDF URL: ${pdfUrl}`);
+      this.log(`   Book: ${transaction.bookNumber}, Page: ${transaction.pageNumber}`);
 
-      // Look for document link in results
-      const docClicked = await this.page.evaluate(() => {
-        // Look for document links
-        const links = Array.from(document.querySelectorAll('a'));
-        for (const link of links) {
-          const text = (link.innerText || '').toLowerCase();
-          if (text.includes('view') || text.includes('image') || text.includes('doc')) {
-            link.click();
-            return { clicked: true, text: link.innerText };
+      // Download PDF using HTTPS with cookies (same method as Orange County)
+      this.log(`📥 Downloading PDF from direct API...`);
+
+      const https = require('https');
+      const url = require('url');
+
+      // Get cookies from current page
+      const cookies = await this.page.cookies();
+      const cookieString = cookies.map(c => `${c.name}=${c.value}`).join('; ');
+
+      const parsedUrl = url.parse(pdfUrl);
+
+      const pdfBuffer = await new Promise((resolve, reject) => {
+        const options = {
+          hostname: parsedUrl.hostname,
+          path: parsedUrl.path,
+          method: 'GET',
+          headers: {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            'Accept': 'application/pdf,*/*',
+            'Referer': 'https://www.pcpao.gov/',
+            'Cookie': cookieString
           }
-        }
+        };
 
-        // Alternative: click first result row
-        const rows = Array.from(document.querySelectorAll('tr'));
-        if (rows.length > 1) {
-          const firstResult = rows[1].querySelector('a');
-          if (firstResult) {
-            firstResult.click();
-            return { clicked: true, text: firstResult.innerText };
+        https.get(options, (response) => {
+          if (response.statusCode === 302 || response.statusCode === 301) {
+            // Handle redirect
+            const redirectUrl = response.headers.location;
+            this.log(`↪️  Redirected to: ${redirectUrl}`);
+            reject(new Error(`Redirect to: ${redirectUrl}`));
+            return;
           }
-        }
 
-        return { clicked: false };
+          if (response.statusCode !== 200) {
+            reject(new Error(`HTTP ${response.statusCode}: ${response.statusMessage}`));
+            return;
+          }
+
+          const chunks = [];
+          response.on('data', (chunk) => chunks.push(chunk));
+          response.on('end', () => {
+            const buffer = Buffer.concat(chunks);
+            resolve(buffer);
+          });
+        }).on('error', (error) => {
+          reject(error);
+        });
       });
-
-      if (docClicked.clicked) {
-        this.log(`✅ Clicked on document: ${docClicked.text}`);
-      } else {
-        this.log(`⚠️ Could not find document link`);
-      }
-
-      await this.randomWait(5000, 7000);
-
-      // Set up listener for PDF download or new window
-      this.log('📥 Looking for PDF download option...');
-
-      // Try to find and download the PDF
-      const pdfInfo = await this.page.evaluate(() => {
-        // Look for PDF links
-        const links = Array.from(document.querySelectorAll('a[href*=".pdf"], a[href*="PDF"]'));
-        if (links.length > 0) {
-          return { pdfUrl: links[0].href, method: 'direct_link' };
-        }
-
-        // Look for download buttons
-        const buttons = Array.from(document.querySelectorAll('button, input[type="button"]'));
-        for (const button of buttons) {
-          const text = (button.innerText || button.value || '').toLowerCase();
-          if (text.includes('download') || text.includes('pdf') || text.includes('print')) {
-            return { buttonText: text, method: 'button_click' };
-          }
-        }
-
-        // Check if current page is already a PDF
-        if (window.location.href.includes('.pdf')) {
-          return { pdfUrl: window.location.href, method: 'current_page' };
-        }
-
-        return { method: 'not_found' };
-      });
-
-      this.log(`🔍 PDF method: ${pdfInfo.method}`);
-
-      let pdfBuffer;
-
-      if (pdfInfo.method === 'direct_link' || pdfInfo.method === 'current_page') {
-        // Download PDF directly
-        this.log(`📥 Downloading PDF from: ${pdfInfo.pdfUrl}`);
-
-        const pdfArrayBuffer = await this.page.evaluate(async (url) => {
-          const response = await fetch(url);
-          if (!response.ok) {
-            throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-          }
-          const arrayBuffer = await response.arrayBuffer();
-          return Array.from(new Uint8Array(arrayBuffer));
-        }, pdfInfo.pdfUrl);
-
-        pdfBuffer = Buffer.from(pdfArrayBuffer);
-      } else {
-        throw new Error('Could not find PDF download option');
-      }
 
       // Verify it's a PDF
       const isPDF = pdfBuffer.slice(0, 4).toString() === '%PDF';
       this.log(`🔍 PDF validation: isPDF=${isPDF}, size=${pdfBuffer.length} bytes`);
 
       if (!isPDF) {
+        // Log first 200 bytes for debugging
+        const preview = pdfBuffer.slice(0, 200).toString();
+        this.log(`⚠️ File content preview: ${preview.substring(0, 100)}`);
         throw new Error('Downloaded file is not a valid PDF');
       }
 
-      this.log(`✅ PDF downloaded successfully (${pdfBuffer.length} bytes)`);
+      this.log(`✅ PDF downloaded successfully (${(pdfBuffer.length / 1024).toFixed(2)} KB)`);
 
       // Save PDF to disk
       const path = require('path');
@@ -678,20 +651,27 @@ class PinellasCountyFloridaScraper extends DeedScraper {
         this.log(`📁 Created download directory: ${downloadPath}`);
       }
 
-      const filename = `pinellas_deed_${transaction.documentNumber || `${transaction.bookNumber}_${transaction.pageNumber}` || Date.now()}.pdf`;
+      const filename = `pinellas_deed_${transaction.bookNumber}_${transaction.pageNumber}.pdf`;
       const filepath = path.join(downloadPath, filename);
 
       fs.writeFileSync(filepath, pdfBuffer);
       this.log(`💾 Saved PDF to: ${filepath}`);
 
+      // Encode PDF to base64 for API response
+      const pdfBase64 = pdfBuffer.toString('base64');
+
       return {
         success: true,
         filename,
         downloadPath,
-        documentNumber: transaction.documentNumber,
+        filepath,
+        bookNumber: transaction.bookNumber,
+        pageNumber: transaction.pageNumber,
         bookPage: transaction.bookPage,
+        pdfUrl,
         timestamp: new Date().toISOString(),
-        fileSize: pdfBuffer.length
+        fileSize: pdfBuffer.length,
+        pdfBase64
       };
 
     } catch (error) {
@@ -703,114 +683,6 @@ class PinellasCountyFloridaScraper extends DeedScraper {
     }
   }
 
-  /**
-   * Search Pinellas Clerk by document/instrument number
-   */
-  async searchByDocumentNumber(docNumber) {
-    this.log(`🔍 Searching by document number: ${docNumber}`);
-
-    // Look for Instrument Number search option
-    const searchClicked = await this.page.evaluate(() => {
-      const links = Array.from(document.querySelectorAll('a'));
-      for (const link of links) {
-        const text = (link.innerText || '').toLowerCase();
-        if (text.includes('instrument') || text.includes('document number')) {
-          link.click();
-          return true;
-        }
-      }
-      return false;
-    });
-
-    if (searchClicked) {
-      this.log('✅ Clicked on Instrument Number search');
-      await this.randomWait(2000, 3000);
-    }
-
-    // Enter document number
-    await this.page.type('input[type="text"]', docNumber);
-    await this.randomWait(1000, 2000);
-
-    // Submit search
-    await this.page.keyboard.press('Enter');
-    await this.randomWait(3000, 5000);
-  }
-
-  /**
-   * Search Pinellas Clerk by Book/Page
-   */
-  async searchByBookPage(book, page) {
-    this.log(`🔍 Searching by Book/Page: ${book}/${page}`);
-
-    // Look for Book/Page search option
-    const searchClicked = await this.page.evaluate(() => {
-      const links = Array.from(document.querySelectorAll('a'));
-      for (const link of links) {
-        const text = (link.innerText || '').toLowerCase();
-        if (text.includes('book') && text.includes('page')) {
-          link.click();
-          return true;
-        }
-      }
-      return false;
-    });
-
-    if (searchClicked) {
-      this.log('✅ Clicked on Book/Page search');
-      await this.randomWait(2000, 3000);
-    }
-
-    // Enter book and page numbers
-    const inputs = await this.page.$$('input[type="text"]');
-    if (inputs.length >= 2) {
-      await inputs[0].type(book);
-      await inputs[1].type(page);
-      await this.randomWait(1000, 2000);
-    }
-
-    // Submit search
-    await this.page.keyboard.press('Enter');
-    await this.randomWait(3000, 5000);
-  }
-
-  /**
-   * Search Pinellas Clerk by grantor/grantee names
-   */
-  async searchByNames(grantor, grantee) {
-    this.log(`🔍 Searching by names: ${grantor} -> ${grantee}`);
-
-    // Look for Name search option
-    const searchClicked = await this.page.evaluate(() => {
-      const links = Array.from(document.querySelectorAll('a'));
-      for (const link of links) {
-        const text = (link.innerText || '').toLowerCase();
-        if (text.includes('name search')) {
-          link.click();
-          return true;
-        }
-      }
-      return false;
-    });
-
-    if (searchClicked) {
-      this.log('✅ Clicked on Name search');
-      await this.randomWait(2000, 3000);
-    }
-
-    // Enter grantee name (last name first)
-    const nameInput = await this.page.$('input[type="text"]');
-    if (nameInput) {
-      // Split name and reverse (Last, First)
-      const nameParts = grantee.split(' ');
-      const lastName = nameParts[nameParts.length - 1];
-      await nameInput.type(lastName);
-      await this.randomWait(1000, 2000);
-    }
-
-    // Submit search
-    await this.page.keyboard.press('Enter');
-    await this.randomWait(3000, 5000);
-  }
 
   /**
    * Random wait to avoid detection

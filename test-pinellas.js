@@ -8,8 +8,8 @@ const PinellasCountyFloridaScraper = require('./county-implementations/pinellas-
 async function testPinellasCounty() {
   console.log('🧪 Testing Pinellas County FL deed scraper...\n');
 
-  // Example test address in Pinellas County
-  const testAddress = '315 COURT ST, CLEARWATER, FL 33756';
+  // Example test address in Pinellas County (from user's workflow)
+  const testAddress = '11074 110TH WAY, Largo, FL';
 
   const scraper = new PinellasCountyFloridaScraper({
     headless: false, // Set to true for headless testing
