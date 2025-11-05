@@ -88,7 +88,7 @@ class BrowardCountyFloridaScraper extends DeedScraper {
 
       // STEP 2: Search Property Appraiser for property
       this.log(`📋 Step 2: Searching county property assessor for: ${this.county} County, ${this.state}`);
-      this.log(`🌐 Navigating to assessor: https://web.bcpa.net/BcpaClient/#/Record-Search`);
+      this.log(`🌐 Navigating to assessor: https://bcpa.net/RecAddr.asp`);
 
       const assessorResult = await this.searchAssessorSite(null, null);
 
@@ -162,179 +162,252 @@ class BrowardCountyFloridaScraper extends DeedScraper {
    */
   getAssessorUrl(county, state) {
     if (county === 'Broward' && state === 'FL') {
-      return 'https://web.bcpa.net/BcpaClient/#/Record-Search';
+      return 'https://bcpa.net/RecAddr.asp';
     }
     return null;
   }
 
   /**
+   * Parse address into components for Broward County search form
+   * Example: "1274 NE 40 STREET #4, OAKLAND PARK FL 33334"
+   * Returns: { houseNumber: "1274", direction: "NE", streetName: "40", streetType: "STREET", unit: "4", city: "OAKLAND PARK" }
+   */
+  parseAddress(fullAddress) {
+    this.log(`🔍 Parsing address: ${fullAddress}`);
+
+    // Remove extra whitespace
+    let address = fullAddress.trim().toUpperCase();
+
+    // Extract city (after comma)
+    let city = '';
+    const parts = address.split(',');
+    if (parts.length >= 2) {
+      // City is in second part (before state and zip)
+      const cityPart = parts[1].trim();
+      // Remove state and zip (FL 33334)
+      city = cityPart.replace(/\s+FL\s+\d{5}.*$/, '').trim();
+    }
+
+    // Work with first part (street address)
+    const streetPart = parts[0].trim();
+
+    // Extract unit number (anything after # or APT or UNIT)
+    let unit = '';
+    const unitMatch = streetPart.match(/#\s*(\S+)|(?:APT|UNIT)\s+(\S+)/i);
+    if (unitMatch) {
+      unit = unitMatch[1] || unitMatch[2];
+    }
+
+    // Remove unit from street address
+    let street = streetPart.replace(/#\s*\S+|(?:APT|UNIT)\s+\S+/gi, '').trim();
+
+    // Parse street components
+    // Pattern: [house number] [direction?] [street name] [street type]
+    const streetRegex = /^(\d+)\s+([NSEW]{1,2})?\s*(.+?)\s+(STREET|ST|AVENUE|AVE|ROAD|RD|DRIVE|DR|LANE|LN|WAY|BOULEVARD|BLVD|COURT|CT|CIRCLE|CIR|PLACE|PL|TERRACE|TER|TRAIL|TRL)(?:\s|$)/i;
+
+    const match = street.match(streetRegex);
+
+    if (!match) {
+      // Fallback: try without street type
+      const simpleRegex = /^(\d+)\s+([NSEW]{1,2})?\s*(.+)/i;
+      const simpleMatch = street.match(simpleRegex);
+
+      if (simpleMatch) {
+        return {
+          houseNumber: simpleMatch[1],
+          direction: simpleMatch[2] || '',
+          streetName: simpleMatch[3],
+          streetType: '',
+          unit,
+          city
+        };
+      }
+
+      this.log(`⚠️ Could not parse address: ${fullAddress}`);
+      return null;
+    }
+
+    const parsed = {
+      houseNumber: match[1],
+      direction: match[2] || '',
+      streetName: match[3].trim(),
+      streetType: match[4].toUpperCase(),
+      unit,
+      city
+    };
+
+    this.log(`✅ Parsed address:`, JSON.stringify(parsed, null, 2));
+    return parsed;
+  }
+
+  /**
    * Search Broward County Property Appraiser by address
-   * URL: https://web.bcpa.net/BcpaClient/#/Record-Search
+   * URL: https://bcpa.net/RecAddr.asp
    */
   async searchAssessorSite(parcelId, ownerName) {
     this.log(`🔍 Searching Broward County FL Property Appraiser`);
-    this.log(`   Using address search`);
+    this.log(`   Using address search at https://bcpa.net/RecAddr.asp`);
 
     try {
       // Navigate to property search page
-      await this.page.goto('https://web.bcpa.net/BcpaClient/#/Record-Search', {
+      await this.page.goto('https://bcpa.net/RecAddr.asp', {
         waitUntil: 'networkidle2',
         timeout: this.timeout
       });
 
-      await this.randomWait(3000, 5000);
-
-      // Extract just the street address (remove city, state, zip)
-      const fullAddress = this.currentAddress || '';
-      let streetAddress = fullAddress.split(',')[0].trim();
-
-      this.log(`🏠 Searching for address: ${streetAddress}`);
-
-      // Wait for page to fully load (Angular app)
-      await this.randomWait(3000, 5000);
-
-      // Look for address input field
-      const addressInput = await this.page.evaluate(() => {
-        // Try multiple selectors for address field
-        const selectors = [
-          'input[placeholder*="Address"]',
-          'input[placeholder*="address"]',
-          'input[name*="address"]',
-          'input[id*="address"]',
-          'input[type="text"]'
-        ];
-
-        for (const selector of selectors) {
-          const input = document.querySelector(selector);
-          if (input && input.offsetParent !== null) {
-            return {
-              found: true,
-              selector,
-              placeholder: input.placeholder
-            };
-          }
-        }
-        return { found: false };
-      });
-
-      this.log(`🔍 [INFO] Address input search: ${JSON.stringify(addressInput)}`);
-
-      if (!addressInput.found) {
-        this.log(`⚠️ Could not find address input field`);
-        return {
-          success: false,
-          message: 'Could not find address input'
-        };
-      }
-
-      // Enter address
-      // Use the returned selector directly (already found, no need to wait again)
-      await this.randomWait(500, 1000);
-
-      // Focus on the input field
-      await this.page.focus(addressInput.selector);
-      await this.randomWait(300, 500);
-
-      // Clear any existing value and type the address
-      await this.page.evaluate((selector) => {
-        const input = document.querySelector(selector);
-        if (input) {
-          input.value = '';
-          input.focus();
-        }
-      }, addressInput.selector);
-
-      await this.randomWait(300, 500);
-
-      // Type the address character by character with delay
-      for (const char of streetAddress) {
-        await this.page.keyboard.type(char);
-        await this.randomWait(80, 120);
-      }
-
-      this.log(`✅ Entered address: ${streetAddress}`);
-
       await this.randomWait(2000, 3000);
 
-      // Press Enter to search (Broward auto-suggests results)
-      await this.page.keyboard.press('Enter');
-      this.log(`⌨️  Pressed Enter to search`);
-
-      // Wait for results
-      this.log(`⏳ Waiting for search results...`);
-      await this.randomWait(7000, 10000);
-
-      // Check if property was found
-      const searchStatus = await this.page.evaluate(() => {
-        const text = document.body.innerText.toLowerCase();
-
-        const hasNoResults = text.includes('no results') ||
-                            text.includes('not found') ||
-                            text.includes('no records found') ||
-                            text.includes('no properties found');
-
-        // Look for property details or folio number
-        const hasResults = text.includes('folio') ||
-                          text.includes('property') ||
-                          text.includes('owner') ||
-                          text.includes('parcel');
+      // Inspect page structure first
+      const pageStructure = await this.page.evaluate(() => {
+        const inputs = Array.from(document.querySelectorAll('input'));
+        const selects = Array.from(document.querySelectorAll('select'));
+        const buttons = Array.from(document.querySelectorAll('button, input[type="button"], input[type="submit"]'));
 
         return {
-          hasNoResults,
-          hasResults,
-          url: window.location.href
+          title: document.title,
+          url: window.location.href,
+          inputs: inputs.map(input => ({
+            name: input.name,
+            type: input.type,
+            id: input.id,
+            value: input.value,
+            placeholder: input.placeholder
+          })),
+          selects: selects.map(select => ({
+            name: select.name,
+            id: select.id,
+            optionCount: select.options.length
+          })),
+          buttons: buttons.map(btn => ({
+            tag: btn.tagName,
+            type: btn.type,
+            value: btn.value,
+            text: btn.textContent?.trim().substring(0, 30)
+          }))
         };
       });
 
-      this.log(`🔍 [INFO] Search status: ${JSON.stringify(searchStatus)}`);
+      this.log(`📋 Page structure:`);
+      this.log(`   Title: ${pageStructure.title}`);
+      this.log(`   All inputs: ${JSON.stringify(pageStructure.inputs, null, 2)}`);
+      this.log(`   Buttons: ${JSON.stringify(pageStructure.buttons, null, 2)}`);
 
-      if (!searchStatus.hasNoResults && searchStatus.hasResults) {
-        this.log(`✅ Property found in search results`);
+      // Parse address into components
+      const fullAddress = this.currentAddress || '';
+      const addressParts = this.parseAddress(fullAddress);
 
-        // Click on the folio number to open property details page
-        this.log(`🖱️  Looking for folio number link to click...`);
+      if (!addressParts) {
+        return {
+          success: false,
+          message: 'Could not parse address into components'
+        };
+      }
 
-        const folioClicked = await this.page.evaluate(() => {
-          const links = Array.from(document.querySelectorAll('a'));
-          for (const link of links) {
-            const text = link.textContent?.trim() || '';
-            // Folio numbers are 12 digits
-            if (text.match(/^\d{12}$/)) {
-              link.click();
-              return { clicked: true, folio: text };
+      this.log(`🏠 Filling address form with parsed components...`);
+
+      // Fill in house number (Situs_Street_Number)
+      if (addressParts.houseNumber) {
+        await this.page.type('input[name="Situs_Street_Number"]', addressParts.houseNumber);
+        this.log(`   House number: ${addressParts.houseNumber}`);
+      }
+
+      await this.randomWait(300, 500);
+
+      // Fill in street direction (optional) (Situs_Street_Direction)
+      if (addressParts.direction) {
+        await this.page.select('select[name="Situs_Street_Direction"]', addressParts.direction);
+        this.log(`   Street direction: ${addressParts.direction}`);
+      }
+
+      await this.randomWait(300, 500);
+
+      // Fill in street name (Situs_Street_Name)
+      if (addressParts.streetName) {
+        await this.page.type('input[name="Situs_Street_Name"]', addressParts.streetName);
+        this.log(`   Street name: ${addressParts.streetName}`);
+      }
+
+      await this.randomWait(300, 500);
+
+      // Fill in street type (Situs_Street_Type)
+      if (addressParts.streetType) {
+        await this.page.select('select[name="Situs_Street_Type"]', addressParts.streetType);
+        this.log(`   Street type: ${addressParts.streetType}`);
+      }
+
+      await this.randomWait(300, 500);
+
+      // Fill in unit number (optional) (Situs_Unit_Number)
+      if (addressParts.unit) {
+        await this.page.type('input[name="Situs_Unit_Number"]', addressParts.unit);
+        this.log(`   Unit: ${addressParts.unit}`);
+      }
+
+      await this.randomWait(300, 500);
+
+      // Fill in city (optional) (Situs_City)
+      if (addressParts.city) {
+        // City is a select dropdown, need to find matching option
+        const citySet = await this.page.evaluate((cityName) => {
+          const citySelect = document.querySelector('select[name="Situs_City"]');
+          if (!citySelect) return false;
+
+          // Find option that matches the city name
+          const options = Array.from(citySelect.options);
+          for (const option of options) {
+            if (option.text.toUpperCase().includes(cityName.toUpperCase())) {
+              citySelect.value = option.value;
+              return true;
             }
           }
-          return { clicked: false };
-        });
+          return false;
+        }, addressParts.city);
 
-        this.log(`🔍 [INFO] Folio click: ${JSON.stringify(folioClicked)}`);
-
-        if (!folioClicked.clicked) {
-          this.log(`⚠️ Could not find folio number link to click`);
-          return {
-            success: false,
-            message: 'Could not find folio number link'
-          };
+        if (citySet) {
+          this.log(`   City: ${addressParts.city}`);
+        } else {
+          this.log(`   ⚠️ Could not find city "${addressParts.city}" in dropdown`);
         }
+      }
 
-        this.log(`✅ Clicked folio: ${folioClicked.folio}, waiting for property details page...`);
+      await this.randomWait(500, 1000);
 
-        // Wait for property details page to load (Angular SPA needs time)
-        await this.randomWait(10000, 15000);
+      // Submit the form using JavaScript
+      this.log(`🔍 Submitting search form...`);
+      const submitted = await this.page.evaluate(() => {
+        const forms = document.querySelectorAll('form');
+        if (forms.length > 0) {
+          forms[0].submit();
+          return { submitted: true, formCount: forms.length };
+        }
+        return { submitted: false, formCount: 0 };
+      });
 
-        // Additional wait for Sales History table data to populate
-        this.log(`⏳ Waiting for Sales History table to fully load...`);
-        await this.randomWait(5000, 7000);
+      this.log(`📋 Form submit: ${JSON.stringify(submitted)}`);
+
+      // Wait for results
+      await this.randomWait(3000, 5000);
+
+      // Check if property was found
+      const currentUrl = this.page.url();
+      this.log(`📍 Current URL: ${currentUrl}`);
+
+      if (currentUrl.includes('RecInfo.asp')) {
+        this.log(`✅ Property found! Redirected to property details page`);
+
+        // Wait for page to fully load
+        await this.randomWait(2000, 3000);
 
         return {
           success: true,
-          message: 'Property details page loaded'
+          message: 'Property details page loaded',
+          url: currentUrl
         };
       } else {
-        this.log(`⚠️ Property not found`);
+        this.log(`⚠️ Property not found or multiple results`);
         return {
           success: false,
-          message: 'Property not found'
+          message: 'Property not found or multiple results returned'
         };
       }
 
@@ -683,85 +756,208 @@ class BrowardCountyFloridaScraper extends DeedScraper {
     try {
       const bookPage = transaction.bookPage;
       const instrumentNumber = transaction.instrumentNumber;
+      const documentId = transaction.documentId;
 
-      this.log(`🔍 [INFO] Transaction details: Book/Page=${bookPage}, CIN=${instrumentNumber}`);
+      this.log(`🔍 Transaction details: Book/Page=${bookPage}, CIN=${instrumentNumber}, DocumentID=${documentId}`);
 
-      if (!bookPage && !instrumentNumber) {
-        throw new Error('No book/page or instrument number available');
+      if (!documentId && !instrumentNumber && !bookPage) {
+        throw new Error('No document ID, book/page, or instrument number available');
       }
 
-      // Navigate directly to Broward County Clerk's Official Records website
-      // The CINs in Property Appraiser are not clickable links - we need to construct the URL
-      this.log(`🌐 Navigating to Broward County Clerk's Official Records website...`);
+      // The Book/Page or CIN should be a clickable link on the current page (RecInfo.asp)
+      // Click on it to load the PDF
+      const searchValue = documentId || instrumentNumber || bookPage;
+      this.log(`🔍 Looking for clickable link with: ${searchValue}`);
 
-      const clerkUrl = `https://officialrecords.broward.org/AcclaimWeb/search/SearchTypeName`;
-      await this.page.goto(clerkUrl, {
-        waitUntil: 'networkidle2',
-        timeout: this.timeout
+      // Scroll to Sale History section first
+      await this.page.evaluate(() => {
+        const elements = Array.from(document.querySelectorAll('*'));
+        for (const el of elements) {
+          const text = el.textContent || '';
+          if (text.includes('Sale History') || text.includes('Sales History')) {
+            el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            break;
+          }
+        }
       });
 
-      await this.randomWait(3000, 5000);
+      await this.randomWait(1000, 2000);
 
-      this.log(`✅ On Clerk's website, searching for CIN/Book-Page...`);
+      // Set up network request monitoring BEFORE clicking the link
+      this.log('📡 Setting up network monitoring to capture PDF requests...');
+      const pdfRequests = [];
 
-      // Use the instrumentNumber or bookPage to search
-      const searchValue = instrumentNumber || bookPage;
-      this.log(`🔍 Searching for: ${searchValue}`);
+      const requestHandler = (request) => {
+        const url = request.url();
+        const resourceType = request.resourceType();
 
-      // Look for PDF in iframe or any element (browser without PDF viewer will show it in iframe)
-      this.log(`🔍 Looking for PDF in iframe or page elements...`);
+        // Capture any PDF-related requests
+        if (url.includes('.pdf') || url.includes('/pdf') || url.includes('document') ||
+            url.includes('Image') || url.includes('blob') || url.includes('DocumentImage') ||
+            resourceType === 'document') {
+          pdfRequests.push({
+            url,
+            resourceType,
+            method: request.method()
+          });
+          this.log(`📥 Captured request: ${resourceType} - ${url.substring(0, 150)}`);
+        }
+      };
 
-      const pageInfo = await targetPage.evaluate(() => {
-        const iframes = Array.from(document.querySelectorAll('iframe'));
-        const embeds = Array.from(document.querySelectorAll('embed, object'));
-        const links = Array.from(document.querySelectorAll('a'));
+      this.page.on('request', requestHandler);
 
-        // Check iframes
-        for (const iframe of iframes) {
-          if (iframe.src && (iframe.src.includes('pdf') || iframe.src.includes('.pdf') || iframe.src.includes('document'))) {
-            return { found: true, type: 'iframe', src: iframe.src };
+      // Find and click the link with the document ID
+      const linkClicked = await this.page.evaluate((searchValue) => {
+        // Look for links containing the search value
+        const allLinks = Array.from(document.querySelectorAll('a'));
+
+        for (const link of allLinks) {
+          const text = (link.textContent || '').trim();
+          const href = link.href || '';
+
+          // Match the CIN (9 digits) or Book/Page format
+          if (text === searchValue || text.includes(searchValue)) {
+            link.click();
+            return { clicked: true, text, href: href.substring(0, 150) };
           }
         }
 
-        // Check embeds/objects
-        for (const el of embeds) {
-          const src = el.src || el.data || '';
-          if (src && (src.includes('pdf') || src.includes('.pdf'))) {
-            return { found: true, type: el.tagName.toLowerCase(), src: src };
+        return { clicked: false, linksFound: allLinks.length };
+      }, searchValue);
+
+      this.log(`🔍 Link click result: ${JSON.stringify(linkClicked)}`);
+
+      if (!linkClicked.clicked) {
+        throw new Error(`Could not find clickable link for document ${searchValue}`);
+      }
+
+      this.log(`✅ Clicked on document link: ${linkClicked.text}`);
+
+      // Wait for PDF page to load (it loads in the same window)
+      // The page navigates to a document details page, then the PDF loads
+      this.log(`⏳ Waiting for PDF document page to load...`);
+      await this.randomWait(5000, 7000);
+
+      // Get current URL - should be on document details page now
+      const currentUrl = this.page.url();
+      this.log(`📍 Current URL: ${currentUrl}`);
+
+      // The PDF should be on this page - use current page as the PDF page
+      const targetPage = this.page;
+
+      // Remove the request handler
+      this.page.off('request', requestHandler);
+
+      // Log captured requests
+      if (pdfRequests.length > 0) {
+        this.log(`📋 Found ${pdfRequests.length} PDF-related network request(s):`);
+        pdfRequests.forEach((req, idx) => {
+          this.log(`   ${idx + 1}. ${req.resourceType}: ${req.url.substring(0, 150)}`);
+        });
+      }
+
+      // Look for PDF in iframe or any element - try multiple times as PDF may load async
+      this.log(`🔍 Looking for PDF in iframe or page elements (will try multiple times)...`);
+
+      let pageInfo = null;
+      for (let attempt = 0; attempt < 10; attempt++) {
+        await this.randomWait(1000, 2000);
+
+        pageInfo = await targetPage.evaluate(() => {
+          const iframes = Array.from(document.querySelectorAll('iframe'));
+          const embeds = Array.from(document.querySelectorAll('embed, object'));
+          const links = Array.from(document.querySelectorAll('a'));
+
+          // Check iframes - look for any iframe, not just ones with 'pdf' in src
+          for (const iframe of iframes) {
+            const src = iframe.src || '';
+            // Any iframe could contain the PDF
+            if (src && src.length > 10) {
+              return { found: true, type: 'iframe', src: src };
+            }
           }
+
+          // Check embeds/objects
+          for (const el of embeds) {
+            const src = el.src || el.data || '';
+            if (src && src.length > 10) {
+              return { found: true, type: el.tagName.toLowerCase(), src: src };
+            }
+          }
+
+          // Check if page content is PDF
+          const contentType = document.contentType || '';
+          if (contentType.includes('pdf')) {
+            return { found: true, type: 'page', src: window.location.href };
+          }
+
+          // Check for PDF links on the page (including download/view buttons)
+          const pdfLinks = links.filter(a => {
+            const href = (a.href || '').toLowerCase();
+            const text = (a.textContent || '').toLowerCase();
+            return href.includes('.pdf') || href.includes('document') || href.includes('pdf') ||
+                   href.includes('download') || href.includes('view') ||
+                   text.includes('download') || text.includes('view') || text.includes('pdf');
+          }).map(a => ({ href: a.href, text: a.textContent?.trim().substring(0, 50) }));
+
+          // Debug: get page structure info
+          return {
+            found: false,
+            iframeCount: iframes.length,
+            iframeSrcs: iframes.map(i => i.src?.substring(0, 100)),
+            embedCount: embeds.length,
+            pdfLinksCount: pdfLinks.length,
+            pdfLinks: pdfLinks.slice(0, 5), // First 5 PDF-related links
+            pageContentPreview: document.body.innerText.substring(0, 300),
+            url: window.location.href
+          };
+        });
+
+        if (pageInfo.found || pageInfo.iframeCount > 0 || pageInfo.pdfLinksCount > 0) {
+          this.log(`✅ Found PDF source on attempt ${attempt + 1}`);
+          break;
         }
 
-        // Check if page content is PDF
-        const contentType = document.contentType || '';
-        if (contentType.includes('pdf')) {
-          return { found: true, type: 'page', src: window.location.href };
-        }
-
-        // Check for PDF links on the page
-        const pdfLinks = links.filter(a => {
-          const href = (a.href || '').toLowerCase();
-          const text = (a.textContent || '').toLowerCase();
-          return href.includes('.pdf') || href.includes('document') || href.includes('pdf');
-        }).map(a => ({ href: a.href, text: a.textContent?.trim() }));
-
-        // Debug: get page structure info
-        return {
-          found: false,
-          iframeCount: iframes.length,
-          embedCount: embeds.length,
-          pdfLinksCount: pdfLinks.length,
-          pdfLinks: pdfLinks.slice(0, 3), // First 3 PDF links
-          pageContentPreview: document.body.innerText.substring(0, 300),
-          url: window.location.href
-        };
-      });
+        this.log(`   Attempt ${attempt + 1}/10: No PDF found yet, waiting...`);
+      }
 
       this.log(`🔍 [DEBUG] Page info: ${JSON.stringify(pageInfo)}`);
 
-      const iframeInfo = pageInfo.found ? pageInfo : { found: false };
+      let pdfUrl = null;
 
-      if (iframeInfo.found) {
-        this.log(`📄 Found PDF in iframe: ${iframeInfo.src}`);
+      // PRIORITY 1: Use captured PDF request from network monitoring (most reliable)
+      if (pdfRequests.length > 0) {
+        this.log(`🎯 Using PDF URL from network capture (most recent)...`);
+        // Find the most promising PDF request - prefer ones with .pdf or document in URL
+        const pdfRequest = pdfRequests.find(r => r.url.includes('.pdf') || r.url.includes('/pdf/')) || pdfRequests[pdfRequests.length - 1];
+        pdfUrl = pdfRequest.url;
+        this.log(`📄 PDF URL from network: ${pdfUrl.substring(0, 150)}`);
+      }
+      // PRIORITY 2: Found PDF in iframe or embed
+      else if (pageInfo.found) {
+        this.log(`📄 Found PDF in ${pageInfo.type}: ${pageInfo.src}`);
+        pdfUrl = pageInfo.src;
+      }
+      // PRIORITY 3: Found PDF links on the page
+      else if (pageInfo.pdfLinksCount > 0 && pageInfo.pdfLinks.length > 0) {
+        this.log(`📄 Found ${pageInfo.pdfLinksCount} PDF link(s), using first one`);
+        pdfUrl = pageInfo.pdfLinks[0].href;
+      }
+      // PRIORITY 4: Try using the current page URL as PDF source
+      else {
+        this.log(`⚠️ No PDF found via network or page elements, will try current page URL as fallback`);
+        pdfUrl = currentUrl;
+      }
+
+      if (pdfUrl) {
+        this.log(`📄 Using PDF URL: ${pdfUrl.substring(0, 150)}`);
+      } else {
+        throw new Error('Could not find PDF URL');
+      }
+
+      // Download the PDF using Orange County method (https with cookies)
+      if (true) {  // Always use Orange County method
+        this.log(`📥 Downloading PDF using Orange County method (https with cookies)...`);
 
         // Download the PDF using Node.js https module with session cookies
         // This is the same approach as Orange County
@@ -769,9 +965,6 @@ class BrowardCountyFloridaScraper extends DeedScraper {
         const fs = require('fs');
         const https = require('https');
         const url = require('url');
-
-        const pdfUrl = iframeInfo.src;
-        this.log(`📥 Downloading PDF using https module with session cookies...`);
 
         // Get cookies from current page session
         const cookies = await targetPage.cookies();
