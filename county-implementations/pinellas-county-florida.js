@@ -571,10 +571,12 @@ class PinellasCountyFloridaScraper extends DeedScraper {
 
       // Construct direct PDF URL using book and page numbers
       // Format: https://www.pcpao.gov/dal/dalapi/getCocDeedBkPg?bk={book}&pg={page}
-      const pdfUrl = `https://www.pcpao.gov/dal/dalapi/getCocDeedBkPg?bk=${transaction.bookNumber}&pg=${transaction.pageNumber}`;
+      // Note: Page number should NOT have leading zeros (e.g., 430 not 0430)
+      const pageNumber = parseInt(transaction.pageNumber, 10);
+      const pdfUrl = `https://www.pcpao.gov/dal/dalapi/getCocDeedBkPg?bk=${transaction.bookNumber}&pg=${pageNumber}`;
 
       this.log(`🔗 Constructed PDF URL: ${pdfUrl}`);
-      this.log(`   Book: ${transaction.bookNumber}, Page: ${transaction.pageNumber}`);
+      this.log(`   Book: ${transaction.bookNumber}, Page: ${pageNumber} (original: ${transaction.pageNumber})`);
 
       // Download PDF using HTTPS with cookies (same method as Orange County)
       this.log(`📥 Downloading PDF from direct API...`);

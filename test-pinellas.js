@@ -9,7 +9,7 @@ async function testPinellasCounty() {
   console.log('🧪 Testing Pinellas County FL deed scraper...\n');
 
   // Example test address in Pinellas County (from user's workflow)
-  const testAddress = '11074 110TH WAY, Largo, FL';
+  const testAddress = '11074 110th Way, Seminole, FL 33778, USA';
 
   const scraper = new PinellasCountyFloridaScraper({
     headless: false, // Set to true for headless testing
