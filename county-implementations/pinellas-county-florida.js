@@ -569,67 +569,89 @@ class PinellasCountyFloridaScraper extends DeedScraper {
         throw new Error('Missing book number or page number for PDF download');
       }
 
-      // Construct direct PDF URL using book and page numbers
-      // Format: https://www.pcpao.gov/dal/dalapi/getCocDeedBkPg?bk={book}&pg={page}
-      // Note: Page number should NOT have leading zeros (e.g., 430 not 0430)
+      // User workflow: Click on the book/page link (e.g., "22450/0430") on the property page
+      // This triggers a popup warning "you are leaving this site" then opens PDF
+
+      // Construct the PDF URL directly (from user workflow step 7)
+      // The URL format is: https://www.pcpao.gov/dal/dalapi/getCocDeedBkPg?bk=BOOK&pg=PAGE
+      // Strip leading zeros from page number
       const pageNumber = parseInt(transaction.pageNumber, 10);
       const pdfUrl = `https://www.pcpao.gov/dal/dalapi/getCocDeedBkPg?bk=${transaction.bookNumber}&pg=${pageNumber}`;
 
-      this.log(`🔗 Constructed PDF URL: ${pdfUrl}`);
-      this.log(`   Book: ${transaction.bookNumber}, Page: ${pageNumber} (original: ${transaction.pageNumber})`);
+      this.log(`📥 Downloading PDF from: ${pdfUrl}`);
 
-      // Download PDF using HTTPS with cookies (same method as Orange County)
-      this.log(`📥 Downloading PDF from direct API...`);
-
-      const https = require('https');
-      const url = require('url');
-
-      // Get cookies from current page
-      const cookies = await this.page.cookies();
-      const cookieString = cookies.map(c => `${c.name}=${c.value}`).join('; ');
-
-      const parsedUrl = url.parse(pdfUrl);
-
-      const pdfBuffer = await new Promise((resolve, reject) => {
-        const options = {
-          hostname: parsedUrl.hostname,
-          path: parsedUrl.path,
-          method: 'GET',
-          headers: {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-            'Accept': 'application/pdf,*/*',
-            'Referer': 'https://www.pcpao.gov/',
-            'Cookie': cookieString
-          }
-        };
-
-        https.get(options, (response) => {
-          if (response.statusCode === 302 || response.statusCode === 301) {
-            // Handle redirect
-            const redirectUrl = response.headers.location;
-            this.log(`↪️  Redirected to: ${redirectUrl}`);
-            reject(new Error(`Redirect to: ${redirectUrl}`));
-            return;
-          }
-
-          if (response.statusCode !== 200) {
-            reject(new Error(`HTTP ${response.statusCode}: ${response.statusMessage}`));
-            return;
-          }
-
-          const chunks = [];
-          response.on('data', (chunk) => chunks.push(chunk));
-          response.on('end', () => {
-            const buffer = Buffer.concat(chunks);
-            resolve(buffer);
+      // Use page.evaluate with fetch API to download PDF
+      // This uses the browser's fetch which has all cookies and proper headers
+      const pdfData = await this.page.evaluate(async (url) => {
+        try {
+          const response = await fetch(url, {
+            method: 'GET',
+            credentials: 'include', // Include cookies
+            headers: {
+              'Accept': 'application/pdf,*/*'
+            }
           });
-        }).on('error', (error) => {
-          reject(error);
-        });
-      });
 
-      // Verify it's a PDF
-      const isPDF = pdfBuffer.slice(0, 4).toString() === '%PDF';
+          if (!response.ok) {
+            throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+          }
+
+          // Get the response as ArrayBuffer
+          const arrayBuffer = await response.arrayBuffer();
+
+          // Convert to base64 for transfer back to Node.js
+          const bytes = new Uint8Array(arrayBuffer);
+          let binary = '';
+          for (let i = 0; i < bytes.length; i++) {
+            binary += String.fromCharCode(bytes[i]);
+          }
+          const base64 = btoa(binary);
+
+          return {
+            success: true,
+            base64,
+            size: arrayBuffer.byteLength,
+            contentType: response.headers.get('content-type'),
+            status: response.status
+          };
+        } catch (error) {
+          return {
+            success: false,
+            error: error.message
+          };
+        }
+      }, pdfUrl);
+
+      if (!pdfData.success) {
+        throw new Error(`Failed to download PDF via fetch: ${pdfData.error}`);
+      }
+
+      this.log(`✅ PDF downloaded via fetch API:`);
+      this.log(`   Status: ${pdfData.status}`);
+      this.log(`   Content-Type: ${pdfData.contentType}`);
+      this.log(`   Size: ${pdfData.size} bytes`);
+
+      // Convert base64 back to buffer
+      let pdfBuffer = Buffer.from(pdfData.base64, 'base64');
+
+      // Check if buffer starts with PDF magic number
+      let isPDF = pdfBuffer.slice(0, 4).toString() === '%PDF';
+
+      // If not, there might be HTTP headers prepended (chunked encoding issue)
+      // Search for the PDF magic number in the buffer
+      if (!isPDF) {
+        this.log(`⚠️ Buffer doesn't start with PDF magic number, searching for it...`);
+        const pdfMarker = '%PDF';
+        const bufferStr = pdfBuffer.toString('binary');
+        const pdfStartIndex = bufferStr.indexOf(pdfMarker);
+
+        if (pdfStartIndex > 0) {
+          this.log(`✅ Found PDF marker at byte ${pdfStartIndex}, extracting PDF content...`);
+          pdfBuffer = pdfBuffer.slice(pdfStartIndex);
+          isPDF = pdfBuffer.slice(0, 4).toString() === '%PDF';
+        }
+      }
+
       this.log(`🔍 PDF validation: isPDF=${isPDF}, size=${pdfBuffer.length} bytes`);
 
       if (!isPDF) {
