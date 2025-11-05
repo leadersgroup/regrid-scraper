@@ -157,7 +157,12 @@ class PalmBeachCountyFloridaScraper extends DeedScraper {
       }
 
       // STEP 3: Download the most recent deed
-      const mostRecentDeed = transactionResult.transactions[0];
+      // Prioritize transactions that have href (direct clerk URLs)
+      let mostRecentDeed = transactionResult.transactions.find(t => t.href);
+      if (!mostRecentDeed) {
+        mostRecentDeed = transactionResult.transactions[0];
+      }
+
       const deedId = mostRecentDeed.documentId || mostRecentDeed.instrumentNumber || `Book ${mostRecentDeed.bookNumber} Page ${mostRecentDeed.pageNumber}`;
       this.log(`📥 Attempting to download most recent deed: ${deedId}`);
 
@@ -258,39 +263,66 @@ class PalmBeachCountyFloridaScraper extends DeedScraper {
 
       this.log(`✅ Entered address: ${streetAddress}`);
 
+      // Wait for autocomplete popup to appear
       await this.randomWait(2000, 3000);
 
-      // Look for and click search button
-      const searchButtonSelectors = [
-        'button[type="submit"]',
-        'input[type="submit"]',
-        'button:contains("Search")',
-        'input[value*="Search"]',
-        'button[id*="search"]'
-      ];
+      // Look for autocomplete suggestions and click matching one
+      this.log(`🔍 Looking for autocomplete suggestions...`);
 
-      let searchClicked = false;
-      for (const selector of searchButtonSelectors) {
-        try {
-          await this.page.waitForSelector(selector, { timeout: 2000 });
-          await this.page.click(selector);
-          this.log(`✅ Clicked search button: ${selector}`);
-          searchClicked = true;
-          break;
-        } catch (e) {
-          // Try next selector
+      let autocompleteClicked = { clicked: false };
+      try {
+        autocompleteClicked = await Promise.race([
+          this.page.evaluate((searchAddr) => {
+            // Look for autocomplete dropdown items
+            const autocompleteSelectors = [
+              '.ui-menu-item',
+              '.ui-autocomplete li',
+              '.autocomplete-item',
+              '[role="option"]',
+              '.suggestion',
+              '.dropdown-item'
+            ];
+
+            for (const selector of autocompleteSelectors) {
+              const items = Array.from(document.querySelectorAll(selector));
+              for (const item of items) {
+                const text = (item.textContent || '').trim();
+                // Check if this item matches the address
+                if (text.includes(searchAddr) || searchAddr.includes(text.split(',')[0].trim())) {
+                  item.click();
+                  return { clicked: true, text: text.substring(0, 100) };
+                }
+              }
+            }
+
+            return { clicked: false };
+          }, streetAddress),
+          new Promise(resolve => setTimeout(() => resolve({ clicked: false, timeout: true }), 5000))
+        ]);
+      } catch (e) {
+        this.log(`⚠️ Autocomplete search timed out: ${e.message}`);
+        autocompleteClicked = { clicked: false };
+      }
+
+      if (autocompleteClicked.clicked && !autocompleteClicked.timeout) {
+        this.log(`✅ Clicked autocomplete suggestion: "${autocompleteClicked.text}"`);
+        // Wait for navigation after autocomplete click
+        await this.randomWait(5000, 7000);
+      } else {
+        if (autocompleteClicked.timeout) {
+          this.log(`ℹ️  Autocomplete search timed out, trying Enter key...`);
+        } else {
+          this.log(`ℹ️  No autocomplete found, trying Enter key...`);
         }
+
+        // Press Enter to submit form
+        await Promise.all([
+          this.page.waitForNavigation({ waitUntil: 'networkidle2', timeout: 15000 }).catch(() => null),
+          this.page.keyboard.press('Enter')
+        ]);
+        await this.randomWait(3000, 5000);
       }
 
-      if (!searchClicked) {
-        // Try pressing Enter as fallback
-        this.log(`⚠️ Could not find search button, pressing Enter`);
-        await this.page.keyboard.press('Enter');
-      }
-
-      // Wait for search results to load
-      this.log(`⏳ Waiting for search results to load...`);
-      await this.randomWait(5000, 7000);
 
       // Check if property was found
       const searchStatus = await this.page.evaluate(() => {
@@ -382,6 +414,10 @@ class PalmBeachCountyFloridaScraper extends DeedScraper {
     try {
       await this.randomWait(2000, 3000);
 
+      // Debug: Log current URL
+      const currentUrl = this.page.url();
+      this.log(`🔍 Current URL: ${currentUrl}`);
+
       // Look for Sales Information section
       this.log('🔍 Looking for Sales Information section...');
 
@@ -413,11 +449,12 @@ class PalmBeachCountyFloridaScraper extends DeedScraper {
         for (const el of allElements) {
           const text = (el.textContent || '').trim();
 
-          // Look for OR Book/Page pattern (e.g., "33358 / 1920")
-          const orBookPageMatch = text.match(/^(\d{4,6})\s*\/\s*(\d{3,5})$/);
+          // Look for OR Book/Page pattern (e.g., "33358 / 1920" or "33358 /  01920")
+          // Allow multiple spaces and leading zeros in page number
+          const orBookPageMatch = text.match(/^(\d{4,6})\s*\/\s*(\d{3,6})$/);
           if (orBookPageMatch) {
             const bookNumber = orBookPageMatch[1];
-            const pageNumber = orBookPageMatch[2];
+            const pageNumber = orBookPageMatch[2].replace(/^0+/, ''); // Remove leading zeros
 
             // Check if this is a clickable link
             const link = el.closest('a');
@@ -448,17 +485,23 @@ class PalmBeachCountyFloridaScraper extends DeedScraper {
           const text = (link.textContent || '').trim();
           const href = link.href || '';
 
-          // Check if link text contains book/page pattern
-          const bookPageMatch = text.match(/(\d{4,6})\s*\/\s*(\d{3,5})/);
-          if (bookPageMatch && !results.some(r => r.bookNumber === bookPageMatch[1] && r.pageNumber === bookPageMatch[2])) {
-            results.push({
-              bookNumber: bookPageMatch[1],
-              pageNumber: bookPageMatch[2],
-              type: 'or_book_page',
-              source: 'Palm Beach County Property Appraiser',
-              href: href,
-              text: text
-            });
+          // Check if link text contains book/page pattern (more flexible - not anchored)
+          const bookPageMatch = text.match(/(\d{4,6})\s*\/\s*(\d{3,6})/);
+          if (bookPageMatch) {
+            const bookNumber = bookPageMatch[1];
+            const pageNumber = bookPageMatch[2].replace(/^0+/, ''); // Remove leading zeros
+
+            // Check if not already added
+            if (!results.some(r => r.bookNumber === bookNumber && r.pageNumber === pageNumber)) {
+              results.push({
+                bookNumber: bookNumber,
+                pageNumber: pageNumber,
+                type: 'or_book_page',
+                source: 'Palm Beach County Property Appraiser',
+                href: href,
+                text: text
+              });
+            }
           }
         }
 
@@ -501,26 +544,27 @@ class PalmBeachCountyFloridaScraper extends DeedScraper {
     try {
       const bookNumber = transaction.bookNumber;
       const pageNumber = transaction.pageNumber;
+      const clerkUrl = transaction.href || transaction.clerkUrl; // Get URL from href field
 
       this.log(`🔍 Transaction details: OR Book/Page=${bookNumber}/${pageNumber}`);
 
-      // Navigate to the clerk's official records search
-      await this.page.goto(clerkUrl, {
-        waitUntil: 'networkidle2',
-        timeout: this.timeout
-      });
-
-      await this.randomWait(5000, 7000);
-
       // If we have a direct clerk URL, use it
-      if (transaction.clerkUrl) {
-        this.log(`📍 Using direct clerk URL: ${transaction.clerkUrl}`);
-        await this.page.goto(transaction.clerkUrl, {
+      if (clerkUrl) {
+        this.log(`📍 Using direct clerk URL: ${clerkUrl}`);
+        await this.page.goto(clerkUrl, {
           waitUntil: 'networkidle2',
           timeout: this.timeout
         });
         await this.randomWait(5000, 7000);
       } else {
+        // Navigate to the clerk's official records search and search manually
+        const clerkSearchUrl = 'https://erec.mypalmbeachclerk.com/';
+        await this.page.goto(clerkSearchUrl, {
+          waitUntil: 'networkidle2',
+          timeout: this.timeout
+        });
+        await this.randomWait(5000, 7000);
+
         // Search by instrument number or book/page
         if (transaction.instrumentNumber) {
           this.log(`🔍 Searching by instrument number: ${transaction.instrumentNumber}`);
@@ -533,209 +577,210 @@ class PalmBeachCountyFloridaScraper extends DeedScraper {
         }
       }
 
-      // Look for PDF viewer or download link
+      // Palm Beach serves documents as PNG images via GetDocumentImage endpoint
+      // We need to: 1) Get page count, 2) Extract document ID, 3) Download PNG images, 4) Convert to PDF
       await this.randomWait(3000, 5000);
 
-      // Set up listener for new page/popup BEFORE clicking any view button
-      this.log(`🔍 Setting up popup listener for PDF viewer...`);
-      const newPagePromise = new Promise(resolve => {
-        this.browser.once('targetcreated', async target => {
-          if (target.type() === 'page') {
-            const newPage = await target.page();
-            resolve(newPage);
+      // Get page count from the document page
+      this.log('🔍 Getting page count...');
+      const pageCount = await this.page.evaluate(() => {
+        // Look for page count indicator
+        const pageInfo = document.body.innerText;
+        const match = pageInfo.match(/Page \d+ of (\d+)/i) || pageInfo.match(/(\d+) pages/i);
+        if (match) {
+          return parseInt(match[1]);
+        }
+
+        // Try to find in carousel or pagination
+        const paginationElements = Array.from(document.querySelectorAll('*'));
+        for (const el of paginationElements) {
+          const text = el.textContent || '';
+          const pageMatch = text.match(/of (\d+)/i);
+          if (pageMatch) {
+            return parseInt(pageMatch[1]);
           }
-        });
+        }
+
+        return 1; // Default to 1 page
       });
 
-      // Look for view/download buttons
-      const viewButtonClicked = await this.page.evaluate(() => {
-        const buttons = Array.from(document.querySelectorAll('button, a, input[type="button"], [role="button"]'));
+      this.log(`📄 Document has ${pageCount} page(s)`);
 
-        for (const btn of buttons) {
-          const text = (btn.textContent || btn.value || '').toLowerCase();
-
-          if (text.includes('view') || text.includes('download') || text.includes('open') || text.includes('image')) {
-            btn.click();
-            return { clicked: true, buttonText: text };
-          }
+      // Extract document ID from network requests
+      this.log('🔍 Monitoring network for document ID...');
+      const pdfRequests = [];
+      const requestHandler = (request) => {
+        const url = request.url();
+        if (url.includes('GetDocumentImage')) {
+          pdfRequests.push(url);
+          this.log(`📥 Captured: ${url.substring(0, 120)}`);
         }
+      };
 
-        return { clicked: false };
+      this.page.on('request', requestHandler);
+
+      // Scroll down to trigger lazy-loaded images
+      await this.page.evaluate(() => {
+        window.scrollTo(0, document.body.scrollHeight);
       });
+      await this.randomWait(2000, 3000);
 
-      if (viewButtonClicked.clicked) {
-        this.log(`✅ Clicked view button: ${viewButtonClicked.buttonText}`);
+      // Scroll back up
+      await this.page.evaluate(() => {
+        window.scrollTo(0, 0);
+      });
+      await this.randomWait(2000, 3000);
 
-        // Wait for new window with timeout
-        const newPage = await Promise.race([
-          newPagePromise,
-          new Promise((_, reject) =>
-            setTimeout(() => reject(new Error('Timeout waiting for PDF viewer window')), 30000)
-          )
-        ]);
+      this.page.off('request', requestHandler);
 
-        this.log('✅ PDF viewer window opened');
-        this.log(`🔍 PDF window URL: ${newPage.url()}`);
-
-        // Wait for the PDF to load
-        await this.randomWait(3000, 5000);
-
-        // Get the PDF URL
-        const pdfUrl = newPage.url();
-
-        // Download the PDF using fetch in the new window's context
-        this.log('📥 Downloading PDF...');
-
-        const pdfArrayBuffer = await newPage.evaluate(async (url) => {
-          const response = await fetch(url);
-          if (!response.ok) {
-            throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-          }
-          const arrayBuffer = await response.arrayBuffer();
-          return Array.from(new Uint8Array(arrayBuffer));
-        }, pdfUrl);
-
-        // Convert array to Buffer
-        const pdfBuffer = Buffer.from(pdfArrayBuffer);
-
-        // Verify it's a PDF
-        const isPDF = pdfBuffer.slice(0, 4).toString() === '%PDF';
-        this.log(`🔍 PDF validation: isPDF=${isPDF}, size=${pdfBuffer.length} bytes`);
-
-        if (!isPDF) {
-          throw new Error('Downloaded file is not a valid PDF');
+      // Find document ID from captured requests
+      let documentId = null;
+      if (pdfRequests.length > 0) {
+        const match = pdfRequests[0].match(/documentId=(\d+)/);
+        if (match) {
+          documentId = match[1];
+          this.log(`✅ Found document ID from network: ${documentId}`);
         }
+      }
 
-        this.log(`✅ PDF downloaded successfully (${pdfBuffer.length} bytes)`);
-
-        // Close the new window
-        await newPage.close();
-
-        // Save PDF to disk
-        const path = require('path');
-        const fs = require('fs');
-        const relativePath = process.env.DEED_DOWNLOAD_PATH || './downloads';
-        const downloadPath = path.resolve(relativePath);
-
-        // Ensure download directory exists
-        if (!fs.existsSync(downloadPath)) {
-          fs.mkdirSync(downloadPath, { recursive: true });
-          this.log(`📁 Created download directory: ${downloadPath}`);
-        }
-
-        const documentId = transaction.instrumentNumber || transaction.documentId || `${transaction.bookNumber}_${transaction.pageNumber}`;
-        const filename = `palm_beach_deed_${documentId}.pdf`;
-        const filepath = path.join(downloadPath, filename);
-
-        fs.writeFileSync(filepath, pdfBuffer);
-        this.log(`💾 Saved PDF to: ${filepath}`);
-
-        return {
-          success: true,
-          filename,
-          downloadPath,
-          documentId,
-          timestamp: new Date().toISOString(),
-          fileSize: pdfBuffer.length
-        };
-
-      } else {
-        // Try alternative: look for iframe with PDF
-        this.log(`ℹ️  No view button found, looking for PDF iframe...`);
-
-        const pdfUrl = await this.page.evaluate(() => {
-          const iframes = Array.from(document.querySelectorAll('iframe'));
-          for (const iframe of iframes) {
-            const src = iframe.src || '';
-            if (src.includes('.pdf') || src.includes('application/pdf')) {
-              return src;
+      // If not found in network, try to extract from page JavaScript
+      if (!documentId) {
+        this.log('🔍 Looking for document ID in page JavaScript...');
+        documentId = await this.page.evaluate(() => {
+          // Check all script tags
+          const scripts = Array.from(document.querySelectorAll('script'));
+          for (const script of scripts) {
+            const text = script.textContent || '';
+            const match = text.match(/documentId["\s:=]+(\d+)/);
+            if (match) {
+              return match[1];
             }
           }
+
+          // Check data attributes
+          const elements = Array.from(document.querySelectorAll('[data-document-id], [data-documentid]'));
+          for (const el of elements) {
+            const id = el.getAttribute('data-document-id') || el.getAttribute('data-documentid');
+            if (id) return id;
+          }
+
+          // Check window object
+          if (window.documentId) return window.documentId.toString();
+          if (window.DocumentId) return window.DocumentId.toString();
+
           return null;
         });
 
-        if (pdfUrl) {
-          this.log(`✅ Found PDF iframe: ${pdfUrl}`);
-
-          // Navigate to PDF URL
-          await this.page.goto(pdfUrl, {
-            waitUntil: 'networkidle2',
-            timeout: this.timeout
-          });
-
-          await this.randomWait(3000, 5000);
-
-          // Download PDF
-          const cookies = await this.page.cookies();
-          const cookieString = cookies.map(c => `${c.name}=${c.value}`).join('; ');
-
-          const https = require('https');
-          const fs = require('fs');
-          const path = require('path');
-          const { URL } = require('url');
-
-          const pdfUrlObj = new URL(pdfUrl);
-
-          return new Promise((resolve, reject) => {
-            const options = {
-              hostname: pdfUrlObj.hostname,
-              path: pdfUrlObj.pathname + pdfUrlObj.search,
-              method: 'GET',
-              headers: {
-                'Cookie': cookieString,
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
-              }
-            };
-
-            https.get(options, (res) => {
-              const chunks = [];
-
-              res.on('data', (chunk) => {
-                chunks.push(chunk);
-              });
-
-              res.on('end', () => {
-                const pdfBuffer = Buffer.concat(chunks);
-
-                // Verify it's a PDF
-                const isPDF = pdfBuffer.slice(0, 4).toString() === '%PDF';
-
-                if (!isPDF) {
-                  return reject(new Error('Downloaded file is not a valid PDF'));
-                }
-
-                // Save to disk
-                const relativePath = process.env.DEED_DOWNLOAD_PATH || './downloads';
-                const downloadPath = path.resolve(relativePath);
-
-                if (!fs.existsSync(downloadPath)) {
-                  fs.mkdirSync(downloadPath, { recursive: true });
-                }
-
-                const documentId = transaction.instrumentNumber || transaction.documentId || `${transaction.bookNumber}_${transaction.pageNumber}`;
-                const filename = `palm_beach_deed_${documentId}.pdf`;
-                const filepath = path.join(downloadPath, filename);
-
-                fs.writeFileSync(filepath, pdfBuffer);
-                this.log(`💾 Saved PDF to: ${filepath}`);
-
-                resolve({
-                  success: true,
-                  filename,
-                  downloadPath,
-                  documentId,
-                  timestamp: new Date().toISOString(),
-                  fileSize: pdfBuffer.length
-                });
-              });
-            }).on('error', (err) => {
-              reject(err);
-            });
-          });
-        } else {
-          throw new Error('Could not find PDF viewer or download link');
+        if (documentId) {
+          this.log(`✅ Found document ID from page: ${documentId}`);
         }
       }
+
+      // If still not found, try extracting from current URL or page content
+      if (!documentId) {
+        this.log('🔍 Looking for document ID in URL or page content...');
+        const currentUrl = this.page.url();
+        this.log(`   Current URL: ${currentUrl}`);
+
+        // Try to find in URL query parameters
+        const urlMatch = currentUrl.match(/documentId=(\d+)/i);
+        if (urlMatch) {
+          documentId = urlMatch[1];
+          this.log(`✅ Found document ID from URL: ${documentId}`);
+        }
+      }
+
+      this.log(`📋 Document ID: ${documentId}`);
+
+      if (!documentId) {
+        throw new Error('Could not find document ID');
+      }
+
+      // Download all pages as PNG images
+      this.log(`📥 Downloading ${pageCount} page(s) as images...`);
+      const cookies = await this.page.cookies();
+      const referer = this.page.url();
+      const imageBuffers = [];
+
+      const https = require('https');
+      const url = require('url');
+
+      for (let pageNum = 0; pageNum < pageCount; pageNum++) {
+        const imageUrl = `https://erec.mypalmbeachclerk.com/Document/GetDocumentImage/?documentId=${documentId}&index=0&pageNum=${pageNum}&type=normal&rotate=0`;
+        this.log(`  Page ${pageNum + 1}/${pageCount}: Downloading...`);
+
+        // Download image using HTTPS module with cookies
+        const imageBuffer = await new Promise((resolve, reject) => {
+          const parsedUrl = url.parse(imageUrl);
+          const cookieString = cookies.map(c => `${c.name}=${c.value}`).join('; ');
+
+          const options = {
+            hostname: parsedUrl.hostname,
+            port: parsedUrl.port || 443,
+            path: parsedUrl.path,
+            method: 'GET',
+            headers: {
+              'Cookie': cookieString,
+              'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+              'Accept': 'image/*,*/*',
+              'Referer': referer
+            }
+          };
+
+          https.get(options, (res) => {
+            const chunks = [];
+            res.on('data', (chunk) => chunks.push(chunk));
+            res.on('end', () => {
+              const buffer = Buffer.concat(chunks);
+              resolve(buffer);
+            });
+          }).on('error', reject);
+        });
+
+        this.log(`    ✅ Downloaded: ${(imageBuffer.length / 1024).toFixed(2)} KB`);
+        imageBuffers.push(imageBuffer);
+
+        await this.randomWait(500, 1000); // Small delay between requests
+      }
+
+      // Convert images to PDF using pdf-lib
+      this.log('📄 Converting images to PDF...');
+      const { PDFDocument } = require('pdf-lib');
+      const pdfDoc = await PDFDocument.create();
+
+      for (let i = 0; i < imageBuffers.length; i++) {
+        this.log(`  Adding page ${i + 1}/${imageBuffers.length}...`);
+        const image = await pdfDoc.embedPng(imageBuffers[i]);
+        const page = pdfDoc.addPage([image.width, image.height]);
+        page.drawImage(image, {
+          x: 0,
+          y: 0,
+          width: image.width,
+          height: image.height
+        });
+      }
+
+      const pdfBytes = await pdfDoc.save();
+      const pdfBuffer = Buffer.from(pdfBytes);
+      this.log(`✅ PDF created: ${(pdfBuffer.length / 1024).toFixed(2)} KB`);
+
+      // Convert to base64 for in-memory return (similar to Broward County)
+      const pdfBase64 = pdfBuffer.toString('base64');
+      this.log(`✅ PDF converted to base64`);
+
+      // Generate filename
+      const docId = transaction.instrumentNumber || transaction.documentId || `${transaction.bookNumber}_${transaction.pageNumber}`;
+      const filename = `palm_beach_deed_${docId}.pdf`;
+
+      return {
+        success: true,
+        pdfBase64: pdfBase64,
+        filename: filename,
+        downloadPath: '', // In-memory download, no file saved to disk
+        documentId: documentId,
+        timestamp: new Date().toISOString(),
+        fileSize: pdfBuffer.length
+      };
 
     } catch (error) {
       this.log(`❌ Failed to download deed: ${error.message}`);
