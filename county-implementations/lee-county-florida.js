@@ -36,14 +36,28 @@ class LeeCountyFloridaScraper extends DeedScraper {
    */
   async initialize() {
     this.log('🚀 Initializing browser with stealth mode...');
+    this.log(`   Platform: ${process.platform}`);
+    this.log(`   Node version: ${process.version}`);
+    this.log(`   Headless mode: ${this.headless}`);
+    this.log(`   Timeout: ${this.timeout}ms`);
 
     const isRailway = process.env.RAILWAY_ENVIRONMENT_NAME || process.env.RAILWAY_PROJECT_NAME;
     const isLinux = process.platform === 'linux';
+
+    this.log(`   Railway environment: ${isRailway ? 'YES' : 'NO'}`);
+    this.log(`   Linux platform: ${isLinux ? 'YES' : 'NO'}`);
 
     const executablePath = isRailway || isLinux
       ? (process.env.PUPPETEER_EXECUTABLE_PATH || '/usr/bin/google-chrome-stable')
       : undefined;
 
+    if (executablePath) {
+      this.log(`   Using Chrome executable: ${executablePath}`);
+    } else {
+      this.log(`   Using default Chrome executable`);
+    }
+
+    this.log('   Launching browser...');
     this.browser = await puppeteer.launch({
       headless: this.headless,
       ...(executablePath && { executablePath }),
@@ -58,16 +72,24 @@ class LeeCountyFloridaScraper extends DeedScraper {
         '--disable-features=IsolateOrigins,site-per-process'
       ]
     });
+    this.log('   ✅ Browser launched');
 
+    this.log('   Creating new page...');
     this.page = await this.browser.newPage();
+    this.log('   ✅ New page created');
 
     // Set realistic user agent
+    this.log('   Setting user agent...');
     await this.page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
+    this.log('   ✅ User agent set');
 
     // Set realistic viewport
+    this.log('   Setting viewport...');
     await this.page.setViewport({ width: 1920, height: 1080 });
+    this.log('   ✅ Viewport set');
 
     // Add realistic headers
+    this.log('   Setting HTTP headers...');
     await this.page.setExtraHTTPHeaders({
       'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,image/apng,*/*;q=0.8',
       'Accept-Language': 'en-US,en;q=0.9',
@@ -80,9 +102,11 @@ class LeeCountyFloridaScraper extends DeedScraper {
       'Sec-Fetch-Site': 'none',
       'Sec-Fetch-User': '?1'
     });
+    this.log('   ✅ HTTP headers set');
 
     // Set up global dialog handler to auto-dismiss all alerts/confirms/prompts
     // This prevents Railway errors when switching between leepa.org and leeclerk.org
+    this.log('   Setting up event handlers...');
     this.page.on('dialog', async (dialog) => {
       this.log(`🔔 Dialog auto-dismissed: ${dialog.type()} - "${dialog.message()}"`);
       try {
@@ -109,6 +133,7 @@ class LeeCountyFloridaScraper extends DeedScraper {
     this.page.on('requestfailed', (request) => {
       this.log(`⚠️  Request failed: ${request.url()} - ${request.failure().errorText}`);
     });
+    this.log('   ✅ Event handlers configured');
 
     this.log('✅ Browser initialized with stealth mode and popup handling');
   }
@@ -240,17 +265,26 @@ class LeeCountyFloridaScraper extends DeedScraper {
   async searchAssessorSite(parcelId, ownerName) {
     this.log(`🔍 Searching Lee County FL Property Appraiser`);
     this.log(`   Using street address search (without city/state)`);
+    this.log(`   Current address: ${this.currentAddress}`);
 
     try {
       // Navigate to property search page
-      await this.page.goto('https://www.leepa.org/Search/PropertySearch.aspx', {
+      const targetUrl = 'https://www.leepa.org/Search/PropertySearch.aspx';
+      this.log(`🌐 Navigating to: ${targetUrl}`);
+      this.log(`   Wait until: networkidle2, Timeout: ${this.timeout}ms`);
+
+      const startTime = Date.now();
+      await this.page.goto(targetUrl, {
         waitUntil: 'networkidle2',
         timeout: this.timeout
       });
+      const loadTime = Date.now() - startTime;
 
       const pageTitle = await this.page.title();
-      this.log(`✅ Page loaded: ${this.page.url()}`);
-      this.log(`📄 Page title: ${pageTitle}`);
+      const pageUrl = this.page.url();
+      this.log(`✅ Page loaded in ${loadTime}ms`);
+      this.log(`   URL: ${pageUrl}`);
+      this.log(`   Title: ${pageTitle}`);
 
       // Check if we got a CAPTCHA, error, or blocked page
       const pageCheck = await this.page.evaluate(() => {
@@ -263,19 +297,26 @@ class LeeCountyFloridaScraper extends DeedScraper {
         };
       });
 
+      this.log(`🔍 Page check results:`);
+      this.log(`   CAPTCHA: ${pageCheck.hasCaptcha ? 'YES' : 'NO'}`);
+      this.log(`   Error: ${pageCheck.hasError ? 'YES' : 'NO'}`);
+      this.log(`   Access Denied: ${pageCheck.hasAccessDenied ? 'YES' : 'NO'}`);
+
       if (pageCheck.hasCaptcha) {
-        this.log(`⚠️  CAPTCHA detected on page!`);
+        this.log(`⚠️  WARNING: CAPTCHA detected!`);
         this.log(`   Body snippet: ${pageCheck.bodySnippet}`);
       }
       if (pageCheck.hasError) {
-        this.log(`⚠️  Error message detected on page!`);
+        this.log(`⚠️  WARNING: Error message detected!`);
         this.log(`   Body snippet: ${pageCheck.bodySnippet}`);
       }
       if (pageCheck.hasAccessDenied) {
-        this.log(`⚠️  Access denied message detected on page!`);
+        this.log(`⚠️  WARNING: Access denied!`);
         this.log(`   Body snippet: ${pageCheck.bodySnippet}`);
       }
 
+      const waitTime = Math.floor(Math.random() * (5000 - 3000 + 1)) + 3000;
+      this.log(`⏳ Waiting ${waitTime}ms before proceeding...`);
       await this.randomWait(3000, 5000);
 
       // Check for and dismiss any popups or overlays
@@ -304,9 +345,12 @@ class LeeCountyFloridaScraper extends DeedScraper {
       const fullAddress = this.currentAddress || '';
       let streetAddress = fullAddress.split(',')[0].trim();
 
-      this.log(`🏠 Searching for address: ${streetAddress}`);
+      this.log(`🏠 Processing address:`);
+      this.log(`   Full address: ${fullAddress}`);
+      this.log(`   Street only: ${streetAddress}`);
 
       // Look for the 'street address' search box
+      this.log(`🔍 Looking for street address input field...`);
       const addressInputSelectors = [
         'input[id*="txtStreetAddress"]',
         'input[name*="txtStreetAddress"]',
@@ -316,15 +360,19 @@ class LeeCountyFloridaScraper extends DeedScraper {
         'input[type="text"]'
       ];
 
+      this.log(`   Trying ${addressInputSelectors.length} selectors...`);
       let addressInput = null;
+      let selectorIndex = 0;
       for (const selector of addressInputSelectors) {
+        selectorIndex++;
         try {
+          this.log(`   [${selectorIndex}/${addressInputSelectors.length}] Trying: ${selector}`);
           await this.page.waitForSelector(selector, { timeout: 3000, visible: true });
           addressInput = selector;
-          this.log(`✅ Found street address input: ${selector}`);
+          this.log(`   ✅ Found! Using selector: ${selector}`);
           break;
         } catch (e) {
-          this.log(`⚠️  Selector not found: ${selector}`);
+          this.log(`   ⚠️  Not found: ${selector}`);
           // Try next selector
         }
       }
@@ -364,25 +412,40 @@ class LeeCountyFloridaScraper extends DeedScraper {
       }
 
       // Enter street address using DOM manipulation (page.type() times out on this site)
-      await this.page.evaluate((selector, address) => {
+      this.log(`📝 Entering address via DOM manipulation...`);
+      this.log(`   Selector: ${addressInput}`);
+      this.log(`   Value: ${streetAddress}`);
+
+      const entryResult = await this.page.evaluate((selector, address) => {
         const input = document.querySelector(selector);
         if (input) {
           input.value = address;
           // Trigger input events to ensure the form recognizes the change
           input.dispatchEvent(new Event('input', { bubbles: true }));
           input.dispatchEvent(new Event('change', { bubbles: true }));
+          return { success: true, actualValue: input.value };
         }
+        return { success: false, error: 'Input element not found' };
       }, addressInput, streetAddress);
 
-      this.log(`✅ Entered address: ${streetAddress}`);
+      if (entryResult.success) {
+        this.log(`✅ Address entered successfully`);
+        this.log(`   Verified value: ${entryResult.actualValue}`);
+      } else {
+        this.log(`❌ Failed to enter address: ${entryResult.error}`);
+      }
+
+      const waitTime2 = Math.floor(Math.random() * (2000 - 1000 + 1)) + 1000;
+      this.log(`⏳ Waiting ${waitTime2}ms before submitting...`);
       await this.randomWait(1000, 2000);
 
       // Press Enter to submit the search (simpler than clicking button)
-      this.log(`⌨️  Pressing Enter to submit search...`);
+      this.log(`⌨️  Pressing Enter key to submit search...`);
       await this.page.keyboard.press('Enter');
 
-      this.log(`✅ Search submitted via Enter key`);
-      this.log(`📍 Current URL after search: ${this.page.url()}`);
+      this.log(`✅ Enter key pressed`);
+      const urlAfterSubmit = this.page.url();
+      this.log(`📍 Current URL: ${urlAfterSubmit}`);
 
       // Wait for search results to load (match table)
       this.log(`⏳ Waiting for search results to load...`);
