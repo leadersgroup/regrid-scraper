@@ -686,56 +686,60 @@ class LeeCountyFloridaScraper extends DeedScraper {
     try {
       await this.randomWait(2000, 3000);
 
-      // Click on 'Sales/Transactions' tab
-      this.log('🔍 Looking for "Sales/Transactions" tab...');
+      // Try to expand 'Sales/Transactions' section via JavaScript manipulation
+      // The expand button has href that causes navigation, so we prevent default and trigger manually
+      this.log('🔍 Looking for "Sales/Transactions" expand button...');
 
-      const salesTabClicked = await this.page.evaluate(() => {
-        const allElements = Array.from(document.querySelectorAll('a, button, div, span, li'));
-
-        for (const el of allElements) {
-          const text = (el.textContent || '').trim();
-
-          if (text.toLowerCase().includes('sales') &&
-              (text.toLowerCase().includes('transaction') || text.toLowerCase().includes('history'))) {
-
-            if (el.tagName === 'A' || el.tagName === 'BUTTON' || el.tagName === 'LI') {
-              el.click();
-              return { clicked: true, element: el.tagName, text: text };
-            }
-
-            const clickableParent = el.closest('a, button, li, [onclick]');
-            if (clickableParent) {
-              clickableParent.click();
-              return { clicked: true, element: clickableParent.tagName, text: text };
-            }
-          }
-
-          // Also look for exact match "Sales/Transactions"
-          if (text === 'Sales/Transactions' || text === 'Sales / Transactions') {
-            if (el.tagName === 'A' || el.tagName === 'BUTTON' || el.tagName === 'LI') {
-              el.click();
-              return { clicked: true, element: el.tagName, text: text };
-            }
-
-            const clickableParent = el.closest('a, button, li, [onclick]');
-            if (clickableParent) {
-              clickableParent.click();
-              return { clicked: true, element: clickableParent.tagName, text: text };
-            }
-          }
+      const salesExpandResult = await this.page.evaluate(() => {
+        // Find the Sales/Transactions section
+        const salesSection = document.querySelector('#SalesDetails');
+        if (!salesSection) {
+          return { success: false, error: 'SalesDetails section not found' };
         }
 
-        return { clicked: false };
+        // Find the expand link
+        const expandLink = salesSection.querySelector('#SalesHyperLink') ||
+                          salesSection.querySelector('a.showHideLink');
+
+        if (!expandLink) {
+          return { success: false, error: 'Expand link not found' };
+        }
+
+        // Prevent the default navigation by setting href to javascript:void(0)
+        const originalHref = expandLink.href;
+        expandLink.href = 'javascript:void(0)';
+
+        // Now click it
+        expandLink.click();
+
+        return {
+          success: true,
+          method: 'prevented-default',
+          originalHref: originalHref,
+          linkId: expandLink.id
+        };
       });
 
-      if (!salesTabClicked || !salesTabClicked.clicked) {
-        throw new Error('Could not find "Sales/Transactions" tab');
+      if (!salesExpandResult || !salesExpandResult.success) {
+        throw new Error(`Could not expand Sales/Transactions: ${salesExpandResult?.error || 'unknown error'}`);
       }
 
-      this.log(`✅ Clicked on "Sales/Transactions" tab: ${salesTabClicked.text}`);
+      this.log(`✅ Clicked Sales/Transactions expand button (prevented navigation from ${salesExpandResult.originalHref})`);
 
-      // Wait for tab content to load
-      await this.randomWait(5000, 7000);
+      // Wait for AJAX content to load into the page
+      this.log(`⏳ Waiting for Sales/Transactions content to load via AJAX...`);
+
+      // Wait for the content to be loaded - the overFlowDiv should be populated
+      await this.randomWait(3000, 5000);
+
+      // Check if we got redirected (shouldn't happen with expand button)
+      const currentUrl = this.page.url();
+      if (currentUrl.includes('InvalidStrap') || currentUrl.includes('Error')) {
+        this.log(`❌ ERROR: Redirected to error page: ${currentUrl}`);
+        throw new Error('Page redirected to error page after clicking expand button');
+      }
+
+      this.log(`📍 Still on correct page: ${currentUrl}`);
 
       // Scroll to ensure content is loaded
       await this.page.evaluate(() => {

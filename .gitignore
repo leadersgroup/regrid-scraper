@@ -6,3 +6,15 @@ node_modules/
 *.log
 dist/
 build/
+*.pdf
+*.png
+*.jpg
+*.jpeg
+*.gif
+*.svg
+*.ico
+*.zip
+*.tar.gz
+*.exe
+*.dll
+
