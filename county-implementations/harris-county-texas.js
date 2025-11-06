@@ -876,6 +876,39 @@ class HarrisCountyTexasScraper extends DeedScraper {
       const pdfUrl = pdfPage.url();
       this.log(`📍 PDF URL: ${pdfUrl}`);
 
+      // Check if we're on a login page
+      if (pdfUrl.includes('Login.aspx') || pdfUrl.includes('login')) {
+        this.log(`⚠️  PDF requires authentication - redirected to login page`);
+        this.log(`📝 Harris County Clerk requires a free registered account to download PDFs`);
+        this.log(`🔗 Create account at: https://www.cclerk.hctx.net/Applications/WebSearch/Registration/NewUser.aspx`);
+
+        // Close the new tab if it was opened
+        if (pdfPage !== this.page) {
+          await pdfPage.close();
+        }
+
+        // Extract the document URL from the ReturnUrl parameter
+        const urlObj = new URL(pdfUrl);
+        const returnUrl = urlObj.searchParams.get('ReturnUrl');
+        const documentId = urlObj.searchParams.get('ID');
+
+        return {
+          success: true,
+          requiresAuth: true,
+          filmCode: filmCode,
+          message: 'PDF requires authentication. Harris County Clerk requires a free registered account.',
+          loginUrl: pdfUrl,
+          documentUrl: returnUrl ? `https://www.cclerk.hctx.net${returnUrl}` : null,
+          documentId: documentId,
+          registrationUrl: 'https://www.cclerk.hctx.net/Applications/WebSearch/Registration/NewUser.aspx',
+          instructions: [
+            '1. Create a free account at Harris County Clerk website',
+            '2. Log in to your account',
+            '3. Use the film code to search and download the PDF'
+          ]
+        };
+      }
+
       // Download the PDF
       this.log('📥 Downloading PDF...');
 
