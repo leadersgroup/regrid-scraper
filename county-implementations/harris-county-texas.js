@@ -927,27 +927,114 @@ class HarrisCountyTexasScraper extends DeedScraper {
             const pdfViewerUrl = pdfPage.url();
             this.log(`📄 PDF Viewer URL: ${pdfViewerUrl}`);
 
-            // Close the PDF viewer tab
-            if (pdfPage !== this.page) {
-              await pdfPage.close();
-            }
+            // Download PDF using external HTTPS request with session cookies
+            // This is necessary because Chrome's PDF viewer intercepts the response
+            // before Puppeteer can capture it
+            this.log(`📥 Downloading PDF using authenticated session...`);
 
-            this.log(`✅ PDF is ready to view at the URL above`);
+            try {
+              const https = require('https');
+              const {URL} = require('url');
 
-            // Return success with PDF viewer URL
-            // Note: Harris County Clerk uses Chrome's PDF viewer which makes programmatic download complex
-            // The PDF viewer URL is provided for manual access if needed
-            return {
-              success: true,
-              filmCode: filmCode,
-              pdfViewerUrl: pdfViewerUrl,
-              message: 'Successfully logged in and accessed PDF viewer. PDF available at viewer URL.',
-              timestamp: new Date().toISOString(),
-              instructions: [
-                'The PDF is accessible at the provided pdfViewerUrl',
-                'You are now logged in and can download the PDF manually if needed',
-                `Film code: ${filmCode}`
-              ]
+              // Get cookies from the logged-in session
+              const cookies = await pdfPage.cookies();
+              const cookieHeader = cookies.map(c => `${c.name}=${c.value}`).join('; ');
+
+              const pdfUrl = new URL(pdfViewerUrl);
+
+              const options = {
+                hostname: pdfUrl.hostname,
+                port: 443,
+                path: pdfUrl.pathname + pdfUrl.search,
+                method: 'POST',  // Use POST as server expects it
+                headers: {
+                  'Cookie': cookieHeader,
+                  'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36',
+                  'Accept': 'application/pdf,*/*',
+                  'Referer': pdfViewerUrl,
+                  'Cache-Control': 'no-cache'
+                }
+              };
+
+              const pdfBuffer = await new Promise((resolve, reject) => {
+                const chunks = [];
+
+                const req = https.request(options, (res) => {
+                  this.log(`   Response status: ${res.statusCode}`);
+                  this.log(`   Content-Type: ${res.headers['content-type']}`);
+                  this.log(`   Content-Length: ${res.headers['content-length']}`);
+
+                  res.on('data', (chunk) => {
+                    chunks.push(chunk);
+                  });
+
+                  res.on('end', () => {
+                    const buffer = Buffer.concat(chunks);
+                    this.log(`   Downloaded: ${buffer.length} bytes`);
+                    resolve(buffer);
+                  });
+                });
+
+                req.on('error', (e) => {
+                  reject(new Error(`HTTPS request failed: ${e.message}`));
+                });
+
+                req.end();
+              });
+
+              // Verify it's a PDF
+              const isPDF = pdfBuffer.slice(0, 4).toString() === '%PDF';
+              this.log(`🔍 PDF validation: isPDF=${isPDF}, size=${pdfBuffer.length} bytes`);
+
+              if (!isPDF) {
+                this.log(`⚠️ Direct download returned HTML instead of PDF, trying alternative method...`);
+                // Fall back to returning the PDF viewer URL
+                throw new Error('Server returned HTML instead of PDF');
+              }
+
+              if (pdfBuffer.length < 10000) {
+                this.log(`⚠️ PDF is suspiciously small (${pdfBuffer.length} bytes), may be incomplete`);
+              }
+
+              // Close the PDF viewer tab
+              if (pdfPage !== this.page) {
+                await pdfPage.close();
+              }
+
+              this.log(`✅ PDF downloaded successfully`);
+
+              return {
+                success: true,
+                filmCode: filmCode,
+                pdfData: pdfBuffer,
+                fileSize: pdfBuffer.length,
+                message: 'PDF downloaded successfully after authentication',
+                timestamp: new Date().toISOString()
+              };
+
+            } catch (downloadError) {
+              this.log(`❌ PDF download failed: ${downloadError.message}`);
+              this.log(`📝 Returning PDF viewer URL for manual access`);
+
+              // Close the PDF viewer tab
+              if (pdfPage !== this.page) {
+                await pdfPage.close();
+              }
+
+              // Return PDF viewer URL as fallback
+              return {
+                success: true,
+                requiresManualDownload: true,
+                filmCode: filmCode,
+                pdfViewerUrl: pdfViewerUrl,
+                message: 'Successfully logged in. PDF viewer URL provided (automatic download not available).',
+                timestamp: new Date().toISOString(),
+                instructions: [
+                  'The PDF is accessible at the provided pdfViewerUrl',
+                  'You are now logged in and can download the PDF manually if needed',
+                  `Film code: ${filmCode}`
+                ]
+              };
             }
 
           } catch (loginError) {

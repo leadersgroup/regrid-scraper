@@ -1,0 +1,101 @@
+{
+  "requests": [
+    {
+      "requestId": "182604B6759423EA9A2229BD07E2FDC6",
+      "url": "https://www.cclerk.hctx.net/Applications/WebSearch/Registration/Login.aspx?ReturnUrl=%2fApplications%2fWebSearch%2fEComm%2fViewEdocs.aspx%3fID%3dihpahpMbvcoWkF5RdbzIVbnGsKyLOH68LuAlCEap0%2bxkX6A0t77OYOFv1GuxNsMNCC7du%2bGPp5le4Q88cSiqedXWXRVWkR%2fC%2blqIOwOiTgqUw6%2fm%2fiVt87sdHO8qmpbCmiBl2N9x2%2bESb6hIpHQAOg%3d%3d&ID=ihpahpMbvcoWkF5RdbzIVbnGsKyLOH68LuAlCEap0+xkX6A0t77OYOFv1GuxNsMNCC7du+GPp5le4Q88cSiqedXWXRVWkR/C+lqIOwOiTgqUw6/m/iVt87sdHO8qmpbCmiBl2N9x2+ESb6hIpHQAOg==",
+      "method": "POST",
+      "type": "Document"
+    },
+    {
+      "requestId": "182604B6759423EA9A2229BD07E2FDC6",
+      "url": "https://www.cclerk.hctx.net/Applications/WebSearch/EComm/ViewEdocs.aspx?ID=ihpahpMbvcoWkF5RdbzIVbnGsKyLOH68LuAlCEap0+xkX6A0t77OYOFv1GuxNsMNCC7du+GPp5le4Q88cSiqedXWXRVWkR/C+lqIOwOiTgqUw6/m/iVt87sdHO8qmpbCmiBl2N9x2+ESb6hIpHQAOg==",
+      "method": "GET",
+      "type": "Document"
+    },
+    {
+      "requestId": "7154.175",
+      "url": "https://www.google-analytics.com/g/collect?v=2&tid=G-LZ5RXL6TEB&gtm=45je5b50v878303640za200zd878303640&_p=1762470526284&gcd=13l3l3l3l1l1&npa=0&dma=0&cid=1367583799.1762470515&ul=en-us&sr=1920x1080&uaa=x86&uab=64&uafvl=Not%253DA%253FBrand%3B24.0.0.0%7CChromium%3B140.0.7339.82&uamb=0&uam=&uap=Mac%20OS%20X&uapv=10_15_7&uaw=0&are=1&frm=0&pscdl=&_eu=AAAAAAQ&_s=3&tag_exp=101509157~103116026~103200004~103233427~104527906~104528501~104684208~104684211~104948813~115480709~115583767~115938466~115938468~116217636~116217638&sid=1762470515&sct=1&seg=1&dl=https%3A%2F%2Fwww.cclerk.hctx.net%2FApplications%2FWebSearch%2FRegistration%2FLogin.aspx%3FReturnUrl%3D%252fApplications%252fWebSearch%252fEComm%252fViewEdocs.aspx%253fID%253dihpahpMbvcoWkF5RdbzIVbnGsKyLOH68LuAlCEap0%252bxkX6A0t77OYOFv1GuxNsMNCC7du%252bGPp5le4Q88cSiqedXWXRVWkR%252fC%252blqIOwOiTgqUw6%252fm%252fiVt87sdHO8qmpbCmiBl2N9x2%252bESb6hIpHQAOg%253d%253d%26ID%3DihpahpMbvcoWkF5RdbzIVbnGsKyLOH68LuAlCEap0%2BxkX6A0t77OYOFv1GuxNsMNCC7du%2BGPp5le4Q88cSiqedXWXRVWkR%2FC%2BlqIOwOiTgqUw6%2Fm%2FiVt87sdHO8qmpbCmiBl2N9x2%2BESb6hIpHQAOg%3D%3D&dt=Web%20Inquiry&en=user_engagement&_et=5457&tfd=5680",
+      "method": "POST",
+      "type": "Fetch"
+    },
+    {
+      "requestId": "7154.177",
+      "url": "https://www.cclerk.hctx.net/Applications/WebSearch/Scripts/jquery-3.7.1.min.js?ts=638980457317343404",
+      "method": "GET",
+      "type": "Script"
+    },
+    {
+      "requestId": "EC6EAF37899D2411C1E5E70FD73FA1B8",
+      "url": "https://www.cclerk.hctx.net/Applications/WebSearch/EComm/ViewEdocs.aspx?ID=ihpahpMbvcoWkF5RdbzIVbnGsKyLOH68LuAlCEap0+xkX6A0t77OYOFv1GuxNsMNCC7du+GPp5le4Q88cSiqedXWXRVWkR%2fC+lqIOwOiTgqUw6%2fm%2fiVt87sdHO8qmpbCmiBl2N9x2+ESb6hIpHQAOg%3d%3d",
+      "method": "POST",
+      "type": "Document"
+    },
+    {
+      "requestId": "E1AF3C1BB67730F7461DE86125701453",
+      "url": "chrome-extension://mhjfbmdgcfjbbpaeojofohoefgiehjai/index.html",
+      "method": "GET",
+      "type": "Document"
+    }
+  ],
+  "responses": [
+    {
+      "requestId": "182604B6759423EA9A2229BD07E2FDC6",
+      "url": "https://www.cclerk.hctx.net/Applications/WebSearch/EComm/ViewEdocs.aspx?ID=ihpahpMbvcoWkF5RdbzIVbnGsKyLOH68LuAlCEap0+xkX6A0t77OYOFv1GuxNsMNCC7du+GPp5le4Q88cSiqedXWXRVWkR/C+lqIOwOiTgqUw6/m/iVt87sdHO8qmpbCmiBl2N9x2+ESb6hIpHQAOg==",
+      "status": 200,
+      "mimeType": "text/html",
+      "headers": {
+        "Cache-Control": "private",
+        "Content-Length": "1478",
+        "Content-Type": "text/html; charset=utf-8",
+        "Date": "Thu, 06 Nov 2025 23:08:51 GMT",
+        "Server": "Microsoft-IIS/10.0",
+        "X-AspNet-Version": "4.0.30319",
+        "X-Powered-By": "ASP.NET"
+      }
+    },
+    {
+      "requestId": "7154.177",
+      "url": "https://www.cclerk.hctx.net/Applications/WebSearch/Scripts/jquery-3.7.1.min.js?ts=638980457317343404",
+      "status": 200,
+      "mimeType": "application/javascript",
+      "headers": {
+        "ETag": "\"305b16999dedda1:0\"",
+        "Accept-Ranges": "bytes",
+        "Content-Length": "87533",
+        "Date": "Thu, 06 Nov 2025 23:08:51 GMT",
+        "Content-Type": "application/javascript",
+        "Last-Modified": "Tue, 13 Aug 2024 16:26:49 GMT",
+        "Server": "Microsoft-IIS/10.0",
+        "X-Powered-By": "ASP.NET"
+      }
+    },
+    {
+      "requestId": "EC6EAF37899D2411C1E5E70FD73FA1B8",
+      "url": "https://www.cclerk.hctx.net/Applications/WebSearch/EComm/ViewEdocs.aspx?ID=ihpahpMbvcoWkF5RdbzIVbnGsKyLOH68LuAlCEap0+xkX6A0t77OYOFv1GuxNsMNCC7du+GPp5le4Q88cSiqedXWXRVWkR%2fC+lqIOwOiTgqUw6%2fm%2fiVt87sdHO8qmpbCmiBl2N9x2+ESb6hIpHQAOg%3d%3d",
+      "status": 200,
+      "mimeType": "application/pdf",
+      "headers": {
+        "Cache-Control": "private",
+        "Content-Length": "2329540",
+        "Content-Type": "Application/pdf; charset=utf-8",
+        "Date": "Thu, 06 Nov 2025 23:08:52 GMT",
+        "Server": "Microsoft-IIS/10.0",
+        "X-AspNet-Version": "4.0.30319",
+        "X-Powered-By": "ASP.NET"
+      }
+    },
+    {
+      "requestId": "E1AF3C1BB67730F7461DE86125701453",
+      "url": "chrome-extension://mhjfbmdgcfjbbpaeojofohoefgiehjai/index.html",
+      "status": 200,
+      "mimeType": "text/html",
+      "headers": {
+        "Access-Control-Allow-Origin": "*",
+        "Content-Length": "493",
+        "Content-Security-Policy": "script-src 'self' 'wasm-eval' blob: filesystem: chrome://resources chrome://webui-test; object-src * blob: externalfile: file: filesystem: data:;",
+        "Content-Type": "text/html",
+        "Cross-Origin-Resource-Policy": "cross-origin"
+      }
+    }
+  ]
+}
