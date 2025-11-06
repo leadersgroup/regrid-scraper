@@ -338,95 +338,41 @@ class ShelbyCountyTennesseeScraper extends DeedScraper {
         await this.page.keyboard.press('Enter');
       }
 
-      // Wait for search results
-      this.log(`⏳ Waiting for search results...`);
+      // Wait for search results / property details page to load
+      this.log(`⏳ Waiting for property details page to load...`);
       await this.randomWait(5000, 7000);
 
-      // Step 4: Check number of results and click appropriate "view" button
-      this.log(`🔍 Step 4: Analyzing search results...`);
+      // Check if we're already on the property details page
+      const currentUrl = this.page.url();
+      this.log(`📍 Current URL: ${currentUrl}`);
 
-      const viewInfo = await this.page.evaluate((originalAddress) => {
-        // Remove city, state, zip from original for comparison
-        const addressForMatch = originalAddress.split(',')[0].trim().toLowerCase();
-
-        // Find all "view" buttons or links, but exclude ones that contain "review" or "assessor"
-        const allElements = Array.from(document.querySelectorAll('button, a, input[type="button"], input[type="submit"]'));
-        const viewButtons = allElements.filter(el => {
-          const text = (el.textContent || el.value || '').toLowerCase().trim();
-          const isView = text === 'view' || (text.includes('view') && !text.includes('review') && !text.includes('assessor'));
-          return isView;
-        });
-
-        console.log(`Found ${viewButtons.length} view buttons`);
-
-        if (viewButtons.length === 0) {
-          return { found: false, error: 'No view buttons found' };
-        }
-
-        if (viewButtons.length === 1) {
-          // Only one result
-          return { found: true, reason: 'single_result', index: 0 };
-        }
-
-        // Multiple results - need to match address
-        console.log('Multiple results found, attempting to match address');
-
-        // Look for property location text near each view button
-        for (let i = 0; i < viewButtons.length; i++) {
-          const btn = viewButtons[i];
-          // Get parent row/container
-          let container = btn.closest('tr') || btn.closest('div') || btn.parentElement;
-
-          if (container) {
-            const containerText = container.textContent.toLowerCase();
-            console.log(`Container text: ${containerText.substring(0, 100)}`);
-
-            // Check if this container's address matches our target
-            if (containerText.includes(addressForMatch)) {
-              console.log(`Found matching address`);
-              return { found: true, reason: 'matched_address', index: i, matched: containerText.substring(0, 100) };
-            }
-          }
-        }
-
-        // If no exact match, use the first one
-        console.log('No exact match, using first result');
-        return { found: true, reason: 'first_result', index: 0, warning: 'No exact address match' };
-
-      }, this.currentAddress);
-
-      if (!viewInfo.found) {
-        this.log(`❌ Could not find view button: ${viewInfo.error}`);
+      // The search directly navigates to propertyDetails page, no need to click "view"
+      if (!currentUrl.includes('propertyDetails')) {
+        this.log(`❌ Not on property details page, current URL: ${currentUrl}`);
         return {
           success: false,
-          error: 'No view button found in search results'
+          error: 'Search did not navigate to property details page'
         };
       }
 
-      this.log(`✅ Found view button (${viewInfo.reason})`);
-      if (viewInfo.warning) {
-        this.log(`⚠️  ${viewInfo.warning}`);
-      }
+      this.log(`✅ Successfully on property details page`);
 
-      // Click view button and wait for navigation
-      this.log(`🖱️  Clicking view button...`);
-      await Promise.all([
-        this.page.waitForNavigation({ waitUntil: 'networkidle0', timeout: this.timeout }),
-        this.page.evaluate((index) => {
-          const allElements = Array.from(document.querySelectorAll('button, a, input[type="button"], input[type="submit"]'));
-          const viewButtons = allElements.filter(el => {
-            const text = (el.textContent || el.value || '').toLowerCase().trim();
-            const isView = text === 'view' || (text.includes('view') && !text.includes('review') && !text.includes('assessor'));
-            return isView;
-          });
-          if (viewButtons[index]) {
-            viewButtons[index].click();
-          }
-        }, viewInfo.index)
-      ]);
+      // Debug: capture page content to see what we're working with
+      const pageInfo = await this.page.evaluate(() => {
+        const headings = Array.from(document.querySelectorAll('h1, h2, h3, h4, h5, h6, div[class*="header"], div[class*="title"]'))
+          .map(el => ({ tag: el.tagName, text: el.textContent.trim().substring(0, 100), class: el.className }))
+          .filter(h => h.text.length > 0)
+          .slice(0, 20);
 
-      await this.randomWait(2000, 3000);
-      this.log(`✅ Successfully navigated to property details`);
+        return {
+          url: window.location.href,
+          title: document.title,
+          headings
+        };
+      });
+
+      this.log(`📄 Page title: ${pageInfo.title}`);
+      this.log(`📍 Page headings: ${JSON.stringify(pageInfo.headings, null, 2)}`);
 
       return {
         success: true,
