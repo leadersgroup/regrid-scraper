@@ -221,6 +221,28 @@ class LeeCountyFloridaScraper extends DeedScraper {
 
       await this.randomWait(3000, 5000);
 
+      // Check for and dismiss any popups or overlays
+      const popupDismissed = await this.page.evaluate(() => {
+        // Look for close buttons on modals/dialogs
+        const closeButtons = Array.from(document.querySelectorAll('button, a, [class*="close"], [class*="dismiss"]'));
+        for (const btn of closeButtons) {
+          const text = (btn.textContent || btn.getAttribute('aria-label') || '').toLowerCase();
+          if (text.includes('close') || text.includes('dismiss') || text.includes('×')) {
+            const style = window.getComputedStyle(btn);
+            if (style.display !== 'none' && style.visibility !== 'hidden') {
+              btn.click();
+              return true;
+            }
+          }
+        }
+        return false;
+      });
+
+      if (popupDismissed) {
+        this.log(`✅ Dismissed popup`);
+        await this.randomWait(1000, 2000);
+      }
+
       // Extract just the street address (remove city, state, zip)
       const fullAddress = this.currentAddress || '';
       let streetAddress = fullAddress.split(',')[0].trim();
@@ -245,11 +267,27 @@ class LeeCountyFloridaScraper extends DeedScraper {
           this.log(`✅ Found street address input: ${selector}`);
           break;
         } catch (e) {
+          this.log(`⚠️  Selector not found: ${selector}`);
           // Try next selector
         }
       }
 
       if (!addressInput) {
+        // Log all input fields on the page for debugging
+        const allInputs = await this.page.evaluate(() => {
+          const inputs = Array.from(document.querySelectorAll('input[type="text"]'));
+          return inputs.map(input => ({
+            id: input.id,
+            name: input.name,
+            placeholder: input.placeholder,
+            className: input.className,
+            visible: window.getComputedStyle(input).display !== 'none'
+          }));
+        });
+
+        this.log(`⚠️  All text inputs found on page:`);
+        this.log(JSON.stringify(allInputs, null, 2));
+
         throw new Error('Could not find street address input field');
       }
 
