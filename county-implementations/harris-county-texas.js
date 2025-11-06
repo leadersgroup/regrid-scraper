@@ -417,18 +417,30 @@ class HarrisCountyTexasScraper extends DeedScraper {
       this.log(`⏳ Waiting for search results to load...`);
       await this.randomWait(5000, 7000);
 
-      // Wait for results - look for account number links (inside iframe)
+      // Wait for results - specifically wait for table with data rows (inside iframe)
       try {
         await searchFrame.waitForFunction(() => {
-          const text = document.body.innerText;
-          // HCAD account numbers are typically 13 digits
-          return /\d{13}/.test(text) || text.includes('Account') || text.includes('Property Details');
+          // Look for table rows with data (not just headers)
+          const rows = document.querySelectorAll('tbody tr');
+          if (rows.length > 0) {
+            // Check if any row has a 13-digit account number
+            for (const row of rows) {
+              const text = row.textContent || '';
+              if (/\d{13}/.test(text)) {
+                return true;
+              }
+            }
+          }
+          return false;
         }, { timeout: 30000 });
 
         this.log(`✅ Search results loaded`);
       } catch (waitError) {
-        this.log(`⚠️ Timeout waiting for results, checking page content anyway...`);
+        this.log(`⚠️ Timeout waiting for data rows, checking page content anyway...`);
       }
+
+      // Additional wait for table to fully render
+      await this.randomWait(2000, 3000);
 
       // Click on first search result (account number link) inside iframe
       const accountClicked = await searchFrame.evaluate(() => {
