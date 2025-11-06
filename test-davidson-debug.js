@@ -45,11 +45,23 @@ async function debugDavidsonSearch() {
     if (searchInput) {
       console.log('✅ Found search input\n');
 
-      // Type the full address
-      const address = '6241 Del Sol Dr, Whites Creek, TN 37189';
-      console.log(`⌨️  Typing address: ${address}`);
-      await searchInput.type(address, { delay: 100 });
-      await new Promise(resolve => setTimeout(resolve, 2000));
+      // Try different address formats
+      const addressVariations = [
+        '6241 Del Sol Dr',
+        '6241 DEL SOL DR',
+        'Del Sol',
+        '6241'
+      ];
+
+      for (const testAddress of addressVariations) {
+        console.log(`\n⌨️  Trying address format: ${testAddress}`);
+
+        // Clear the input first
+        await searchInput.click({ clickCount: 3 });
+        await scraper.page.keyboard.press('Backspace');
+
+        await searchInput.type(testAddress, { delay: 50 });
+        await new Promise(resolve => setTimeout(resolve, 1000));
 
       // Take screenshot after typing
       await scraper.page.screenshot({

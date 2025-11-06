@@ -277,155 +277,125 @@ class DavidsonCountyTennesseeScraper extends DeedScraper {
       this.log(`✅ Page loaded`);
       await this.randomWait(3000, 5000);
 
-      // Step 1: Click on 'owner' box/dropdown to open it
-      this.log(`🔍 Step 1: Looking for 'owner' dropdown...`);
+      // Step 1: Select "Address" from the dropdown
+      this.log(`🔍 Step 1: Looking for search type dropdown...`);
 
-      const ownerDropdownSelectors = [
-        'select',
-        'select[name*="owner"]',
-        'select[id*="owner"]',
-        'select[name*="searchType"]',
-        'select[id*="searchType"]'
-      ];
+      const dropdownSelected = await this.page.evaluate(() => {
+        // Look for the dropdown with id="inputGroupSelect01" or name="SelectedSearch"
+        const select = document.querySelector('#inputGroupSelect01') ||
+                      document.querySelector('select[name="SelectedSearch"]') ||
+                      document.querySelector('select');
 
-      let ownerDropdownFound = false;
-      for (const selector of ownerDropdownSelectors) {
-        try {
-          await this.page.waitForSelector(selector, { timeout: 3000, visible: true });
-          this.log(`✅ Found dropdown with selector: ${selector}`);
-
-          // Try to select "Address" option
-          const addressSelected = await this.page.evaluate((sel) => {
-            const select = document.querySelector(sel);
-            if (!select) return false;
-
-            const options = Array.from(select.options);
-            for (const option of options) {
-              const text = (option.text || option.value || '').toLowerCase();
-              if (text.includes('address') || text === 'address') {
-                select.value = option.value;
-                select.dispatchEvent(new Event('change', { bubbles: true }));
-                return { success: true, value: option.value, text: option.text };
-              }
-            }
-            return false;
-          }, selector);
-
-          if (addressSelected && addressSelected.success) {
-            this.log(`✅ Selected "Address" option: ${addressSelected.text}`);
-            ownerDropdownFound = true;
-            break;
-          }
-        } catch (e) {
-          // Try next selector
+        if (!select) {
+          return { success: false, error: 'No dropdown found' };
         }
-      }
 
-      if (ownerDropdownFound) {
+        // Find the "Address" option (value="2")
+        const options = Array.from(select.options);
+        const addressOption = options.find(opt =>
+          opt.text?.toLowerCase() === 'address' || opt.value === '2'
+        );
+
+        if (!addressOption) {
+          return { success: false, error: 'No Address option found', options: options.map(o => ({ value: o.value, text: o.text })) };
+        }
+
+        // Select it
+        select.value = addressOption.value;
+        select.dispatchEvent(new Event('change', { bubbles: true }));
+
+        return { success: true, value: addressOption.value, text: addressOption.text };
+      });
+
+      if (dropdownSelected.success) {
+        this.log(`✅ Selected "Address" option (value: ${dropdownSelected.value})`);
+        // Wait for form fields to update after dropdown selection
         await this.randomWait(2000, 3000);
       } else {
-        this.log(`⚠️  Owner dropdown not found, continuing anyway...`);
+        this.log(`⚠️  Could not select Address option: ${dropdownSelected.error}`);
+        if (dropdownSelected.options) {
+          this.log(`   Available options: ${JSON.stringify(dropdownSelected.options)}`);
+        }
+        return {
+          success: false,
+          error: 'Could not select Address search mode'
+        };
       }
 
       // Step 2: Parse address into number and street name
       const { number, street } = this.parseAddress(this.currentAddress);
+      this.log(`🔍 Step 2: Parsed address - Number: ${number}, Street: ${street}`);
 
-      // Step 3: Find and fill number field
-      this.log(`🔍 Step 2: Looking for address number input field...`);
+      // Step 3: Find and fill the address number field (first field)
+      this.log(`🔍 Step 3: Looking for address number field...`);
 
-      const numberInputSelectors = [
-        'input[name*="number"]',
-        'input[id*="number"]',
-        'input[placeholder*="number"]',
-        'input[type="text"]'
-      ];
+      const numberEntered = await this.page.evaluate((num) => {
+        // After selecting "Address", there should be multiple input fields
+        const inputs = Array.from(document.querySelectorAll('input[type="text"]'));
 
-      let numberInputFound = false;
-      for (const selector of numberInputSelectors) {
-        try {
-          const inputs = await this.page.$$(selector);
-          if (inputs.length > 0) {
-            this.log(`✅ Found number input: ${selector}`);
+        // Look for the first visible text input
+        const numberInput = inputs.find(input => {
+          const isVisible = input.offsetParent !== null;
+          return isVisible;
+        });
 
-            await this.page.evaluate((sel, value) => {
-              const inputs = Array.from(document.querySelectorAll(sel));
-              // Use the first text input or one with 'number' in name/id
-              for (const input of inputs) {
-                const name = (input.name || input.id || '').toLowerCase();
-                if (name.includes('number') || inputs.length === 1) {
-                  input.value = value;
-                  input.dispatchEvent(new Event('input', { bubbles: true }));
-                  input.dispatchEvent(new Event('change', { bubbles: true }));
-                  return true;
-                }
-              }
-              // Fallback: use first input
-              if (inputs[0]) {
-                inputs[0].value = value;
-                inputs[0].dispatchEvent(new Event('input', { bubbles: true }));
-                inputs[0].dispatchEvent(new Event('change', { bubbles: true }));
-                return true;
-              }
-              return false;
-            }, selector, number);
-
-            this.log(`✅ Entered address number: ${number}`);
-            numberInputFound = true;
-            break;
-          }
-        } catch (e) {
-          // Try next selector
+        if (!numberInput) {
+          return { success: false, error: 'No visible text input found for number' };
         }
+
+        numberInput.value = num;
+        numberInput.dispatchEvent(new Event('input', { bubbles: true }));
+        numberInput.dispatchEvent(new Event('change', { bubbles: true }));
+
+        return { success: true };
+      }, number);
+
+      if (!numberEntered.success) {
+        this.log(`❌ Could not enter number: ${numberEntered.error}`);
+        return {
+          success: false,
+          error: 'Could not enter address number'
+        };
       }
 
-      await this.randomWait(1000, 2000);
+      this.log(`✅ Entered number: ${number}`);
+      await this.randomWait(1000, 1500);
 
-      // Step 4: Find and fill street name field
-      this.log(`🔍 Step 3: Looking for street name input field...`);
+      // Step 4: Find and fill the street name field (second field)
+      this.log(`🔍 Step 4: Looking for street name field...`);
 
-      const streetInputSelectors = [
-        'input[name*="street"]',
-        'input[id*="street"]',
-        'input[placeholder*="street"]',
-        'input[type="text"]:not([name*="number"])'
-      ];
+      const streetEntered = await this.page.evaluate((streetName) => {
+        // Find all visible text inputs
+        const inputs = Array.from(document.querySelectorAll('input[type="text"]'));
+        const visibleInputs = inputs.filter(input => input.offsetParent !== null);
 
-      let streetInputFound = false;
-      for (const selector of streetInputSelectors) {
-        try {
-          const inputs = await this.page.$$(selector);
-          if (inputs.length > 0) {
-            this.log(`✅ Found street input: ${selector}`);
+        // The street field should be the second visible input
+        const streetInput = visibleInputs[1] || visibleInputs[0];
 
-            await this.page.evaluate((sel, value) => {
-              const inputs = Array.from(document.querySelectorAll(sel));
-              // Find the one that's not the number input and is visible
-              for (const input of inputs) {
-                const name = (input.name || input.id || '').toLowerCase();
-                const isVisible = input.offsetParent !== null;
-                if (isVisible && !name.includes('number')) {
-                  input.value = value;
-                  input.dispatchEvent(new Event('input', { bubbles: true }));
-                  input.dispatchEvent(new Event('change', { bubbles: true }));
-                  return true;
-                }
-              }
-              return false;
-            }, selector, street);
-
-            this.log(`✅ Entered street name: ${street}`);
-            streetInputFound = true;
-            break;
-          }
-        } catch (e) {
-          // Try next selector
+        if (!streetInput) {
+          return { success: false, error: 'No visible text input found for street' };
         }
+
+        streetInput.value = streetName;
+        streetInput.dispatchEvent(new Event('input', { bubbles: true }));
+        streetInput.dispatchEvent(new Event('change', { bubbles: true }));
+
+        return { success: true };
+      }, street);
+
+      if (!streetEntered.success) {
+        this.log(`❌ Could not enter street: ${streetEntered.error}`);
+        return {
+          success: false,
+          error: 'Could not enter street name'
+        };
       }
 
+      this.log(`✅ Entered street: ${street}`);
       await this.randomWait(1000, 2000);
 
-      // Step 5: Click search button
-      this.log(`🔍 Step 4: Looking for search button...`);
+      // Step 5: Click search button or press Enter
+      this.log(`🔍 Step 5: Looking for search button...`);
 
       const searchClicked = await this.page.evaluate(() => {
         const buttons = Array.from(document.querySelectorAll('button, input[type="submit"], input[type="button"]'));
@@ -451,7 +421,7 @@ class DavidsonCountyTennesseeScraper extends DeedScraper {
       await this.randomWait(5000, 7000);
 
       // Step 6: Find and click on parcel number (e.g., "049 14 0a 023.00")
-      this.log(`🔍 Step 5: Looking for parcel number link...`);
+      this.log(`🔍 Step 6: Looking for parcel number link...`);
 
       const parcelLinkClicked = await this.page.evaluate(() => {
         // Look for links or clickable elements with parcel-like patterns
