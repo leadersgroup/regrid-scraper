@@ -8,12 +8,11 @@ const LeeCountyFloridaScraper = require('./county-implementations/lee-county-flo
 async function testLeeCounty() {
   console.log('🧪 Testing Lee County FL deed scraper...\n');
 
-  // Example test address in Lee County (Fort Myers area)
-  // Replace with a real address for testing
-  const testAddress = '2201 SECOND ST, FORT MYERS, FL 33901';
+  // Example test address from user
+  const testAddress = '503 NORIDGE DR, Fort Myers, FL 33919';
 
   const scraper = new LeeCountyFloridaScraper({
-    headless: true, // Set to true for headless testing
+    headless: false, // Set to false to see the browser
     timeout: 120000,
     verbose: true
   });

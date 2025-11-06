@@ -201,15 +201,20 @@ class LeeCountyFloridaScraper extends DeedScraper {
 
   /**
    * Search Lee County Property Appraiser by address
-   * URL: https://www.leepa.org/search/propertysearch.aspx
+   * URL: https://www.leepa.org/Search/PropertySearch.aspx
+   * Workflow:
+   * 1. Find 'street address' search box
+   * 2. Type in address without city and state (e.g., "503 NORIDGE DR")
+   * 3. Click on search button
+   * 4. After match table is shown, find 'parcel details' button and click it
    */
   async searchAssessorSite(parcelId, ownerName) {
     this.log(`🔍 Searching Lee County FL Property Appraiser`);
-    this.log(`   Using address search`);
+    this.log(`   Using street address search (without city/state)`);
 
     try {
       // Navigate to property search page
-      await this.page.goto('https://www.leepa.org/search/propertysearch.aspx', {
+      await this.page.goto('https://www.leepa.org/Search/PropertySearch.aspx', {
         waitUntil: 'networkidle2',
         timeout: this.timeout
       });
@@ -222,8 +227,7 @@ class LeeCountyFloridaScraper extends DeedScraper {
 
       this.log(`🏠 Searching for address: ${streetAddress}`);
 
-      // Look for the address input field in the Property Information tab
-      // The site uses ASP.NET with Infragistics controls
+      // Look for the 'street address' search box
       const addressInputSelectors = [
         'input[id*="txtStreetAddress"]',
         'input[name*="txtStreetAddress"]',
@@ -238,7 +242,7 @@ class LeeCountyFloridaScraper extends DeedScraper {
         try {
           await this.page.waitForSelector(selector, { timeout: 3000, visible: true });
           addressInput = selector;
-          this.log(`✅ Found address input: ${selector}`);
+          this.log(`✅ Found street address input: ${selector}`);
           break;
         } catch (e) {
           // Try next selector
@@ -246,20 +250,29 @@ class LeeCountyFloridaScraper extends DeedScraper {
       }
 
       if (!addressInput) {
-        this.log(`⚠️ Could not find address input field, trying all text inputs`);
-        // Fallback: find all visible text inputs and use the first one
-        addressInput = 'input[type="text"]:visible';
+        throw new Error('Could not find street address input field');
       }
 
       // Enter street address
       await this.page.click(addressInput);
-      await this.randomWait(500, 1000);
-      await this.page.type(addressInput, streetAddress, { delay: 100 });
+      await this.randomWait(300, 500);
+
+      // Clear any existing text
+      await this.page.evaluate((selector) => {
+        const input = document.querySelector(selector);
+        if (input) input.value = '';
+      }, addressInput);
+
+      // Type address with human-like delays
+      for (const char of streetAddress) {
+        await this.page.keyboard.type(char);
+        await this.randomWait(50, 150);
+      }
 
       this.log(`✅ Entered address: ${streetAddress}`);
-      await this.randomWait(2000, 3000);
+      await this.randomWait(1000, 2000);
 
-      // Look for the search button - ASP.NET form with submit button
+      // Click on search button
       const searchButtonSelectors = [
         'input[type="submit"]',
         'button[type="submit"]',
@@ -285,25 +298,21 @@ class LeeCountyFloridaScraper extends DeedScraper {
         this.log(`🔍 Clicking search button...`);
         await this.page.click(searchButton);
       } else {
-        // Fallback: Press Enter key
-        this.log(`⚠️ Could not find search button, trying Enter key`);
-        await this.page.keyboard.press('Enter');
+        throw new Error('Could not find search button');
       }
 
-      // Wait for search results to load
-      this.log(`⏳ Waiting for search results to load (this may take 20-30+ seconds)...`);
+      // Wait for search results to load (match table)
+      this.log(`⏳ Waiting for search results to load...`);
       await this.randomWait(5000, 7000);
 
-      // Wait for results to appear - either results table or property detail page
+      // Wait for match table to appear
       try {
         await this.page.waitForFunction(() => {
           const text = document.body.innerText.toLowerCase();
-          // Check if we have results or navigated to a property page
-          return text.includes('folio') ||
-                 text.includes('parcel') ||
-                 text.includes('owner') ||
-                 text.includes('property information') ||
-                 text.includes('assessment');
+          return text.includes('match') ||
+                 text.includes('results') ||
+                 text.includes('folio') ||
+                 text.includes('parcel');
         }, { timeout: 30000 });
 
         this.log(`✅ Search results loaded`);
@@ -311,44 +320,58 @@ class LeeCountyFloridaScraper extends DeedScraper {
         this.log(`⚠️ Timeout waiting for results, checking page content anyway...`);
       }
 
-      await this.randomWait(3000, 5000);
+      await this.randomWait(2000, 3000);
 
-      // Check if we got results or went directly to property page
-      const pageStatus = await this.page.evaluate(() => {
-        const text = document.body.innerText.toLowerCase();
+      // Look for 'parcel details' button and click it
+      this.log(`🔍 Looking for "Parcel Details" button...`);
 
-        const hasNoResults = text.includes('no results') ||
-                            text.includes('not found') ||
-                            text.includes('no records found') ||
-                            text.includes('no properties found');
+      const parcelDetailsClicked = await this.page.evaluate(() => {
+        const allElements = Array.from(document.querySelectorAll('a, button, input[type="button"], input[type="submit"]'));
 
-        const hasPropertyData = text.includes('folio') &&
-                               (text.includes('owner') || text.includes('sale'));
+        for (const el of allElements) {
+          const text = (el.textContent || el.value || '').toLowerCase();
+          const title = (el.title || '').toLowerCase();
 
-        return {
-          hasNoResults,
-          hasPropertyData,
-          url: window.location.href
-        };
+          if (text.includes('parcel details') ||
+              title.includes('parcel details') ||
+              text.includes('view details') ||
+              text === 'details') {
+            el.click();
+            return { clicked: true, text: el.textContent || el.value || el.title };
+          }
+        }
+
+        // Also check for links with DisplayParcel.aspx
+        const links = Array.from(document.querySelectorAll('a[href*="DisplayParcel"]'));
+        if (links.length > 0) {
+          links[0].click();
+          return { clicked: true, text: 'DisplayParcel link' };
+        }
+
+        return { clicked: false };
       });
 
-      this.log(`🔍 Search result analysis:`);
-      this.log(`   Current URL: ${pageStatus.url}`);
-      this.log(`   Has property data: ${pageStatus.hasPropertyData}`);
-      this.log(`   Has "no results" message: ${pageStatus.hasNoResults}`);
+      if (!parcelDetailsClicked || !parcelDetailsClicked.clicked) {
+        throw new Error('Could not find "Parcel Details" button');
+      }
 
-      if (!pageStatus.hasNoResults && pageStatus.hasPropertyData) {
-        this.log(`✅ Property found on assessor website`);
+      this.log(`✅ Clicked on "Parcel Details" button: ${parcelDetailsClicked.text}`);
+
+      // Wait for parcel details page to load
+      await this.randomWait(5000, 7000);
+
+      // Verify we're on the parcel details page
+      const currentUrl = this.page.url();
+      this.log(`📍 Current URL: ${currentUrl}`);
+
+      if (currentUrl.includes('DisplayParcel.aspx')) {
+        this.log(`✅ Successfully navigated to parcel details page`);
         return {
           success: true,
-          message: 'Property found on assessor website'
+          message: 'Property found and navigated to parcel details'
         };
       } else {
-        this.log(`⚠️ Property not found or search failed`);
-        return {
-          success: false,
-          message: `Property not found (noResults: ${pageStatus.hasNoResults}, hasData: ${pageStatus.hasPropertyData})`
-        };
+        throw new Error('Did not navigate to parcel details page');
       }
 
     } catch (error) {
@@ -361,7 +384,10 @@ class LeeCountyFloridaScraper extends DeedScraper {
   }
 
   /**
-   * Navigate to Deed/Recording Information tab and extract instrument numbers
+   * Navigate to Sales/Transactions tab and extract Clerk file number
+   * Workflow:
+   * 1. Click on 'Sales/Transactions' tab to open it
+   * 2. Click on 1st entry in "Clerk file number" column (e.g., 2022000220622)
    */
   async extractTransactionRecords() {
     this.log('📋 Extracting transaction records from Property Appraiser...');
@@ -369,26 +395,38 @@ class LeeCountyFloridaScraper extends DeedScraper {
     try {
       await this.randomWait(2000, 3000);
 
-      // Look for Deed/Recording Information tab
-      this.log('🔍 Looking for Deed/Recording Information tab...');
+      // Click on 'Sales/Transactions' tab
+      this.log('🔍 Looking for "Sales/Transactions" tab...');
 
-      const deedTabClicked = await this.page.evaluate(() => {
+      const salesTabClicked = await this.page.evaluate(() => {
         const allElements = Array.from(document.querySelectorAll('a, button, div, span, li'));
 
         for (const el of allElements) {
-          const text = el.textContent?.trim() || '';
+          const text = (el.textContent || '').trim();
 
-          if (text === 'Deed/Recording Information' ||
-              text.includes('Deed') ||
-              text.includes('Recording Information') ||
-              text.includes('Sales History')) {
+          if (text.toLowerCase().includes('sales') &&
+              (text.toLowerCase().includes('transaction') || text.toLowerCase().includes('history'))) {
 
-            if (el.tagName === 'A' || el.tagName === 'BUTTON') {
+            if (el.tagName === 'A' || el.tagName === 'BUTTON' || el.tagName === 'LI') {
               el.click();
               return { clicked: true, element: el.tagName, text: text };
             }
 
-            const clickableParent = el.closest('a, button, [onclick]');
+            const clickableParent = el.closest('a, button, li, [onclick]');
+            if (clickableParent) {
+              clickableParent.click();
+              return { clicked: true, element: clickableParent.tagName, text: text };
+            }
+          }
+
+          // Also look for exact match "Sales/Transactions"
+          if (text === 'Sales/Transactions' || text === 'Sales / Transactions') {
+            if (el.tagName === 'A' || el.tagName === 'BUTTON' || el.tagName === 'LI') {
+              el.click();
+              return { clicked: true, element: el.tagName, text: text };
+            }
+
+            const clickableParent = el.closest('a, button, li, [onclick]');
             if (clickableParent) {
               clickableParent.click();
               return { clicked: true, element: clickableParent.tagName, text: text };
@@ -399,108 +437,78 @@ class LeeCountyFloridaScraper extends DeedScraper {
         return { clicked: false };
       });
 
-      this.log(`🔍 [INFO] Deed tab click result: ${JSON.stringify(deedTabClicked)}`);
-
-      if (deedTabClicked && deedTabClicked.clicked) {
-        this.log(`✅ Clicked on Deed/Recording Information tab (${deedTabClicked.text})`);
-        await this.randomWait(5000, 7000);
-
-        // Scroll to ensure content is loaded
-        await this.page.evaluate(() => {
-          window.scrollBy(0, 1000);
-        });
-        await this.randomWait(2000, 3000);
-      } else {
-        this.log(`ℹ️  No Deed tab found, checking current page for transaction data`);
+      if (!salesTabClicked || !salesTabClicked.clicked) {
+        throw new Error('Could not find "Sales/Transactions" tab');
       }
 
-      // Extract transaction information from the page
-      this.log('🔍 Extracting transaction data...');
+      this.log(`✅ Clicked on "Sales/Transactions" tab: ${salesTabClicked.text}`);
+
+      // Wait for tab content to load
+      await this.randomWait(5000, 7000);
+
+      // Scroll to ensure content is loaded
+      await this.page.evaluate(() => {
+        window.scrollBy(0, 500);
+      });
+      await this.randomWait(2000, 3000);
+
+      // Extract Clerk file numbers from the table
+      this.log('🔍 Extracting Clerk file numbers from Sales/Transactions table...');
 
       const transactions = await this.page.evaluate(() => {
         const results = [];
-        const allText = document.body.innerText;
-        const lines = allText.split('\n');
 
-        // Look for Instrument Number pattern (typically 8-12 digits)
-        // Also look for Book/Page patterns
-        for (const line of lines) {
-          // Instrument Number: YYYYXXXXXXXX format (year + sequence)
-          const instrumentMatch = line.match(/\b(20\d{10}|19\d{10}|\d{8,12})\b/);
-          if (instrumentMatch && line.toLowerCase().includes('instrument')) {
-            results.push({
-              instrumentNumber: instrumentMatch[1],
-              type: 'instrument',
-              source: 'Lee County Property Appraiser',
-              rawText: line.trim().substring(0, 200)
-            });
-          }
+        // Look for table with Clerk file number column
+        const tables = Array.from(document.querySelectorAll('table'));
 
-          // Book/Page format: Book XXXX Page XXXX
-          const bookPageMatch = line.match(/book\s+(\d+)\s+page\s+(\d+)/i);
-          if (bookPageMatch) {
-            const bookNum = bookPageMatch[1];
-            const pageNum = bookPageMatch[2];
+        for (const table of tables) {
+          const tableText = (table.innerText || table.textContent || '').toLowerCase();
 
-            // Avoid duplicates
-            const exists = results.some(r =>
-              r.type === 'book_page' && r.bookNumber === bookNum && r.pageNumber === pageNum
-            );
+          // Check if this table contains "clerk file" or similar
+          if (tableText.includes('clerk file') ||
+              tableText.includes('instrument') ||
+              tableText.includes('sale')) {
 
-            if (!exists && parseInt(bookNum) > 100) { // Filter out plat books
-              results.push({
-                bookNumber: bookNum,
-                pageNumber: pageNum,
-                type: 'book_page',
-                source: 'Lee County Property Appraiser',
-                rawText: line.trim().substring(0, 200)
-              });
-            }
-          }
-        }
+            // Find all rows
+            const rows = table.querySelectorAll('tr');
 
-        // Alternative: look in table cells for structured data
-        const tableCells = Array.from(document.querySelectorAll('td, th'));
-        for (const cell of tableCells) {
-          const text = cell.textContent?.trim() || '';
+            for (const row of rows) {
+              const cells = Array.from(row.querySelectorAll('td'));
 
-          // Look for instrument numbers in cells
-          if (/^\d{8,12}$/.test(text)) {
-            // Check if this looks like an instrument number (not already added)
-            const exists = results.some(r => r.instrumentNumber === text);
-            if (!exists) {
-              results.push({
-                instrumentNumber: text,
-                type: 'instrument',
-                source: 'Lee County Property Appraiser (table)',
-                rawText: text
-              });
-            }
-          }
+              // Look for clerk file numbers in cells (typically 13 digits like 2022000220622)
+              for (const cell of cells) {
+                const text = (cell.textContent || '').trim();
 
-          // Look for book/page in adjacent cells
-          if (text.toLowerCase().includes('book') || text.toLowerCase().includes('page')) {
-            const nextCell = cell.nextElementSibling;
-            if (nextCell) {
-              const nextText = nextCell.textContent?.trim() || '';
-              const bookMatch = text.match(/book.*?(\d+)/i);
-              const pageMatch = nextText.match(/(\d+)/);
+                // Clerk file number format: YYYYXXXXXXXXX (year + sequence)
+                // Example: 2022000220622 (13 digits starting with year)
+                const clerkFileMatch = text.match(/^(20\d{11})$/);
 
-              if (bookMatch && pageMatch) {
-                const bookNum = bookMatch[1];
-                const pageNum = pageMatch[1];
-                const exists = results.some(r =>
-                  r.type === 'book_page' && r.bookNumber === bookNum && r.pageNumber === pageNum
-                );
-
-                if (!exists && parseInt(bookNum) > 100) {
+                if (clerkFileMatch) {
                   results.push({
-                    bookNumber: bookNum,
-                    pageNumber: pageNum,
-                    type: 'book_page',
-                    source: 'Lee County Property Appraiser (table)',
-                    rawText: `${text} ${nextText}`.substring(0, 200)
+                    clerkFileNumber: clerkFileMatch[1],
+                    type: 'clerk_file',
+                    source: 'Lee County Property Appraiser - Sales/Transactions',
+                    rawText: text
                   });
+                }
+
+                // Also look for links with CFN parameter
+                const links = cell.querySelectorAll('a[href*="CFN"]');
+                for (const link of links) {
+                  const href = link.href || '';
+                  const cfnMatch = href.match(/cfn=(\d+)/i);
+
+                  if (cfnMatch) {
+                    const exists = results.some(r => r.clerkFileNumber === cfnMatch[1]);
+                    if (!exists) {
+                      results.push({
+                        clerkFileNumber: cfnMatch[1],
+                        type: 'clerk_file',
+                        source: 'Lee County Property Appraiser - Sales/Transactions (link)',
+                        rawText: link.textContent?.trim() || cfnMatch[1]
+                      });
+                    }
+                  }
                 }
               }
             }
@@ -510,29 +518,28 @@ class LeeCountyFloridaScraper extends DeedScraper {
         return results;
       });
 
-      this.log(`🔍 [INFO] Extracted ${transactions.length} transactions from page`);
-      this.log(`🔍 [INFO] Transactions: ${JSON.stringify(transactions.map(t => ({
-        type: t.type,
-        instrumentNumber: t.instrumentNumber,
-        book: t.bookNumber,
-        page: t.pageNumber
-      })))}`);
+      if (transactions.length > 0) {
+        this.log(`🔍 Extracted ${transactions.length} clerk file number(s)`);
+        transactions.forEach((t, i) => {
+          this.log(`   📄 Clerk File #${i+1}: ${t.clerkFileNumber}`);
+        });
 
-      this.log(`✅ Found ${transactions.length} transaction record(s)`);
-
-      // Log what we found
-      for (const trans of transactions) {
-        if (trans.type === 'instrument') {
-          this.log(`   Instrument Number: ${trans.instrumentNumber}`);
-        } else if (trans.type === 'book_page') {
-          this.log(`   Book/Page: ${trans.bookNumber}/${trans.pageNumber}`);
-        }
+        return {
+          success: true,
+          transactions: transactions.map(t => ({
+            instrumentNumber: t.clerkFileNumber,  // Use instrumentNumber for compatibility
+            clerkFileNumber: t.clerkFileNumber,
+            type: 'clerk_file',
+            source: t.source
+          }))
+        };
       }
 
+      this.log(`⚠️ No clerk file numbers found in Sales/Transactions table`);
       return {
-        success: transactions.length > 0,
-        transactions,
-        debugLogs: this.debugLogs // Include debug logs in response
+        success: false,
+        message: 'No clerk file numbers found',
+        transactions: []
       };
 
     } catch (error) {
@@ -540,248 +547,32 @@ class LeeCountyFloridaScraper extends DeedScraper {
       return {
         success: false,
         error: error.message,
-        debugLogs: this.debugLogs // Include debug logs even on error
+        transactions: []
       };
     }
   }
 
   /**
    * Download deed PDF from Lee County Clerk
-   * Navigate to LandMarkWeb, search by instrument number or book/page, and download PDF
+   * Workflow:
+   * 1. Directly navigate to PDF URL: https://or.leeclerk.org/LandMarkWeb/Document/GetDocumentByCFN/?cfn=2022000220622
+   * 2. Download using Brevard County method (iframe + Save Document button)
    */
   async downloadDeed(transaction) {
     this.log('📄 Downloading deed from Lee County Clerk...');
 
     try {
-      // Navigate to LandMarkWeb
-      const clerkUrl = 'https://or.leeclerk.org/LandMarkWeb';
-      this.log(`🌐 Navigating to Lee County Clerk: ${clerkUrl}`);
+      const clerkFileNumber = transaction.clerkFileNumber || transaction.instrumentNumber;
 
-      await this.page.goto(clerkUrl, {
-        waitUntil: 'networkidle2',
-        timeout: this.timeout
-      });
-
-      await this.randomWait(5000, 7000);
-
-      // Accept disclaimer if present
-      const disclaimerAccepted = await this.page.evaluate(() => {
-        const buttons = Array.from(document.querySelectorAll('button, input[type="button"], input[type="submit"]'));
-        for (const btn of buttons) {
-          const text = btn.textContent?.toLowerCase() || btn.value?.toLowerCase() || '';
-          if (text.includes('accept') || text.includes('agree') || text.includes('continue')) {
-            btn.click();
-            return true;
-          }
-        }
-        return false;
-      });
-
-      if (disclaimerAccepted) {
-        this.log('✅ Accepted disclaimer');
-        await this.randomWait(3000, 5000);
+      if (!clerkFileNumber) {
+        throw new Error('No clerk file number found in transaction record');
       }
 
-      // Search for the document by instrument number or book/page
-      let searchPerformed = false;
+      // Construct direct PDF URL
+      const pdfUrl = `https://or.leeclerk.org/LandMarkWeb/Document/GetDocumentByCFN/?cfn=${clerkFileNumber}`;
+      this.log(`🌐 Navigating to PDF page: ${pdfUrl}`);
 
-      if (transaction.instrumentNumber) {
-        this.log(`🔍 Searching by Instrument Number: ${transaction.instrumentNumber}`);
-
-        // Look for instrument number input field
-        const instrumentInputSelectors = [
-          'input[id*="Instrument"]',
-          'input[name*="Instrument"]',
-          'input[id*="DocNumber"]',
-          'input[name*="DocNumber"]'
-        ];
-
-        for (const selector of instrumentInputSelectors) {
-          try {
-            await this.page.waitForSelector(selector, { timeout: 2000, visible: true });
-            await this.page.click(selector);
-            await this.page.type(selector, transaction.instrumentNumber, { delay: 100 });
-            this.log(`✅ Entered instrument number: ${transaction.instrumentNumber}`);
-            searchPerformed = true;
-            break;
-          } catch (e) {
-            // Try next selector
-          }
-        }
-      } else if (transaction.bookNumber && transaction.pageNumber) {
-        this.log(`🔍 Searching by Book/Page: ${transaction.bookNumber}/${transaction.pageNumber}`);
-
-        // Look for book and page input fields
-        try {
-          const bookInput = await this.page.$('input[id*="Book"], input[name*="Book"]');
-          const pageInput = await this.page.$('input[id*="Page"], input[name*="Page"]');
-
-          if (bookInput && pageInput) {
-            await bookInput.click();
-            await bookInput.type(transaction.bookNumber, { delay: 100 });
-            await pageInput.click();
-            await pageInput.type(transaction.pageNumber, { delay: 100 });
-            this.log(`✅ Entered book/page: ${transaction.bookNumber}/${transaction.pageNumber}`);
-            searchPerformed = true;
-          }
-        } catch (e) {
-          this.log(`⚠️ Could not enter book/page: ${e.message}`);
-        }
-      }
-
-      if (!searchPerformed) {
-        throw new Error('Could not perform search - no instrument number or book/page available');
-      }
-
-      await this.randomWait(2000, 3000);
-
-      // Click search button
-      const searchButtonSelectors = [
-        'input[type="submit"]',
-        'button[type="submit"]',
-        'input[value*="Search"]',
-        'button:contains("Search")',
-        'input[id*="btnSearch"]'
-      ];
-
-      let searchClicked = false;
-      for (const selector of searchButtonSelectors) {
-        try {
-          await this.page.waitForSelector(selector, { timeout: 2000 });
-          await this.page.click(selector);
-          this.log(`✅ Clicked search button`);
-          searchClicked = true;
-          break;
-        } catch (e) {
-          // Try next selector
-        }
-      }
-
-      if (!searchClicked) {
-        this.log(`⚠️ Could not find search button, trying Enter key`);
-        await this.page.keyboard.press('Enter');
-      }
-
-      // Wait for search results
-      this.log(`⏳ Waiting for search results...`);
-      await this.randomWait(5000, 7000);
-
-      // Look for the document in results and click to view/download
-      this.log('🔍 Looking for document in search results...');
-
-      // Set up listener for new page/popup or download
-      const newPagePromise = new Promise(resolve => {
-        this.browser.once('targetcreated', async target => {
-          if (target.type() === 'page') {
-            const newPage = await target.page();
-            resolve(newPage);
-          }
-        });
-      });
-
-      // Click on the document link
-      const documentClicked = await this.page.evaluate(() => {
-        // Look for PDF links or view buttons
-        const links = Array.from(document.querySelectorAll('a, button, input[type="button"]'));
-
-        for (const link of links) {
-          const text = link.textContent?.toLowerCase() || link.value?.toLowerCase() || '';
-          const href = link.href || '';
-
-          if (text.includes('view') ||
-              text.includes('download') ||
-              text.includes('pdf') ||
-              href.includes('.pdf') ||
-              href.includes('document')) {
-            link.click();
-            return { clicked: true, text: text || href };
-          }
-        }
-
-        // If no explicit button, click on the first result row
-        const firstResult = document.querySelector('tr[onclick], tr.result, table tbody tr:first-child');
-        if (firstResult) {
-          firstResult.click();
-          return { clicked: true, text: 'first result row' };
-        }
-
-        return { clicked: false };
-      });
-
-      this.log(`🔍 [INFO] Document click result: ${JSON.stringify(documentClicked)}`);
-
-      if (!documentClicked || !documentClicked.clicked) {
-        throw new Error('Could not find document to view/download');
-      }
-
-      this.log(`✅ Clicked on document: ${documentClicked.text}`);
-
-      // Wait for PDF to load (either in new window or current page)
-      await this.randomWait(3000, 5000);
-
-      // Try to get PDF from new window if opened
-      let pdfBuffer;
-      try {
-        const newPage = await Promise.race([
-          newPagePromise,
-          new Promise((_, reject) =>
-            setTimeout(() => reject(new Error('No new window opened')), 5000)
-          )
-        ]);
-
-        this.log('✅ New window opened with PDF viewer');
-        const pdfUrl = newPage.url();
-        this.log(`📍 PDF URL: ${pdfUrl}`);
-
-        // Download the PDF using fetch in the new window's context
-        this.log('📥 Downloading PDF from new window...');
-
-        const pdfArrayBuffer = await newPage.evaluate(async (url) => {
-          const response = await fetch(url);
-          if (!response.ok) {
-            throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-          }
-          const arrayBuffer = await response.arrayBuffer();
-          return Array.from(new Uint8Array(arrayBuffer));
-        }, pdfUrl);
-
-        pdfBuffer = Buffer.from(pdfArrayBuffer);
-        await newPage.close();
-
-      } catch (newWindowError) {
-        // No new window, try to get PDF from current page
-        this.log('ℹ️  No new window opened, trying to download from current page...');
-
-        const currentUrl = this.page.url();
-        if (currentUrl.includes('.pdf') || currentUrl.endsWith('.pdf')) {
-          this.log(`📍 PDF URL in current page: ${currentUrl}`);
-
-          const pdfArrayBuffer = await this.page.evaluate(async (url) => {
-            const response = await fetch(url);
-            if (!response.ok) {
-              throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-            }
-            const arrayBuffer = await response.arrayBuffer();
-            return Array.from(new Uint8Array(arrayBuffer));
-          }, currentUrl);
-
-          pdfBuffer = Buffer.from(pdfArrayBuffer);
-        } else {
-          throw new Error('Could not download PDF - no new window and current page is not PDF');
-        }
-      }
-
-      // Verify it's a PDF
-      const isPDF = pdfBuffer.slice(0, 4).toString() === '%PDF';
-      this.log(`🔍 [INFO] PDF validation: isPDF=${isPDF}, size=${pdfBuffer.length} bytes`);
-
-      if (!isPDF) {
-        throw new Error('Downloaded file is not a valid PDF');
-      }
-
-      this.log(`✅ PDF downloaded successfully (${pdfBuffer.length} bytes)`);
-
-      // Save PDF to disk
+      // Set up download handling BEFORE navigating
       const path = require('path');
       const fs = require('fs');
       const relativePath = process.env.DEED_DOWNLOAD_PATH || './downloads';
@@ -793,7 +584,154 @@ class LeeCountyFloridaScraper extends DeedScraper {
         this.log(`📁 Created download directory: ${downloadPath}`);
       }
 
-      const filename = `lee_deed_${transaction.instrumentNumber || `${transaction.bookNumber}_${transaction.pageNumber}`}.pdf`;
+      // Set download behavior
+      const client = await this.page.target().createCDPSession();
+      await client.send('Page.setDownloadBehavior', {
+        behavior: 'allow',
+        downloadPath: downloadPath
+      });
+
+      this.log(`📁 Download path set to: ${downloadPath}`);
+
+      // Navigate to the PDF page
+      await this.page.goto(pdfUrl, {
+        waitUntil: 'networkidle0',
+        timeout: 60000
+      });
+
+      this.log(`✅ PDF page loaded`);
+
+      // Wait for the page to load
+      await this.randomWait(3000, 5000);
+
+      // Check if there's an iframe with PDF viewer (like Brevard)
+      const iframeElement = await this.page.$('iframe');
+
+      if (iframeElement) {
+        this.log(`✅ Found PDF iframe`);
+
+        // Get the iframe's content frame
+        const frame = await iframeElement.contentFrame();
+
+        if (frame) {
+          this.log(`✅ Accessed iframe content`);
+
+          // Wait for PDF viewer to load in iframe
+          await this.randomWait(2000, 3000);
+
+          // Look for "Save Document" button (like Brevard)
+          this.log(`🔍 Looking for "Save Document" button...`);
+
+          try {
+            await frame.waitForSelector('#SaveDoc', { timeout: 10000 });
+
+            this.log(`🔘 Found "Save Document" button (id=SaveDoc)`);
+
+            // Click the button using evaluate
+            await frame.evaluate(() => {
+              const btn = document.querySelector('#SaveDoc');
+              if (btn) {
+                btn.click();
+                return true;
+              }
+              return false;
+            });
+
+            this.log(`✅ Clicked "Save Document" button`);
+
+            // Wait for download to complete
+            this.log(`⏳ Waiting for PDF download to complete...`);
+            await this.randomWait(5000, 8000);
+
+            // Find the downloaded PDF
+            const files = fs.readdirSync(downloadPath);
+            const pdfFiles = files.filter(f => f.toLowerCase().endsWith('.pdf'));
+
+            if (pdfFiles.length === 0) {
+              throw new Error('No PDF file found in download directory after clicking Save');
+            }
+
+            // Get the most recent PDF
+            const latestPdf = pdfFiles.sort((a, b) => {
+              const statA = fs.statSync(path.join(downloadPath, a));
+              const statB = fs.statSync(path.join(downloadPath, b));
+              return statB.mtime.getTime() - statA.mtime.getTime();
+            })[0];
+
+            const filepath = path.join(downloadPath, latestPdf);
+            const stats = fs.statSync(filepath);
+
+            // Read the PDF to get base64
+            const pdfBuffer = fs.readFileSync(filepath);
+            const pdfBase64 = pdfBuffer.toString('base64');
+
+            this.log(`✅ PDF downloaded successfully: ${latestPdf}`);
+            this.log(`💾 File size: ${(stats.size / 1024).toFixed(2)} KB`);
+
+            // Rename to standard format
+            const filename = `lee_deed_${clerkFileNumber}.pdf`;
+            const newFilepath = path.join(downloadPath, filename);
+
+            if (filepath !== newFilepath) {
+              fs.renameSync(filepath, newFilepath);
+              this.log(`📝 Renamed to: ${filename}`);
+            }
+
+            return {
+              success: true,
+              filename,
+              downloadPath,
+              filepath: newFilepath,
+              clerkFileNumber,
+              instrumentNumber: clerkFileNumber,
+              pdfUrl,
+              timestamp: new Date().toISOString(),
+              fileSize: stats.size,
+              pdfBase64
+            };
+
+          } catch (saveButtonError) {
+            this.log(`⚠️ Could not find Save Document button: ${saveButtonError.message}`);
+            // Fall through to alternative download method
+          }
+        }
+      }
+
+      // Alternative: Try to download PDF directly from current page
+      this.log('ℹ️  Trying to download PDF directly from page...');
+
+      const currentUrl = this.page.url();
+      this.log(`📍 Current URL: ${currentUrl}`);
+
+      // Try to download PDF using fetch
+      const pdfArrayBuffer = await this.page.evaluate(async (url) => {
+        try {
+          const response = await fetch(url);
+          if (!response.ok) {
+            throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+          }
+          const arrayBuffer = await response.arrayBuffer();
+          return Array.from(new Uint8Array(arrayBuffer));
+        } catch (err) {
+          return null;
+        }
+      }, currentUrl);
+
+      if (!pdfArrayBuffer) {
+        throw new Error('Could not download PDF - iframe Save button not found and direct download failed');
+      }
+
+      const pdfBuffer = Buffer.from(pdfArrayBuffer);
+
+      // Verify it's a PDF
+      const isPDF = pdfBuffer.slice(0, 4).toString() === '%PDF';
+      if (!isPDF) {
+        throw new Error('Downloaded file is not a valid PDF');
+      }
+
+      this.log(`✅ PDF downloaded successfully (${pdfBuffer.length} bytes)`);
+
+      const filename = `lee_deed_${clerkFileNumber}.pdf`;
       const filepath = path.join(downloadPath, filename);
 
       fs.writeFileSync(filepath, pdfBuffer);
@@ -803,11 +741,13 @@ class LeeCountyFloridaScraper extends DeedScraper {
         success: true,
         filename,
         downloadPath,
-        instrumentNumber: transaction.instrumentNumber,
-        bookNumber: transaction.bookNumber,
-        pageNumber: transaction.pageNumber,
+        filepath,
+        clerkFileNumber,
+        instrumentNumber: clerkFileNumber,
+        pdfUrl,
         timestamp: new Date().toISOString(),
-        fileSize: pdfBuffer.length
+        fileSize: pdfBuffer.length,
+        pdfBase64: pdfBuffer.toString('base64')
       };
 
     } catch (error) {
@@ -817,6 +757,14 @@ class LeeCountyFloridaScraper extends DeedScraper {
         error: error.message
       };
     }
+  }
+
+  /**
+   * Random wait helper
+   */
+  async randomWait(min, max) {
+    const delay = Math.floor(Math.random() * (max - min + 1)) + min;
+    await new Promise(resolve => setTimeout(resolve, delay));
   }
 }
 
