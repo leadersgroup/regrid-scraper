@@ -314,120 +314,88 @@ class DavidsonCountyTennesseeScraper extends DeedScraper {
       const { number, street } = this.parseAddress(this.currentAddress);
       this.log(`🔍 Step 2: Parsed address - Number: ${number}, Street: ${street}`);
 
-      // Step 3: Find and fill the address number field (first field)
-      this.log(`🔍 Step 3: Looking for address number field...`);
+      // Step 3: Fill the address fields using specific IDs
+      this.log(`🔍 Step 3: Filling address fields...`);
 
-      const numberEntered = await this.page.evaluate((num) => {
-        // After selecting "Address", there should be multiple input fields
-        const inputs = Array.from(document.querySelectorAll('input[type="text"]'));
+      const fieldsEntered = await this.page.evaluate((num, streetName) => {
+        // Use specific field IDs
+        const numberInput = document.querySelector('#streetNumber');
+        const streetInput = document.querySelector('#singleSearchCriteria');
 
-        // Look for the first visible text input
-        const numberInput = inputs.find(input => {
-          const isVisible = input.offsetParent !== null;
-          return isVisible;
-        });
-
-        if (!numberInput) {
-          return { success: false, error: 'No visible text input found for number' };
+        if (!numberInput || !streetInput) {
+          return {
+            success: false,
+            error: 'Could not find address fields',
+            numberFound: !!numberInput,
+            streetFound: !!streetInput
+          };
         }
 
         numberInput.value = num;
         numberInput.dispatchEvent(new Event('input', { bubbles: true }));
         numberInput.dispatchEvent(new Event('change', { bubbles: true }));
 
-        return { success: true };
-      }, number);
-
-      if (!numberEntered.success) {
-        this.log(`❌ Could not enter number: ${numberEntered.error}`);
-        return {
-          success: false,
-          error: 'Could not enter address number'
-        };
-      }
-
-      this.log(`✅ Entered number: ${number}`);
-      await this.randomWait(1000, 1500);
-
-      // Step 4: Find and fill the street name field (second field)
-      this.log(`🔍 Step 4: Looking for street name field...`);
-
-      const streetEntered = await this.page.evaluate((streetName) => {
-        // Find all visible text inputs
-        const inputs = Array.from(document.querySelectorAll('input[type="text"]'));
-        const visibleInputs = inputs.filter(input => input.offsetParent !== null);
-
-        // The street field should be the second visible input
-        const streetInput = visibleInputs[1] || visibleInputs[0];
-
-        if (!streetInput) {
-          return { success: false, error: 'No visible text input found for street' };
-        }
-
         streetInput.value = streetName;
         streetInput.dispatchEvent(new Event('input', { bubbles: true }));
         streetInput.dispatchEvent(new Event('change', { bubbles: true }));
 
         return { success: true };
-      }, street);
+      }, number, street);
 
-      if (!streetEntered.success) {
-        this.log(`❌ Could not enter street: ${streetEntered.error}`);
+      if (!fieldsEntered.success) {
+        this.log(`❌ Could not enter address: ${fieldsEntered.error}`);
         return {
           success: false,
-          error: 'Could not enter street name'
+          error: 'Could not enter address fields'
         };
       }
 
-      this.log(`✅ Entered street: ${street}`);
+      this.log(`✅ Entered address: ${number} ${street}`);
       await this.randomWait(1000, 2000);
 
-      // Step 5: Submit the form
-      this.log(`🔍 Step 5: Submitting search form...`);
+      // Step 4: Click the search button (NOT form.submit())
+      this.log(`🔍 Step 4: Clicking search button...`);
 
-      const formSubmitted = await this.page.evaluate(() => {
-        // Find the form by ID or by checking for the form with our inputs
-        const form = document.querySelector('#frmQuick') ||
-                    document.querySelector('form[action*="QuickPropertySearchAsync"]') ||
-                    document.querySelector('form');
+      const searchClicked = await this.page.evaluate(() => {
+        // Find the submit button
+        const submitBtn = document.querySelector('button[type="submit"]');
 
-        if (form) {
-          form.submit();
-          return { success: true, method: 'form.submit()' };
+        if (submitBtn) {
+          submitBtn.click();
+          return { success: true };
         }
 
-        return { success: false, error: 'No form found' };
+        return { success: false, error: 'No submit button found' };
       });
 
-      if (formSubmitted.success) {
-        this.log(`✅ Form submitted: ${formSubmitted.method}`);
-      } else {
-        this.log(`⚠️  Could not submit form: ${formSubmitted.error}`);
+      if (!searchClicked.success) {
+        this.log(`⚠️  Could not click search button: ${searchClicked.error}`);
         this.log(`   Trying Enter key as fallback...`);
         await this.page.keyboard.press('Enter');
+      } else {
+        this.log(`✅ Clicked search button`);
       }
 
-      // Wait for search results
+      // Wait for search results to appear on the SAME page
       this.log(`⏳ Waiting for search results...`);
-      await this.randomWait(5000, 7000);
+      await this.randomWait(3000, 5000);
 
-      // Step 6: Find and click on parcel number card (e.g., "049 14 0a 023.00")
+      // Step 5: Find and click on parcel number card (e.g., "049 14 0a 023.00")
       // NOTE: This appears on the SAME PAGE as the search results, not a new page
-      this.log(`🔍 Step 6: Looking for parcel number card...`);
+      this.log(`🔍 Step 5: Looking for parcel number card...`);
 
       const parcelCardClicked = await this.page.evaluate(() => {
         // Look for parcel number with pattern like "049 14 0A 023.00"
         const pattern = /^\d{3}\s+\d{2}\s+\w+\s+\d+\.\d+$/i;
 
-        // Check all elements that might be clickable
-        const allElements = Array.from(document.querySelectorAll('a, button, div, span, td'));
-        for (const el of allElements) {
-          const text = (el.textContent || '').trim();
-          // Match ONLY the parcel number, not text containing it
+        // Check all links with onclick handler
+        const allLinks = Array.from(document.querySelectorAll('a[onclick*="OnSearchGridSelectAccount"]'));
+        for (const link of allLinks) {
+          const text = (link.textContent || '').trim();
           const firstLine = text.split('\n')[0].trim();
           if (pattern.test(firstLine)) {
             console.log(`Found parcel card: ${firstLine}`);
-            el.click();
+            link.click();
             return { clicked: true, parcel: firstLine };
           }
         }
@@ -444,73 +412,89 @@ class DavidsonCountyTennesseeScraper extends DeedScraper {
 
       this.log(`✅ Clicked parcel card: ${parcelCardClicked.parcel}`);
 
-      // Wait for the card to expand or show more details
-      await this.randomWait(2000, 3000);
+      // Wait for property details to load on the same page
+      await this.randomWait(3000, 5000);
 
-      // Step 7: Find and click "View Deed" button
-      this.log(`🔍 Step 7: Looking for "View Deed" button...`);
+      // Step 6: Find "View Deed" link and get the URL
+      this.log(`🔍 Step 6: Looking for "View Deed" link...`);
 
-      const viewDeedResult = await this.page.evaluate(() => {
-        const allButtons = Array.from(document.querySelectorAll('button, input[type="button"], input[type="submit"], a, div[onclick], span[onclick]'));
+      const deedLinkInfo = await this.page.evaluate(() => {
+        // Look for "View Deed" link
+        const allLinks = Array.from(document.querySelectorAll('a'));
 
-        // Log all visible buttons for debugging
-        const visibleButtons = allButtons
-          .filter(btn => {
-            const style = window.getComputedStyle(btn);
-            return style.display !== 'none' && style.visibility !== 'hidden';
-          })
-          .map(btn => ({
-            tag: btn.tagName,
-            text: (btn.textContent || btn.value || '').trim().substring(0, 50),
-            onclick: btn.getAttribute('onclick')
-          }))
-          .filter(b => b.text.length > 0);
-
-        // Try to find "View Deed" button
-        for (const btn of allButtons) {
-          const text = (btn.textContent || btn.value || '').trim().toLowerCase();
-          const onclick = (btn.getAttribute('onclick') || '').toLowerCase();
-
-          if (text.includes('deed') || onclick.includes('deed')) {
-            const style = window.getComputedStyle(btn);
-            if (style.display !== 'none' && style.visibility !== 'hidden') {
-              btn.click();
-              return { clicked: true, text: btn.textContent || btn.value || btn.getAttribute('onclick'), allButtons: visibleButtons };
-            }
+        for (const link of allLinks) {
+          const text = (link.textContent || '').trim();
+          if (text.toLowerCase() === 'view deed') {
+            const href = link.getAttribute('href');
+            return {
+              found: true,
+              href: href,
+              text: text
+            };
           }
         }
 
-        return { clicked: false, allButtons: visibleButtons };
+        return { found: false };
       });
 
-      if (viewDeedResult.allButtons) {
-        this.log(`📋 Visible buttons/links found: ${viewDeedResult.allButtons.length}`);
-        viewDeedResult.allButtons.forEach((btn, i) => {
-          if (i < 10) { // Log first 10
-            this.log(`   ${i + 1}. [${btn.tag}] "${btn.text}"`);
-          }
-        });
-      }
-
-      const viewDeedClicked = { clicked: viewDeedResult.clicked, text: viewDeedResult.text };
-
-      if (!viewDeedClicked.clicked) {
-        this.log('⚠️  Could not find "View Deed" button');
+      if (!deedLinkInfo.found) {
+        this.log('⚠️  Could not find "View Deed" link');
         return {
           success: false,
           error: 'Could not find "View Deed" button after clicking parcel card'
         };
       }
 
-      this.log(`✅ Clicked "View Deed" button: ${viewDeedClicked.text}`);
+      this.log(`✅ Found "View Deed" link: ${deedLinkInfo.href}`);
 
-      // Wait for deed viewer/download to appear
-      await this.randomWait(3000, 5000);
+      // Step 7: Fetch the deed PDF directly using axios
+      this.log(`🔽 Step 7: Fetching deed PDF...`);
 
-      return {
-        success: true,
-        message: 'Found property and clicked View Deed button'
-      };
+      const axios = require('axios');
+      const cookies = await this.page.cookies();
+      const cookieString = cookies.map(c => `${c.name}=${c.value}`).join('; ');
+
+      try {
+        const response = await axios.get(deedLinkInfo.href, {
+          responseType: 'arraybuffer',
+          headers: {
+            'Cookie': cookieString,
+            'User-Agent': await this.page.evaluate(() => navigator.userAgent),
+            'Referer': 'https://portal.padctn.org/'
+          }
+        });
+
+        const deedBuffer = Buffer.from(response.data);
+        const isPDF = deedBuffer.toString('utf8', 0, 4) === '%PDF';
+
+        if (!isPDF) {
+          this.log(`⚠️  Downloaded file is not a PDF`);
+          return {
+            success: false,
+            error: 'Downloaded file is not a valid PDF'
+          };
+        }
+
+        this.log(`✅ Successfully downloaded deed PDF (${deedBuffer.length} bytes)`);
+
+        // Store for downloadDeedPDF to return
+        this.deedBuffer = deedBuffer;
+        this.deedUrl = deedLinkInfo.href;
+
+        return {
+          success: true,
+          deedUrl: deedLinkInfo.href,
+          message: 'Successfully downloaded deed PDF'
+        };
+
+      } catch (axiosError) {
+        this.log(`❌ Failed to download deed PDF: ${axiosError.message}`);
+        return {
+          success: false,
+          error: `Failed to download deed: ${axiosError.message}`,
+          deedUrl: deedLinkInfo.href
+        };
+      }
 
     } catch (error) {
       this.log(`❌ Assessor search failed: ${error.message}`);
@@ -710,6 +694,29 @@ class DavidsonCountyTennesseeScraper extends DeedScraper {
     this.log('📥 Downloading deed PDF...');
 
     try {
+      // Check if we already downloaded the PDF in searchAssessorSite
+      if (this.deedBuffer && this.deedUrl) {
+        this.log(`✅ Using previously downloaded deed PDF (${this.deedBuffer.length} bytes)`);
+
+        const fs = require('fs');
+        const path = require('path');
+
+        // Save to file
+        const fileName = `davidson_deed_${Date.now()}.pdf`;
+        const filePath = path.join('/tmp', fileName);
+        fs.writeFileSync(filePath, this.deedBuffer);
+
+        return {
+          success: true,
+          filename: fileName,
+          filepath: filePath,
+          url: this.deedUrl,
+          size: this.deedBuffer.length,
+          base64: this.deedBuffer.toString('base64')
+        };
+      }
+
+      // Fallback to old method if buffer not available
       // Wait for PDF to load
       await this.randomWait(3000, 5000);
 
