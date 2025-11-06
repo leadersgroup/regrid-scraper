@@ -394,25 +394,28 @@ class DavidsonCountyTennesseeScraper extends DeedScraper {
       this.log(`✅ Entered street: ${street}`);
       await this.randomWait(1000, 2000);
 
-      // Step 5: Click search button or press Enter
-      this.log(`🔍 Step 5: Looking for search button...`);
+      // Step 5: Submit the form
+      this.log(`🔍 Step 5: Submitting search form...`);
 
-      const searchClicked = await this.page.evaluate(() => {
-        const buttons = Array.from(document.querySelectorAll('button, input[type="submit"], input[type="button"]'));
-        for (const btn of buttons) {
-          const text = (btn.textContent || btn.value || '').toLowerCase();
-          if (text.includes('search')) {
-            btn.click();
-            return { clicked: true, text: btn.textContent || btn.value };
-          }
+      const formSubmitted = await this.page.evaluate(() => {
+        // Find the form by ID or by checking for the form with our inputs
+        const form = document.querySelector('#frmQuick') ||
+                    document.querySelector('form[action*="QuickPropertySearchAsync"]') ||
+                    document.querySelector('form');
+
+        if (form) {
+          form.submit();
+          return { success: true, method: 'form.submit()' };
         }
-        return { clicked: false };
+
+        return { success: false, error: 'No form found' };
       });
 
-      if (searchClicked.clicked) {
-        this.log(`✅ Clicked search button: ${searchClicked.text}`);
+      if (formSubmitted.success) {
+        this.log(`✅ Form submitted: ${formSubmitted.method}`);
       } else {
-        this.log(`⚠️  No search button found, trying Enter key...`);
+        this.log(`⚠️  Could not submit form: ${formSubmitted.error}`);
+        this.log(`   Trying Enter key as fallback...`);
         await this.page.keyboard.press('Enter');
       }
 
