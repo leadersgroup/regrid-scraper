@@ -749,6 +749,16 @@ class LeeCountyFloridaScraper extends DeedScraper {
           this.log(`✅ Switching to new page: ${newPage.url()}`);
           this.page = newPage;
 
+          // Set up dialog handler for the new page
+          this.page.on('dialog', async (dialog) => {
+            this.log(`🔔 Dialog auto-dismissed on new page: ${dialog.type()} - "${dialog.message()}"`);
+            try {
+              await dialog.accept();
+            } catch (err) {
+              this.log(`⚠️  Failed to dismiss dialog: ${err.message}`);
+            }
+          });
+
           // Set up download behavior for the new page
           const newClient = await this.page.target().createCDPSession();
           await newClient.send('Page.setDownloadBehavior', {
