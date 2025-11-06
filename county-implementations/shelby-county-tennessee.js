@@ -339,23 +339,106 @@ class ShelbyCountyTennesseeScraper extends DeedScraper {
       }
 
       // Wait for search results / property details page to load
-      this.log(`⏳ Waiting for property details page to load...`);
+      this.log(`⏳ Waiting for page to load...`);
       await this.randomWait(5000, 7000);
 
-      // Check if we're already on the property details page
+      // Check what page we're on
       const currentUrl = this.page.url();
       this.log(`📍 Current URL: ${currentUrl}`);
 
-      // The search directly navigates to propertyDetails page, no need to click "view"
-      if (!currentUrl.includes('propertyDetails')) {
-        this.log(`❌ Not on property details page, current URL: ${currentUrl}`);
+      // Two possible outcomes:
+      // 1. Single result: redirects to propertyDetails?IR=true&parcelid=...
+      // 2. Multiple results: goes to realPropertyDetails?StreetNumber=...&StreetName=...
+
+      if (currentUrl.includes('propertyDetails?IR=true')) {
+        // Single result - already on property details page
+        this.log(`✅ Single result - already on property details page`);
+      } else if (currentUrl.includes('realPropertyDetails')) {
+        // Multiple results - need to click a "View" button
+        this.log(`🔍 Multiple results found, looking for correct property...`);
+
+        const viewLinkInfo = await this.page.evaluate((originalAddress) => {
+          // Parse the original address for matching
+          const addressForMatch = originalAddress.split(',')[0].trim().toLowerCase();
+
+          // Find all view links that go to propertyDetails
+          const links = Array.from(document.querySelectorAll('a[href*="propertyDetails"]'));
+          const viewLinks = links.filter(el => {
+            const text = (el.textContent || '').toLowerCase().trim();
+            const href = el.href || '';
+            return (text === 'view' || text.includes('view')) &&
+                   href.includes('propertyDetails') &&
+                   href.includes('IR=true');
+          });
+
+          console.log(`Found ${viewLinks.length} property detail view links`);
+
+          if (viewLinks.length === 0) {
+            return { success: false, error: 'No property detail view links found' };
+          }
+
+          // Try to find the matching property
+          for (let i = 0; i < viewLinks.length; i++) {
+            const link = viewLinks[i];
+            const container = link.closest('tr') || link.closest('div.card') || link.parentElement;
+
+            if (container) {
+              const containerText = container.textContent.toLowerCase();
+              if (containerText.includes(addressForMatch)) {
+                console.log(`Found matching address at link ${i}`);
+                return { success: true, matched: true, href: link.href, index: i };
+              }
+            }
+          }
+
+          // No exact match, use first one
+          console.log('No exact match, using first link');
+          return { success: true, matched: false, href: viewLinks[0].href, index: 0 };
+        }, this.currentAddress);
+
+        if (!viewLinkInfo.success) {
+          this.log(`❌ ${viewLinkInfo.error}`);
+          return {
+            success: false,
+            error: viewLinkInfo.error
+          };
+        }
+
+        if (viewLinkInfo.matched) {
+          this.log(`✅ Found matching property`);
+        } else {
+          this.log(`⚠️  No exact match found, using first result`);
+        }
+
+        // Navigate directly to the property details page
+        this.log(`🌐 Navigating to: ${viewLinkInfo.href}`);
+        await this.page.goto(viewLinkInfo.href, {
+          waitUntil: 'domcontentloaded',
+          timeout: 30000
+        });
+
+        await this.randomWait(3000, 5000);
+
+        const newUrl = this.page.url();
+        this.log(`📍 New URL: ${newUrl}`);
+
+        if (!newUrl.includes('propertyDetails?')) {
+          this.log(`❌ Navigation failed, not on property details page`);
+          return {
+            success: false,
+            error: 'Failed to navigate to property details page'
+          };
+        }
+
+        this.log(`✅ Successfully navigated to property details page`);
+      } else {
+        // Unknown page
+        this.log(`❌ Unexpected page: ${currentUrl}`);
         return {
           success: false,
-          error: 'Search did not navigate to property details page'
+          error: 'Search did not navigate to expected page'
         };
       }
-
-      this.log(`✅ Successfully on property details page`);
 
       // Debug: capture page content to see what we're working with
       const pageInfo = await this.page.evaluate(() => {
