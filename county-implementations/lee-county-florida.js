@@ -47,7 +47,7 @@ class LeeCountyFloridaScraper extends DeedScraper {
     this.browser = await puppeteer.launch({
       headless: this.headless,
       ...(executablePath && { executablePath }),
-      protocolTimeout: 300000, // 5 minute timeout for protocol operations
+      protocolTimeout: 600000, // 10 minute timeout for protocol operations (increased from 5 min)
       args: [
         '--no-sandbox',
         '--disable-setuid-sandbox',
@@ -291,53 +291,25 @@ class LeeCountyFloridaScraper extends DeedScraper {
         throw new Error('Could not find street address input field');
       }
 
-      // Enter street address
-      await this.page.click(addressInput);
-      await this.randomWait(300, 500);
-
-      // Clear any existing text
-      await this.page.evaluate((selector) => {
+      // Enter street address using DOM manipulation (page.type() times out on this site)
+      await this.page.evaluate((selector, address) => {
         const input = document.querySelector(selector);
-        if (input) input.value = '';
-      }, addressInput);
-
-      // Type address with human-like delays
-      for (const char of streetAddress) {
-        await this.page.keyboard.type(char);
-        await this.randomWait(50, 150);
-      }
+        if (input) {
+          input.value = address;
+          // Trigger input events to ensure the form recognizes the change
+          input.dispatchEvent(new Event('input', { bubbles: true }));
+          input.dispatchEvent(new Event('change', { bubbles: true }));
+        }
+      }, addressInput, streetAddress);
 
       this.log(`✅ Entered address: ${streetAddress}`);
       await this.randomWait(1000, 2000);
 
-      // Click on search button
-      const searchButtonSelectors = [
-        'input[type="submit"]',
-        'button[type="submit"]',
-        'input[value*="Search"]',
-        'button:contains("Search")',
-        'input[id*="btnSearch"]',
-        'input[id*="Submit"]'
-      ];
+      // Press Enter to submit the search (simpler than clicking button)
+      this.log(`⌨️  Pressing Enter to submit search...`);
+      await this.page.keyboard.press('Enter');
 
-      let searchButton = null;
-      for (const selector of searchButtonSelectors) {
-        try {
-          await this.page.waitForSelector(selector, { timeout: 2000 });
-          searchButton = selector;
-          this.log(`✅ Found search button: ${selector}`);
-          break;
-        } catch (e) {
-          // Try next selector
-        }
-      }
-
-      if (searchButton) {
-        this.log(`🔍 Clicking search button...`);
-        await this.page.click(searchButton);
-      } else {
-        throw new Error('Could not find search button');
-      }
+      this.log(`✅ Search submitted via Enter key`);
 
       // Wait for search results to load (match table)
       this.log(`⏳ Waiting for search results to load...`);
@@ -360,10 +332,61 @@ class LeeCountyFloridaScraper extends DeedScraper {
 
       await this.randomWait(2000, 3000);
 
-      // Look for 'parcel details' button and click it
-      this.log(`🔍 Looking for "Parcel Details" button...`);
+      // Debug: Check page content
+      const pageContent = await this.page.evaluate(() => {
+        const bodyText = document.body.innerText;
+        return {
+          hasMatch: bodyText.toLowerCase().includes('match'),
+          hasResults: bodyText.toLowerCase().includes('results'),
+          hasProperty: bodyText.toLowerCase().includes('property'),
+          hasNoMatch: bodyText.toLowerCase().includes('no match') || bodyText.toLowerCase().includes('no results'),
+          snippet: bodyText.substring(0, 500)
+        };
+      });
 
-      const parcelDetailsClicked = await this.page.evaluate(() => {
+      this.log(`⚠️  Debug: Page content check:`);
+      this.log(`   Has "match": ${pageContent.hasMatch}`);
+      this.log(`   Has "results": ${pageContent.hasResults}`);
+      this.log(`   Has "no match": ${pageContent.hasNoMatch}`);
+      this.log(`   Content snippet: ${pageContent.snippet.substring(0, 200)}...`);
+
+      // Look for 'parcel details' button and click it
+      this.log(`🔍 Looking for "Parcel Details" button or link...`);
+
+      // Find the link selector (not clicking yet, just finding)
+      const linkInfo = await this.page.evaluate(() => {
+        const debugInfo = {
+          allLinks: [],
+          displayParcelLinks: [],
+          foundSelector: null
+        };
+
+        // First, collect all links for debugging
+        const allLinks = Array.from(document.querySelectorAll('a[href]'));
+        debugInfo.allLinks = allLinks.slice(0, 20).map(a => ({
+          text: a.textContent?.trim().substring(0, 50),
+          href: a.href
+        }));
+
+        // Check for links with DisplayParcel.aspx
+        const displayParcelLinks = Array.from(document.querySelectorAll('a[href*="DisplayParcel"]'));
+        debugInfo.displayParcelLinks = displayParcelLinks.map(a => ({
+          text: a.textContent?.trim(),
+          href: a.href
+        }));
+
+        if (displayParcelLinks.length > 0) {
+          // Return selector instead of clicking
+          const link = displayParcelLinks[0];
+          if (link.id) {
+            debugInfo.foundSelector = `#${link.id}`;
+          } else {
+            debugInfo.foundSelector = `a[href*="DisplayParcel"]`;
+          }
+          return { found: true, text: link.textContent?.trim() || 'DisplayParcel link', debugInfo };
+        }
+
+        // Look for buttons/links with "details" text
         const allElements = Array.from(document.querySelectorAll('a, button, input[type="button"], input[type="submit"]'));
 
         for (const el of allElements) {
@@ -373,30 +396,71 @@ class LeeCountyFloridaScraper extends DeedScraper {
           if (text.includes('parcel details') ||
               title.includes('parcel details') ||
               text.includes('view details') ||
-              text === 'details') {
-            el.click();
-            return { clicked: true, text: el.textContent || el.value || el.title };
+              text.includes('details')) {
+            if (el.id) {
+              debugInfo.foundSelector = `#${el.id}`;
+            } else if (el.tagName === 'A') {
+              debugInfo.foundSelector = `a:has-text("${el.textContent?.trim()}")`;
+            }
+            return { found: true, text: el.textContent || el.value || el.title, debugInfo };
           }
         }
 
-        // Also check for links with DisplayParcel.aspx
-        const links = Array.from(document.querySelectorAll('a[href*="DisplayParcel"]'));
-        if (links.length > 0) {
-          links[0].click();
-          return { clicked: true, text: 'DisplayParcel link' };
+        // Try first visible link in a table row
+        const tableLinks = Array.from(document.querySelectorAll('table a[href]'));
+        if (tableLinks.length > 0) {
+          const link = tableLinks[0];
+          debugInfo.foundSelector = 'table a[href]';
+          return { found: true, text: `First table link: ${link.textContent?.trim()}`, debugInfo };
         }
 
-        return { clicked: false };
+        return { found: false, debugInfo };
       });
 
-      if (!parcelDetailsClicked || !parcelDetailsClicked.clicked) {
-        throw new Error('Could not find "Parcel Details" button');
+      if (!linkInfo || !linkInfo.found) {
+        this.log(`⚠️  Debug: Found ${linkInfo.debugInfo.allLinks.length} links on page:`);
+        linkInfo.debugInfo.allLinks.forEach((link, i) => {
+          this.log(`   [${i+1}] "${link.text}" -> ${link.href}`);
+        });
+
+        this.log(`⚠️  Debug: Found ${linkInfo.debugInfo.displayParcelLinks.length} DisplayParcel links`);
+
+        throw new Error('Could not find "Parcel Details" button or link');
       }
 
-      this.log(`✅ Clicked on "Parcel Details" button: ${parcelDetailsClicked.text}`);
+      this.log(`✅ Found link: ${linkInfo.text}, selector: ${linkInfo.debugInfo.foundSelector}`);
 
-      // Wait for parcel details page to load
-      await this.randomWait(5000, 7000);
+      // Check if link opens in new tab/window
+      const linkTarget = await this.page.evaluate((selector) => {
+        const link = document.querySelector(selector);
+        return link ? { target: link.target, href: link.href } : null;
+      }, linkInfo.debugInfo.foundSelector);
+
+      this.log(`🔗 Link target: ${linkTarget.target || 'same window'}, href: ${linkTarget.href}`);
+
+      // If there's a DisplayParcel link, navigate directly to it
+      if (linkTarget && linkTarget.href && linkTarget.href.includes('DisplayParcel.aspx')) {
+        this.log(`🌐 Navigating directly to: ${linkTarget.href}`);
+        await this.page.goto(linkTarget.href, {
+          waitUntil: 'networkidle2',
+          timeout: 30000
+        });
+        this.log(`✅ Navigated to parcel details page`);
+      } else {
+        // Try clicking and waiting for navigation
+        try {
+          await Promise.all([
+            this.page.waitForNavigation({ waitUntil: 'networkidle2', timeout: 30000 }),
+            this.page.click(linkInfo.debugInfo.foundSelector)
+          ]);
+          this.log(`✅ Clicked link and navigated successfully`);
+        } catch (navError) {
+          this.log(`⚠️  No navigation occurred after clicking: ${navError.message}`);
+        }
+      }
+
+      // Wait for parcel details content to load
+      await this.randomWait(3000, 5000);
 
       // Verify we're on the parcel details page
       const currentUrl = this.page.url();
