@@ -747,6 +747,29 @@ class LeeCountyFloridaScraper extends DeedScraper {
       });
       await this.randomWait(2000, 3000);
 
+      // Debug: Check what's in the SalesDetails section now
+      const salesDebugInfo = await this.page.evaluate(() => {
+        const salesSection = document.querySelector('#SalesDetails');
+        if (!salesSection) {
+          return { found: false };
+        }
+
+        const overFlowDiv = salesSection.querySelector('.overFlowDiv');
+        return {
+          found: true,
+          sectionHTML: salesSection.innerHTML.substring(0, 1000),
+          overFlowDivHTML: overFlowDiv ? overFlowDiv.innerHTML.substring(0, 500) : 'no overFlowDiv',
+          hasTable: !!salesSection.querySelector('table'),
+          tableCount: salesSection.querySelectorAll('table').length
+        };
+      });
+
+      this.log(`📋 SalesDetails debug info:`);
+      this.log(`   Has section: ${salesDebugInfo.found}`);
+      this.log(`   Has table: ${salesDebugInfo.hasTable}`);
+      this.log(`   Table count: ${salesDebugInfo.tableCount}`);
+      this.log(`   overFlowDiv content: ${salesDebugInfo.overFlowDivHTML?.substring(0, 200)}`);
+
       // Extract Clerk file numbers from the table
       this.log('🔍 Extracting Clerk file numbers from Sales/Transactions table...');
 
