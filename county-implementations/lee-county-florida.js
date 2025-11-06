@@ -92,6 +92,24 @@ class LeeCountyFloridaScraper extends DeedScraper {
       }
     });
 
+    // Set up console error logging to capture JavaScript errors from the page
+    this.page.on('console', (msg) => {
+      const type = msg.type();
+      if (type === 'error' || type === 'warning') {
+        this.log(`🖥️  Browser ${type}: ${msg.text()}`);
+      }
+    });
+
+    // Set up page error logging
+    this.page.on('pageerror', (error) => {
+      this.log(`❌ Page error: ${error.message}`);
+    });
+
+    // Log failed requests
+    this.page.on('requestfailed', (request) => {
+      this.log(`⚠️  Request failed: ${request.url()} - ${request.failure().errorText}`);
+    });
+
     this.log('✅ Browser initialized with stealth mode and popup handling');
   }
 
@@ -230,6 +248,34 @@ class LeeCountyFloridaScraper extends DeedScraper {
         timeout: this.timeout
       });
 
+      const pageTitle = await this.page.title();
+      this.log(`✅ Page loaded: ${this.page.url()}`);
+      this.log(`📄 Page title: ${pageTitle}`);
+
+      // Check if we got a CAPTCHA, error, or blocked page
+      const pageCheck = await this.page.evaluate(() => {
+        const bodyText = document.body.innerText.toLowerCase();
+        return {
+          hasCaptcha: bodyText.includes('captcha') || bodyText.includes('robot') || bodyText.includes('recaptcha'),
+          hasError: bodyText.includes('error') || bodyText.includes('not found') || bodyText.includes('unavailable'),
+          hasAccessDenied: bodyText.includes('access denied') || bodyText.includes('forbidden'),
+          bodySnippet: document.body.innerText.substring(0, 300)
+        };
+      });
+
+      if (pageCheck.hasCaptcha) {
+        this.log(`⚠️  CAPTCHA detected on page!`);
+        this.log(`   Body snippet: ${pageCheck.bodySnippet}`);
+      }
+      if (pageCheck.hasError) {
+        this.log(`⚠️  Error message detected on page!`);
+        this.log(`   Body snippet: ${pageCheck.bodySnippet}`);
+      }
+      if (pageCheck.hasAccessDenied) {
+        this.log(`⚠️  Access denied message detected on page!`);
+        this.log(`   Body snippet: ${pageCheck.bodySnippet}`);
+      }
+
       await this.randomWait(3000, 5000);
 
       // Check for and dismiss any popups or overlays
@@ -299,6 +345,21 @@ class LeeCountyFloridaScraper extends DeedScraper {
         this.log(`⚠️  All text inputs found on page:`);
         this.log(JSON.stringify(allInputs, null, 2));
 
+        // Capture screenshot for debugging
+        try {
+          const screenshotPath = path.join(this.downloadPath, 'lee_error_no_input.png');
+          await this.page.screenshot({ path: screenshotPath, fullPage: true });
+          this.log(`📸 Screenshot saved to: ${screenshotPath}`);
+        } catch (err) {
+          this.log(`⚠️  Failed to capture screenshot: ${err.message}`);
+        }
+
+        // Log HTML content for debugging
+        const htmlContent = await this.page.content();
+        const htmlPath = path.join(this.downloadPath, 'lee_error_no_input.html');
+        await fs.promises.writeFile(htmlPath, htmlContent);
+        this.log(`📄 HTML saved to: ${htmlPath}`);
+
         throw new Error('Could not find street address input field');
       }
 
@@ -321,6 +382,7 @@ class LeeCountyFloridaScraper extends DeedScraper {
       await this.page.keyboard.press('Enter');
 
       this.log(`✅ Search submitted via Enter key`);
+      this.log(`📍 Current URL after search: ${this.page.url()}`);
 
       // Wait for search results to load (match table)
       this.log(`⏳ Waiting for search results to load...`);
@@ -435,6 +497,21 @@ class LeeCountyFloridaScraper extends DeedScraper {
         });
 
         this.log(`⚠️  Debug: Found ${linkInfo.debugInfo.displayParcelLinks.length} DisplayParcel links`);
+
+        // Capture screenshot for debugging
+        try {
+          const screenshotPath = path.join(this.downloadPath, 'lee_error_no_results.png');
+          await this.page.screenshot({ path: screenshotPath, fullPage: true });
+          this.log(`📸 Screenshot saved to: ${screenshotPath}`);
+        } catch (err) {
+          this.log(`⚠️  Failed to capture screenshot: ${err.message}`);
+        }
+
+        // Log HTML content for debugging
+        const htmlContent = await this.page.content();
+        const htmlPath = path.join(this.downloadPath, 'lee_error_no_results.html');
+        await fs.promises.writeFile(htmlPath, htmlContent);
+        this.log(`📄 HTML saved to: ${htmlPath}`);
 
         throw new Error('Could not find "Parcel Details" button or link');
       }
