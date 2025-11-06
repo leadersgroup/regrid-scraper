@@ -549,19 +549,21 @@ class HarrisCountyTexasScraper extends DeedScraper {
 
           // If we're in the ownership section, look for first entry
           if (inOwnershipSection) {
-            // Look for owner name (typically appears first)
-            if (!owner && line.length > 0 && !line.includes('Effective Date') && !line.includes('Owner')) {
-              // Check if this looks like a name (contains letters, not just numbers/dates)
-              if (/[A-Za-z]{2,}/.test(line) && !/^\d{2}\/\d{2}\/\d{4}$/.test(line)) {
-                owner = line;
-              }
+            // Skip the header row
+            if (line.includes('Owner') && line.includes('Effective Date')) {
+              continue;
             }
 
-            // Look for effective date (format: MM/DD/YYYY)
-            if (!effectiveDate) {
-              const dateMatch = line.match(/(\d{2}\/\d{2}\/\d{4})/);
-              if (dateMatch) {
-                effectiveDate = dateMatch[1];
+            // Check if line contains both name and date (tab-separated or space-separated)
+            // Format: "XU HUIPING	07/25/2023" or "XU HUIPING 07/25/2023"
+            const dateMatch = line.match(/(\d{2}\/\d{2}\/\d{4})/);
+            if (dateMatch) {
+              effectiveDate = dateMatch[1];
+
+              // Extract owner name (everything before the date)
+              const ownerPart = line.substring(0, line.indexOf(dateMatch[0])).trim();
+              if (ownerPart.length > 0 && /[A-Za-z]{2,}/.test(ownerPart)) {
+                owner = ownerPart;
               }
             }
 
@@ -571,9 +573,9 @@ class HarrisCountyTexasScraper extends DeedScraper {
             }
 
             // Stop if we hit another section
-            if (line.toLowerCase().includes('value history') ||
-                line.toLowerCase().includes('building') ||
-                line.toLowerCase().includes('land')) {
+            if (line.toLowerCase().includes('building summary') ||
+                line.toLowerCase().includes('legal disclaimer') ||
+                (line.toLowerCase().includes('building') && i > 0 && !inOwnershipSection)) {
               break;
             }
           }
