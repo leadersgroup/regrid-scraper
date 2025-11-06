@@ -89,6 +89,19 @@ app.get('/api/counties', (req, res) => {
           'Instrument Number and Book/Page support'
         ],
         cost: 'Free (no CAPTCHA)'
+      },
+      {
+        name: 'Harris County',
+        state: 'TX',
+        stateCode: 'Texas',
+        features: [
+          'HCAD property search',
+          'Ownership history extraction',
+          'Clerk records search',
+          'Film code deed download',
+          'Cloudflare bypass with 2Captcha'
+        ],
+        cost: '$0.003 per deed (with 2Captcha API, if needed)'
       }
     ],
     timestamp: new Date().toISOString()
@@ -135,6 +148,13 @@ app.post('/api/deed', async (req, res) => {
     } else if (detectedCounty === 'Duval' && detectedState === 'FL') {
       const DuvalCountyFloridaScraper = require('./county-implementations/duval-county-florida');
       scraper = new DuvalCountyFloridaScraper({
+        headless: true,
+        timeout: 120000,
+        verbose: true
+      });
+    } else if (detectedCounty === 'Harris' && detectedState === 'TX') {
+      const HarrisCountyTexasScraper = require('./county-implementations/harris-county-texas');
+      scraper = new HarrisCountyTexasScraper({
         headless: true,
         timeout: 120000,
         verbose: true
