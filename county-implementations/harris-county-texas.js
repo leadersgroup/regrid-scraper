@@ -314,9 +314,6 @@ class HarrisCountyTexasScraper extends DeedScraper {
       const fullAddress = address;
       let streetAddress = fullAddress.split(',')[0].trim();
 
-      // Convert to uppercase - HCAD may be case-sensitive
-      streetAddress = streetAddress.toUpperCase();
-
       this.log(`🏠 Searching for address: ${streetAddress}`);
 
       // Make sure "Property Address" radio button is selected
@@ -361,9 +358,19 @@ class HarrisCountyTexasScraper extends DeedScraper {
 
       // Clear any existing text and enter the address
       await addressInput.click({ clickCount: 3 }); // Select all existing text
-      await addressInput.type(streetAddress, { delay: 50 });
+      await this.randomWait(500, 1000);
+      await addressInput.type(streetAddress, { delay: 100 });  // Slower typing
 
-      await this.randomWait(1000, 2000);
+      // Trigger input/change events for Blazor
+      await searchFrame.evaluate(() => {
+        const input = document.querySelector('input[type="search"]');
+        if (input) {
+          input.dispatchEvent(new Event('input', { bubbles: true }));
+          input.dispatchEvent(new Event('change', { bubbles: true }));
+        }
+      });
+
+      await this.randomWait(2000, 3000);  // Longer wait for validation
 
       this.log(`✅ Entered address: ${streetAddress}`);
 
