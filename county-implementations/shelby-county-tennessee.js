@@ -19,6 +19,7 @@ const puppeteer = require('puppeteer-extra');
 const StealthPlugin = require('puppeteer-extra-plugin-stealth');
 const path = require('path');
 const fs = require('fs');
+const axios = require('axios');
 
 // Use stealth plugin to avoid bot detection
 puppeteer.use(StealthPlugin());
@@ -618,86 +619,69 @@ class ShelbyCountyTennesseeScraper extends DeedScraper {
 
       this.log(`✅ Found PDF link: ${pdfLinkInfo.href}`);
 
-      // Step 4: Navigate to the PDF URL
+      // Step 4: Download the PDF using axios instead of navigating
+      // This ensures we get the complete file, not a browser-rendered version
       this.log(`📥 Downloading PDF from: ${pdfLinkInfo.href}`);
-      await this.page.goto(pdfLinkInfo.href, { waitUntil: 'networkidle0', timeout: this.timeout });
-      await this.randomWait(3000, 5000);
 
-      // Check if we're viewing a PDF in browser or if it downloaded
-      const currentUrl = this.page.url();
-      this.log(`📍 Current URL: ${currentUrl}`);
+      try {
+        // Download the PDF directly using axios with the same cookies/session
+        const cookies = await this.page.cookies();
+        const cookieString = cookies.map(c => `${c.name}=${c.value}`).join('; ');
 
-      // Find the downloaded file
-      const files = fs.readdirSync(downloadPath);
-      const pdfFiles = files.filter(f => f.endsWith('.pdf')).sort((a, b) => {
-        const aStat = fs.statSync(path.join(downloadPath, a));
-        const bStat = fs.statSync(path.join(downloadPath, b));
-        return bStat.mtime - aStat.mtime; // Most recent first
-      });
-
-      let pdfBuffer;
-      let filename;
-      let filepath;
-
-      if (pdfFiles.length > 0) {
-        // File was downloaded
-        const latestPdf = pdfFiles[0];
-        filepath = path.join(downloadPath, latestPdf);
-        const stats = fs.statSync(filepath);
-
-        pdfBuffer = fs.readFileSync(filepath);
-
-        this.log(`✅ PDF file downloaded: ${latestPdf}`);
-        this.log(`💾 File size: ${(stats.size / 1024).toFixed(2)} KB`);
-
-        // Rename to standard format
-        filename = `shelby_deed_${Date.now()}.pdf`;
-        const newFilepath = path.join(downloadPath, filename);
-
-        if (filepath !== newFilepath) {
-          fs.renameSync(filepath, newFilepath);
-          filepath = newFilepath;
-          this.log(`📝 Renamed to: ${filename}`);
-        }
-
-      } else if (currentUrl.includes('.pdf') || currentUrl.includes('register.shelby')) {
-        // PDF is being viewed in browser, need to save it
-        this.log(`📄 PDF is being viewed in browser, saving...`);
-
-        pdfBuffer = await this.page.pdf({
-          format: 'A4',
-          printBackground: true
+        const response = await axios.get(pdfLinkInfo.href, {
+          responseType: 'arraybuffer',
+          headers: {
+            'Cookie': cookieString,
+            'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+          },
+          timeout: this.timeout,
+          maxContentLength: 50 * 1024 * 1024, // 50MB max
+          maxBodyLength: 50 * 1024 * 1024
         });
 
-        filename = `shelby_deed_${Date.now()}.pdf`;
-        filepath = path.join(downloadPath, filename);
+        const pdfBuffer = Buffer.from(response.data);
+
+        this.log(`✅ PDF downloaded: ${(pdfBuffer.length / 1024).toFixed(2)} KB`);
+
+        // Verify it's actually a PDF
+        const magicNumber = pdfBuffer.slice(0, 4).toString();
+        if (magicNumber !== '%PDF') {
+          this.log(`❌ Downloaded file is not a valid PDF (magic number: ${magicNumber})`);
+          return {
+            success: false,
+            error: 'Downloaded file is not a valid PDF'
+          };
+        }
+
+        // Save to file
+        const filename = `shelby_deed_${Date.now()}.pdf`;
+        const filepath = path.join(downloadPath, filename);
         fs.writeFileSync(filepath, pdfBuffer);
 
-        this.log(`✅ PDF saved from browser view: ${filename}`);
-        this.log(`💾 File size: ${(pdfBuffer.length / 1024).toFixed(2)} KB`);
+        this.log(`💾 Saved to: ${filename}`);
 
-      } else {
-        this.log(`❌ No PDF file found and not viewing PDF in browser`);
+        // Read the PDF to get base64
+        const pdfBase64 = pdfBuffer.toString('base64');
+
+        return {
+          success: true,
+          filename,
+          downloadPath,
+          filepath,
+          deedLink: deedLink,
+          deedNumber: deedNumber,
+          timestamp: new Date().toISOString(),
+          fileSize: pdfBuffer.length,
+          pdfBase64
+        };
+
+      } catch (downloadError) {
+        this.log(`❌ Failed to download PDF via axios: ${downloadError.message}`);
         return {
           success: false,
-          error: 'PDF download did not complete'
+          error: downloadError.message
         };
       }
-
-      // Read the PDF to get base64
-      const pdfBase64 = pdfBuffer.toString('base64');
-
-      return {
-        success: true,
-        filename,
-        downloadPath,
-        filepath,
-        deedLink: deedLink,
-        deedNumber: deedNumber,
-        timestamp: new Date().toISOString(),
-        fileSize: pdfBuffer.length,
-        pdfBase64
-      };
 
     } catch (error) {
       this.log(`❌ Failed to download deed: ${error.message}`);
