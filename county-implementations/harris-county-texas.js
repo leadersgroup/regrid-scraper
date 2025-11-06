@@ -314,6 +314,9 @@ class HarrisCountyTexasScraper extends DeedScraper {
       const fullAddress = address;
       let streetAddress = fullAddress.split(',')[0].trim();
 
+      // Convert to uppercase - HCAD may be case-sensitive
+      streetAddress = streetAddress.toUpperCase();
+
       this.log(`🏠 Searching for address: ${streetAddress}`);
 
       // Make sure "Property Address" radio button is selected
