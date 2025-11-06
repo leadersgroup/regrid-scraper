@@ -879,34 +879,169 @@ class HarrisCountyTexasScraper extends DeedScraper {
       // Check if we're on a login page
       if (pdfUrl.includes('Login.aspx') || pdfUrl.includes('login')) {
         this.log(`⚠️  PDF requires authentication - redirected to login page`);
-        this.log(`📝 Harris County Clerk requires a free registered account to download PDFs`);
-        this.log(`🔗 Create account at: https://www.cclerk.hctx.net/Applications/WebSearch/Registration/NewUser.aspx`);
 
-        // Close the new tab if it was opened
-        if (pdfPage !== this.page) {
-          await pdfPage.close();
+        // Check if credentials are available
+        const username = process.env.HARRIS_COUNTY_CLERK_USERNAME;
+        const password = process.env.HARRIS_COUNTY_CLERK_PASSWORD;
+
+        if (username && password) {
+          this.log(`🔐 Attempting to log in with provided credentials...`);
+
+          try {
+            // Fill in login form
+            const usernameField = 'input[name*="UserName"], input[id*="UserName"]';
+            const passwordField = 'input[type="password"], input[name*="Password"]';
+            const loginButton = 'input[type="submit"], input[name*="LoginButton"]';
+
+            await pdfPage.waitForSelector(usernameField, { timeout: 5000 });
+            await pdfPage.type(usernameField, username);
+            this.log(`✅ Entered username`);
+
+            await pdfPage.waitForSelector(passwordField, { timeout: 5000 });
+            await pdfPage.type(passwordField, password);
+            this.log(`✅ Entered password`);
+
+            await this.randomWait(1000, 2000);
+
+            await pdfPage.click(loginButton);
+            this.log(`✅ Clicked login button`);
+
+            // Wait for login to complete and redirect to PDF
+            await this.randomWait(3000, 5000);
+
+            // Check if login was successful
+            const currentUrl = pdfPage.url();
+            this.log(`📍 After login URL: ${currentUrl}`);
+
+            if (currentUrl.includes('Login.aspx')) {
+              this.log(`❌ Login failed - still on login page`);
+              throw new Error('Login failed - please check credentials');
+            }
+
+            this.log(`✅ Login successful! Attempting to download PDF...`);
+
+            // Wait for PDF to load in viewer
+            await this.randomWait(5000, 7000);
+
+            // Use CDP to print the PDF page (captures the embedded PDF)
+            try {
+              const pdfClient = await pdfPage.target().createCDPSession();
+
+              this.log(`📥 Capturing PDF using Chrome DevTools Protocol...`);
+
+              const {data} = await pdfClient.send('Page.printToPDF', {
+                printBackground: true,
+                preferCSSPageSize: true
+              });
+
+              // Convert base64 to buffer
+              const pdfBuffer = Buffer.from(data, 'base64');
+
+              const isPDF = pdfBuffer.slice(0, 4).toString() === '%PDF';
+              this.log(`🔍 PDF validation: isPDF=${isPDF}, size=${pdfBuffer.length} bytes`);
+
+              if (!isPDF) {
+                throw new Error('Downloaded file is not a valid PDF');
+              }
+
+              this.log(`✅ PDF downloaded successfully (${pdfBuffer.length} bytes)`);
+
+              // Close the new tab if it was opened
+              if (pdfPage !== this.page) {
+                await pdfPage.close();
+              }
+
+              // Save PDF to disk
+              const path = require('path');
+              const fs = require('fs');
+              const relativePath = process.env.DEED_DOWNLOAD_PATH || './downloads';
+              const downloadPath = path.resolve(relativePath);
+
+              // Ensure download directory exists
+              if (!fs.existsSync(downloadPath)) {
+                fs.mkdirSync(downloadPath, { recursive: true });
+                this.log(`📁 Created download directory: ${downloadPath}`);
+              }
+
+              const filename = `harris_deed_${filmCode.replace(/[^a-zA-Z0-9]/g, '_')}.pdf`;
+              const filepath = path.join(downloadPath, filename);
+
+              fs.writeFileSync(filepath, pdfBuffer);
+              this.log(`💾 Saved PDF to: ${filepath}`);
+
+              return {
+                success: true,
+                filename,
+                pdfPath: filepath,
+                downloadPath,
+                filmCode: filmCode,
+                timestamp: new Date().toISOString(),
+                fileSize: pdfBuffer.length
+              };
+
+            } catch (pdfError) {
+              this.log(`❌ PDF download error: ${pdfError.message}`);
+
+              // Close the new tab if it was opened
+              if (pdfPage !== this.page) {
+                await pdfPage.close();
+              }
+
+              return {
+                success: false,
+                requiresAuth: false,
+                filmCode: filmCode,
+                error: `PDF download failed: ${pdfError.message}`,
+                message: 'Logged in successfully but could not download PDF'
+              };
+            }
+
+          } catch (loginError) {
+            this.log(`❌ Login error: ${loginError.message}`);
+
+            // Close the new tab if it was opened
+            if (pdfPage !== this.page) {
+              await pdfPage.close();
+            }
+
+            return {
+              success: false,
+              requiresAuth: true,
+              filmCode: filmCode,
+              error: `Login failed: ${loginError.message}`,
+              message: 'Could not log in to Harris County Clerk website'
+            };
+          }
+        } else {
+          this.log(`📝 Harris County Clerk requires a free registered account to download PDFs`);
+          this.log(`🔗 Create account at: https://www.cclerk.hctx.net/Applications/WebSearch/Registration/NewUser.aspx`);
+
+          // Close the new tab if it was opened
+          if (pdfPage !== this.page) {
+            await pdfPage.close();
+          }
+
+          // Extract the document URL from the ReturnUrl parameter
+          const urlObj = new URL(pdfUrl);
+          const returnUrl = urlObj.searchParams.get('ReturnUrl');
+          const documentId = urlObj.searchParams.get('ID');
+
+          return {
+            success: true,
+            requiresAuth: true,
+            filmCode: filmCode,
+            message: 'PDF requires authentication. Harris County Clerk requires a free registered account.',
+            loginUrl: pdfUrl,
+            documentUrl: returnUrl ? `https://www.cclerk.hctx.net${returnUrl}` : null,
+            documentId: documentId,
+            registrationUrl: 'https://www.cclerk.hctx.net/Applications/WebSearch/Registration/NewUser.aspx',
+            instructions: [
+              '1. Create a free account at Harris County Clerk website',
+              '2. Log in to your account',
+              '3. Use the film code to search and download the PDF'
+            ]
+          };
         }
-
-        // Extract the document URL from the ReturnUrl parameter
-        const urlObj = new URL(pdfUrl);
-        const returnUrl = urlObj.searchParams.get('ReturnUrl');
-        const documentId = urlObj.searchParams.get('ID');
-
-        return {
-          success: true,
-          requiresAuth: true,
-          filmCode: filmCode,
-          message: 'PDF requires authentication. Harris County Clerk requires a free registered account.',
-          loginUrl: pdfUrl,
-          documentUrl: returnUrl ? `https://www.cclerk.hctx.net${returnUrl}` : null,
-          documentId: documentId,
-          registrationUrl: 'https://www.cclerk.hctx.net/Applications/WebSearch/Registration/NewUser.aspx',
-          instructions: [
-            '1. Create a free account at Harris County Clerk website',
-            '2. Log in to your account',
-            '3. Use the film code to search and download the PDF'
-          ]
-        };
       }
 
       // Download the PDF
