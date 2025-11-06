@@ -34,6 +34,7 @@ const LeeCountyFloridaScraper = require('./county-implementations/lee-county-flo
 const PalmBeachCountyFloridaScraper = require('./county-implementations/palm-beach-county-florida');
 const MiamiDadeCountyFloridaScraper = require('./county-implementations/miami-dade-county-florida');
 const BrowardCountyFloridaScraper = require('./county-implementations/broward-county-florida');
+const ShelbyCountyTennesseeScraper = require('./county-implementations/shelby-county-tennessee');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -199,6 +200,18 @@ app.get('/api/counties', (req, res) => {
           'Direct address search'
         ],
         cost: 'Free (no CAPTCHA)'
+      },
+      {
+        name: 'Shelby County',
+        state: 'TN',
+        stateCode: 'Tennessee',
+        features: [
+          'Full PDF download',
+          'Sales history extraction',
+          'Deed number support',
+          'Register of Deeds integration'
+        ],
+        cost: 'Free (no CAPTCHA)'
       }
     ]
   });
@@ -221,7 +234,8 @@ function normalizeCountyName(county) {
     'miamidade': 'Miami-Dade',
     'orange': 'Orange',
     'hillsborough': 'Hillsborough',
-    'broward': 'Broward'
+    'broward': 'Broward',
+    'shelby': 'Shelby'
   };
 
   return countyMap[normalized] || county;
@@ -265,6 +279,8 @@ async function processDeedDownload(address, county, state, options = {}) {
     scraper = new MiamiDadeCountyFloridaScraper(scraperOptions);
   } else if (detectedCounty === 'Broward' && detectedState === 'FL') {
     scraper = new BrowardCountyFloridaScraper(scraperOptions);
+  } else if (detectedCounty === 'Shelby' && detectedState === 'TN') {
+    scraper = new ShelbyCountyTennesseeScraper(scraperOptions);
   } else {
     throw new Error(`County "${detectedCounty}, ${detectedState}" is not yet supported`);
   }
