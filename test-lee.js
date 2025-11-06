@@ -9,7 +9,7 @@ async function testLeeCounty() {
   console.log('🧪 Testing Lee County FL deed scraper...\n');
 
   // Example test address from user
-  const testAddress = '503 NORIDGE DR, Fort Myers, FL 33919';
+  const testAddress = '503 Noridge Dr, Lehigh Acres, FL 33936, USA';
 
   const scraper = new LeeCountyFloridaScraper({
     headless: false, // Set to false to see the browser

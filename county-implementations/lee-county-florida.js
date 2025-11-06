@@ -81,7 +81,18 @@ class LeeCountyFloridaScraper extends DeedScraper {
       'Sec-Fetch-User': '?1'
     });
 
-    this.log('✅ Browser initialized with stealth mode');
+    // Set up global dialog handler to auto-dismiss all alerts/confirms/prompts
+    // This prevents Railway errors when switching between leepa.org and leeclerk.org
+    this.page.on('dialog', async (dialog) => {
+      this.log(`🔔 Dialog auto-dismissed: ${dialog.type()} - "${dialog.message()}"`);
+      try {
+        await dialog.accept();
+      } catch (err) {
+        this.log(`⚠️  Failed to dismiss dialog: ${err.message}`);
+      }
+    });
+
+    this.log('✅ Browser initialized with stealth mode and popup handling');
   }
 
   /**
@@ -695,11 +706,60 @@ class LeeCountyFloridaScraper extends DeedScraper {
 
       this.log(`📁 Download path set to: ${downloadPath}`);
 
-      // Navigate to the PDF page
-      await this.page.goto(pdfUrl, {
-        waitUntil: 'networkidle0',
-        timeout: 60000
+      // Set up popup/new page listener BEFORE navigating
+      // This handles cases where the clerk site opens in a new tab
+      let newPage = null;
+      const newPagePromise = new Promise((resolve) => {
+        this.browser.once('targetcreated', async (target) => {
+          if (target.type() === 'page') {
+            const page = await target.page();
+            this.log(`🔔 New page detected: ${page.url()}`);
+            resolve(page);
+          }
+        });
+        // Timeout after 5 seconds if no new page
+        setTimeout(() => resolve(null), 5000);
       });
+
+      // Navigate to the PDF page
+      try {
+        await this.page.goto(pdfUrl, {
+          waitUntil: 'networkidle0',
+          timeout: 60000
+        });
+        this.log(`✅ PDF page loaded in current tab`);
+      } catch (navError) {
+        this.log(`⚠️  Navigation warning: ${navError.message}`);
+        // Check if a new page was opened instead
+        newPage = await newPagePromise;
+        if (newPage) {
+          this.log(`✅ PDF page loaded in new tab`);
+          // Switch to the new page
+          this.page = newPage;
+          await this.randomWait(2000, 3000);
+        } else {
+          throw navError;
+        }
+      }
+
+      // If no new page yet, check one more time
+      if (!newPage) {
+        newPage = await newPagePromise;
+        if (newPage) {
+          this.log(`✅ Switching to new page: ${newPage.url()}`);
+          this.page = newPage;
+
+          // Set up download behavior for the new page
+          const newClient = await this.page.target().createCDPSession();
+          await newClient.send('Page.setDownloadBehavior', {
+            behavior: 'allow',
+            downloadPath: downloadPath
+          });
+          this.log(`📁 Download path configured for new page`);
+
+          await this.randomWait(2000, 3000);
+        }
+      }
 
       this.log(`✅ PDF page loaded`);
 
