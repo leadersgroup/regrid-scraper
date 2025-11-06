@@ -424,6 +424,7 @@ class HarrisCountyTexasScraper extends DeedScraper {
       const accountClicked = await searchFrame.evaluate(() => {
         // Look for account number links (13-digit numbers)
         const links = Array.from(document.querySelectorAll('a'));
+        const allLinks = links.map(l => l.textContent?.trim()).filter(t => t && t.length > 0);
 
         for (const link of links) {
           const text = link.textContent?.trim() || '';
@@ -434,14 +435,28 @@ class HarrisCountyTexasScraper extends DeedScraper {
           }
         }
 
-        return { clicked: false };
+        // Return diagnostic info if no account number found
+        return {
+          clicked: false,
+          allLinks: allLinks.slice(0, 10),  // First 10 links for debugging
+          pageText: document.body.innerText.substring(0, 500)
+        };
       });
 
       if (!accountClicked.clicked) {
         this.log(`⚠️ Could not find account number link`);
+        if (this.verbose) {
+          this.log(`   Found ${accountClicked.allLinks?.length || 0} links:`);
+          accountClicked.allLinks?.forEach(link => this.log(`     - "${link}"`));
+          this.log(`   Page content: ${accountClicked.pageText?.substring(0, 200)}`);
+        }
         return {
           success: false,
-          message: 'Could not find account number link'
+          message: 'Could not find account number link',
+          debug: {
+            linksFound: accountClicked.allLinks,
+            pagePreview: accountClicked.pageText
+          }
         };
       }
 
