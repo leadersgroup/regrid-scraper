@@ -271,11 +271,25 @@ class HarrisCountyTexasScraper extends DeedScraper {
         await this.randomWait(3000, 5000);
       }
 
-      // Wait for the Property Search interface with radio buttons to load
-      this.log(`⏳ Waiting for property search interface...`);
+      // Wait for the iframe containing the property search interface
+      this.log(`⏳ Waiting for property search iframe...`);
+      let searchFrame;
       try {
-        await this.page.waitForSelector('input[type="radio"]', { timeout: 30000 });
-        this.log(`✅ Property search interface loaded`);
+        await this.page.waitForSelector('iframe#parentIframe', { timeout: 30000 });
+        this.log(`✅ Property search iframe found`);
+
+        // Get the iframe
+        const frameHandle = await this.page.$('iframe#parentIframe');
+        searchFrame = await frameHandle.contentFrame();
+
+        if (!searchFrame) {
+          throw new Error('Could not access iframe content');
+        }
+
+        // Wait for radio buttons to load inside iframe
+        await searchFrame.waitForSelector('input[type="radio"]', { timeout: 20000 });
+        this.log(`✅ Property search interface loaded inside iframe`);
+
       } catch (e) {
         this.log(`⚠️ Timeout waiting for search interface: ${e.message}`);
 
@@ -287,6 +301,11 @@ class HarrisCountyTexasScraper extends DeedScraper {
         } catch (screenshotError) {
           this.log(`⚠️ Could not save screenshot: ${screenshotError.message}`);
         }
+
+        return {
+          success: false,
+          message: 'Could not load property search interface'
+        };
       }
 
       await this.randomWait(2000, 3000);
@@ -298,7 +317,7 @@ class HarrisCountyTexasScraper extends DeedScraper {
       this.log(`🏠 Searching for address: ${streetAddress}`);
 
       // Make sure "Property Address" radio button is selected
-      const propertyAddressRadio = await this.page.evaluate(() => {
+      const propertyAddressRadio = await searchFrame.evaluate(() => {
         const radios = Array.from(document.querySelectorAll('input[type="radio"]'));
         for (const radio of radios) {
           const label = radio.parentElement?.textContent || '';
@@ -318,10 +337,14 @@ class HarrisCountyTexasScraper extends DeedScraper {
         this.log(`⚠️ Could not find Property Address radio button`);
       }
 
-      await this.randomWait(500, 1000);
+      await this.randomWait(1000, 2000);
 
-      // Find the text input field (it should be near the radio buttons)
-      const addressInput = await this.page.$('input[type="text"]');
+      // Wait for the search input field (type="search", not "text")
+      this.log(`⏳ Waiting for address input field...`);
+      await searchFrame.waitForSelector('input[type="search"]', { timeout: 10000 });
+
+      // Find the search input field
+      const addressInput = await searchFrame.$('input[type="search"]');
 
       if (!addressInput) {
         this.log(`❌ Could not find address input field`);
@@ -343,7 +366,7 @@ class HarrisCountyTexasScraper extends DeedScraper {
 
       // Click the search button (magnifying glass icon)
       // Look for button with search icon or submit button
-      const searchClicked = await this.page.evaluate(() => {
+      const searchClicked = await searchFrame.evaluate(() => {
         // Try to find search button - could be a button or link with icon
         const buttons = Array.from(document.querySelectorAll('button, a, input[type="submit"]'));
 
@@ -377,16 +400,16 @@ class HarrisCountyTexasScraper extends DeedScraper {
       } else {
         // Try pressing Enter as fallback
         this.log(`⚠️ Could not find search button, trying Enter key`);
-        await this.page.keyboard.press('Enter');
+        await addressInput.press('Enter');
       }
 
-      // Wait for search results to load
+      // Wait for search results to load (inside iframe)
       this.log(`⏳ Waiting for search results to load...`);
       await this.randomWait(5000, 7000);
 
-      // Wait for results - look for account number links
+      // Wait for results - look for account number links (inside iframe)
       try {
-        await this.page.waitForFunction(() => {
+        await searchFrame.waitForFunction(() => {
           const text = document.body.innerText;
           // HCAD account numbers are typically 13 digits
           return /\d{13}/.test(text) || text.includes('Account') || text.includes('Property Details');
@@ -397,8 +420,8 @@ class HarrisCountyTexasScraper extends DeedScraper {
         this.log(`⚠️ Timeout waiting for results, checking page content anyway...`);
       }
 
-      // Click on first search result (account number link)
-      const accountClicked = await this.page.evaluate(() => {
+      // Click on first search result (account number link) inside iframe
+      const accountClicked = await searchFrame.evaluate(() => {
         // Look for account number links (13-digit numbers)
         const links = Array.from(document.querySelectorAll('a'));
 
@@ -424,10 +447,10 @@ class HarrisCountyTexasScraper extends DeedScraper {
 
       this.log(`✅ Clicked on account number: ${accountClicked.accountNumber}`);
 
-      // Wait for property detail page to load
+      // Wait for property detail page to load (inside iframe)
       await this.randomWait(3000, 5000);
 
-      await this.page.waitForFunction(() => {
+      await searchFrame.waitForFunction(() => {
         const text = document.body.innerText.toLowerCase();
         return text.includes('ownership history') ||
                text.includes('owner') ||
@@ -436,10 +459,10 @@ class HarrisCountyTexasScraper extends DeedScraper {
 
       this.log(`✅ Property detail page loaded`);
 
-      // Extract owner name and effective date from Ownership History
+      // Extract owner name and effective date from Ownership History (inside iframe)
       this.log(`🔍 Looking for Ownership History...`);
 
-      const ownershipData = await this.page.evaluate(() => {
+      const ownershipData = await searchFrame.evaluate(() => {
         // Look for "Ownership history" section
         const allText = document.body.innerText;
         const lines = allText.split('\n');
