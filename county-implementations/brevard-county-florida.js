@@ -133,7 +133,7 @@ class BrevardCountyFloridaScraper extends DeedScraper {
       result.steps.step2 = {
         success: transactionResult.success,
         transactions: transactionResult.transactions || [],
-        assessorUrl: 'https://www.bcpao.us/PropertySearch/',
+        assessorUrl: 'https://www.bcpao.us/PropertySearch/#/nav/Search',
         originalAddress: address,
         county: 'Brevard',
         state: 'FL'
@@ -183,22 +183,28 @@ class BrevardCountyFloridaScraper extends DeedScraper {
    */
   getAssessorUrl(county, state) {
     if (county === 'Brevard' && state === 'FL') {
-      return 'https://www.bcpao.us/PropertySearch/';
+      return 'https://www.bcpao.us/PropertySearch/#/nav/Search';
     }
     return null;
   }
 
   /**
    * Search Brevard County Property Appraiser by address
-   * URL: https://www.bcpao.us/PropertySearch/
+   * URL: https://www.bcpao.us/PropertySearch/#/nav/Search
+   * Workflow:
+   * 1. Type address without city and state
+   * 2. Wait for autocomplete popup
+   * 3. Verify popup matches search address
+   * 4. Click on popup address
+   * 5. Press Enter
    */
   async searchAssessorSite(parcelId, ownerName) {
     this.log(`🔍 Searching Brevard County FL Property Appraiser`);
-    this.log(`   Using address search`);
+    this.log(`   Using address search (without city/state)`);
 
     try {
       // Navigate to property search page
-      await this.page.goto('https://www.bcpao.us/PropertySearch/', {
+      await this.page.goto('https://www.bcpao.us/PropertySearch/#/nav/Search', {
         waitUntil: 'networkidle2',
         timeout: this.timeout
       });
@@ -354,159 +360,67 @@ class BrevardCountyFloridaScraper extends DeedScraper {
    * Extract transaction records from Property Appraiser
    * Look for sales history, instrument numbers, book/page references
    */
+  /**
+   * Extract transaction records from the property detail page
+   * Workflow:
+   * 1. Find the "Sale/Transfers" table
+   * 2. Extract the first entry in the "Instrument" column (e.g., "6790/1266")
+   * 3. Extract the link behind it (e.g., https://vaclmweb1.brevardclerk.us/AcclaimWeb/Details/GetDocumentbyBookPage/OR/6790/1266)
+   */
   async extractTransactionRecords() {
     this.log('📋 Extracting transaction records from Property Appraiser...');
 
     try {
       await this.randomWait(2000, 3000);
 
-      // Look for Sales/Transfer information sections
-      this.log('🔍 Looking for Sales/Transfer information...');
-
-      // Brevard County might have a Sales tab or section
-      const salesSectionFound = await this.page.evaluate(() => {
-        const allElements = Array.from(document.querySelectorAll('a, button, div, span, h2, h3'));
-
-        for (const el of allElements) {
-          const text = el.textContent?.trim() || '';
-
-          if (text.match(/sales?( history)?/i) ||
-              text.match(/transfer/i) ||
-              text.match(/conveyance/i)) {
-
-            if (el.tagName === 'A' || el.tagName === 'BUTTON') {
-              el.click();
-              return { clicked: true, text: text };
-            }
-
-            const clickableParent = el.closest('a, button, [onclick]');
-            if (clickableParent) {
-              clickableParent.click();
-              return { clicked: true, text: text };
-            }
-          }
-        }
-
-        return { clicked: false };
-      });
-
-      if (salesSectionFound && salesSectionFound.clicked) {
-        this.log(`✅ Clicked on Sales section (${salesSectionFound.text})`);
-        await this.randomWait(3000, 5000);
-
-        // Scroll to ensure content is loaded
-        await this.page.evaluate(() => {
-          window.scrollBy(0, 800);
-        });
-        await this.randomWait(2000, 3000);
-      } else {
-        this.log(`ℹ️  No Sales section found, checking current page for transaction data`);
-      }
+      // Look for "Sale/Transfers" table
+      this.log('🔍 Looking for "Sale/Transfers" table...');
 
       // Extract transaction information from the page
-      this.log('🔍 Extracting transaction data...');
-
+      // Look specifically for links to brevardclerk.us with book/page format
       const transactions = await this.page.evaluate(() => {
         const results = [];
-        const pageText = document.body.innerText;
 
-        // Look for instrument numbers (typically 10-12 digits for Florida)
-        // Format: CFN 2023012345, Inst# 2023012345, OR 2023012345, etc.
-        const instrumentPatterns = [
-          /(?:CFN|Instrument|Inst\.?|OR|Doc(?:ument)?)[:\s#]*(\d{10,12})/gi,
-          /\b(\d{10,12})\b/g  // Standalone 10-12 digit numbers
-        ];
-
-        const foundInstruments = new Set();
-
-        for (const pattern of instrumentPatterns) {
-          const matches = [...pageText.matchAll(pattern)];
-          for (const match of matches) {
-            const instrumentNum = match[1];
-            // Only add if it looks like a valid instrument number (starts with 20 for year)
-            if (instrumentNum.startsWith('20') && instrumentNum.length >= 10) {
-              foundInstruments.add(instrumentNum);
-            }
-          }
-        }
-
-        // Convert to array and create transaction objects
-        for (const instrumentNum of foundInstruments) {
-          results.push({
-            instrumentNumber: instrumentNum,
-            type: 'instrument_number',
-            source: 'Brevard County Property Appraiser'
-          });
-        }
-
-        // Look for Book/Page format
-        // Format: "Book 9999 Page 9999" or "Bk 9999 Pg 9999" or "9999/9999"
-        const bookPagePatterns = [
-          /Book[:\s#]*(\d{3,5})[,\s\-]+Page[:\s#]*(\d{3,5})/gi,
-          /Bk[:\s#]*(\d{3,5})[,\s\-]+Pg[:\s#]*(\d{3,5})/gi,
-          /OR\s+Book[:\s#]*(\d{3,5})[,\s\-]+Page[:\s#]*(\d{3,5})/gi
-        ];
-
-        for (const pattern of bookPagePatterns) {
-          const matches = [...pageText.matchAll(pattern)];
-          for (const match of matches) {
-            const bookNum = match[1];
-            const pageNum = match[2];
-
-            // Avoid duplicates
-            const exists = results.some(r =>
-              r.type === 'book_page' && r.bookNumber === bookNum && r.pageNumber === pageNum
-            );
-
-            if (!exists && parseInt(bookNum) > 100) { // Filter out low book numbers
-              results.push({
-                bookNumber: bookNum,
-                pageNumber: pageNum,
-                type: 'book_page',
-                source: 'Brevard County Property Appraiser'
-              });
-            }
-          }
-        }
-
-        // Also check for table data (more structured)
+        // Find all tables on the page
         const tables = Array.from(document.querySelectorAll('table'));
+
         for (const table of tables) {
-          const rows = Array.from(table.querySelectorAll('tr'));
+          // Check if this table contains "Sale" or "Transfer" text
+          const tableText = table.innerText || table.textContent || '';
 
-          for (let i = 1; i < rows.length; i++) { // Skip header
-            const row = rows[i];
-            const cells = Array.from(row.querySelectorAll('td'));
+          if (tableText.toLowerCase().includes('sale') ||
+              tableText.toLowerCase().includes('transfer') ||
+              tableText.toLowerCase().includes('instrument')) {
 
-            if (cells.length >= 2) {
-              const rowText = row.innerText;
+            // Look for links to brevardclerk.us in this table
+            const links = table.querySelectorAll('a[href*="brevardclerk"]');
 
-              // Check for instrument number in table
-              const instMatch = rowText.match(/\b(20\d{8,10})\b/);
-              if (instMatch && !foundInstruments.has(instMatch[1])) {
-                foundInstruments.add(instMatch[1]);
-                results.push({
-                  instrumentNumber: instMatch[1],
-                  type: 'instrument_number',
-                  source: 'Brevard County Property Appraiser - Table'
-                });
-              }
+            for (const link of links) {
+              const href = link.href;
+              const text = (link.textContent || '').trim();
 
-              // Check for book/page in table
-              const bookPageMatch = rowText.match(/(\d{3,5})[\/\-\s]+(\d{3,5})/);
+              // Extract book/page from the link text (e.g., "6790/1266")
+              const bookPageMatch = text.match(/(\d+)\/(\d+)/);
+
               if (bookPageMatch) {
-                const bookNum = bookPageMatch[1];
-                const pageNum = bookPageMatch[2];
-                const exists = results.some(r =>
-                  r.type === 'book_page' && r.bookNumber === bookNum && r.pageNumber === pageNum
-                );
-
-                if (!exists && parseInt(bookNum) > 100) {
+                results.push({
+                  bookNumber: bookPageMatch[1],
+                  pageNumber: bookPageMatch[2],
+                  bookPage: text,
+                  href: href,
+                  source: 'Brevard County Property Appraiser - Sale/Transfers Table'
+                });
+              } else {
+                // Try to extract from URL
+                // URL format: /GetDocumentbyBookPage/OR/6790/1266
+                const urlMatch = href.match(/\/OR\/(\d+)\/(\d+)/);
+                if (urlMatch) {
                   results.push({
-                    bookNumber: bookNum,
-                    pageNumber: pageNum,
-                    type: 'book_page',
-                    source: 'Brevard County Property Appraiser - Table'
+                    bookNumber: urlMatch[1],
+                    pageNumber: urlMatch[2],
+                    bookPage: text || `${urlMatch[1]}/${urlMatch[2]}`,
+                    href: href,
+                    source: 'Brevard County Property Appraiser - Sale/Transfers Table'
                   });
                 }
               }
@@ -514,96 +428,212 @@ class BrevardCountyFloridaScraper extends DeedScraper {
           }
         }
 
+        // If we didn't find anything in tables, search all links on the page
+        if (results.length === 0) {
+          const allLinks = document.querySelectorAll('a[href*="brevardclerk"]');
+
+          for (const link of allLinks) {
+            const href = link.href;
+            const text = (link.textContent || '').trim();
+
+            // Extract book/page from URL
+            const urlMatch = href.match(/\/OR\/(\d+)\/(\d+)/);
+            if (urlMatch) {
+              const bookPageMatch = text.match(/(\d+)\/(\d+)/);
+              results.push({
+                bookNumber: urlMatch[1],
+                pageNumber: urlMatch[2],
+                bookPage: bookPageMatch ? text : `${urlMatch[1]}/${urlMatch[2]}`,
+                href: href,
+                source: 'Brevard County Clerk Website'
+              });
+            }
+          }
+        }
+
         return results;
       });
 
-      this.log(`✅ Found ${transactions.length} transaction record(s)`);
+      if (transactions.length > 0) {
+        this.log(`🔍 Extracted ${transactions.length} deed record(s)`);
+        transactions.forEach((t, i) => {
+          this.log(`   📄 Book/Page: ${t.bookPage} (Book: ${t.bookNumber}, Page: ${t.pageNumber})`);
+          this.log(`      Link: ${t.href}`);
+        });
 
-      // Log what we found
-      for (const trans of transactions) {
-        if (trans.type === 'instrument_number') {
-          this.log(`   Instrument #: ${trans.instrumentNumber}`);
-        } else if (trans.type === 'book_page') {
-          this.log(`   Book/Page: ${trans.bookNumber}/${trans.pageNumber}`);
-        }
+        return {
+          success: true,
+          transactions
+        };
       }
 
+      this.log(`⚠️ No transactions found on page`);
       return {
-        success: transactions.length > 0,
-        transactions
+        success: false,
+        message: 'No transactions found on Property Appraiser page',
+        transactions: []
       };
 
     } catch (error) {
-      this.log(`❌ Failed to extract transaction records: ${error.message}`);
+      this.log(`❌ Error extracting transactions: ${error.message}`);
       return {
         success: false,
-        error: error.message
+        message: error.message,
+        transactions: []
       };
     }
   }
 
   /**
-   * Download deed PDF from Brevard County Clerk
-   * Navigate to clerk page, search by instrument number or book/page, download PDF
+   * Download deed PDF from Brevard County Clerk website
+   * URL pattern: https://vaclmweb1.brevardclerk.us/AcclaimWeb/Details/GetDocumentbyBookPage/OR/6790/1266
+   *
+   * The detail page contains an iframe with a PDF viewer that has a download button in the upper right corner
+   * <iframe src="https://vaclmweb1.brevardclerk.us/AcclaimWeb/Image/DocumentImage1/8876398" id="imgFrame1" class="docFrame">
+   *
+   * We need to:
+   * 1. Navigate to the detail page
+   * 2. Wait for iframe to load
+   * 3. Switch to iframe context
+   * 4. Click the download button in the upper right corner
    */
   async downloadDeed(transaction) {
     this.log('📄 Downloading deed from Brevard County Clerk...');
 
     try {
-      const clerkUrl = 'https://vaclmweb1.brevardclerk.us/AcclaimWeb/';
-      this.log(`🌐 Navigating to Clerk's website: ${clerkUrl}`);
+      if (!transaction.href) {
+        throw new Error('No PDF URL found in transaction record');
+      }
 
-      await this.page.goto(clerkUrl, {
-        waitUntil: 'networkidle2',
-        timeout: this.timeout
+      const detailPageUrl = transaction.href;
+      this.log(`🌐 Navigating to detail page: ${detailPageUrl}`);
+
+      // Set up download handling BEFORE navigating
+      const path = require('path');
+      const fs = require('fs');
+      const relativePath = process.env.DEED_DOWNLOAD_PATH || './downloads';
+      const downloadPath = path.resolve(relativePath);
+
+      // Ensure download directory exists
+      if (!fs.existsSync(downloadPath)) {
+        fs.mkdirSync(downloadPath, { recursive: true });
+        this.log(`📁 Created download directory: ${downloadPath}`);
+      }
+
+      // Set download behavior
+      const client = await this.page.target().createCDPSession();
+      await client.send('Page.setDownloadBehavior', {
+        behavior: 'allow',
+        downloadPath: downloadPath
       });
 
+      this.log(`📁 Download path set to: ${downloadPath}`);
+
+      // Navigate to the detail page
+      await this.page.goto(detailPageUrl, {
+        waitUntil: 'networkidle0',
+        timeout: 60000
+      });
+
+      this.log(`✅ Detail page loaded`);
+
+      // Wait for the iframe to load
       await this.randomWait(3000, 5000);
 
-      // Check if we need to accept disclaimer or login
-      const pageStatus = await this.page.evaluate(() => {
-        const text = document.body.innerText.toLowerCase();
-        return {
-          hasDisclaimer: text.includes('disclaimer') || text.includes('accept'),
-          hasLogin: text.includes('login') || text.includes('username'),
-          hasSearch: text.includes('search') || text.includes('name search') || text.includes('book')
-        };
+      // Find the iframe
+      const iframeElement = await this.page.$('iframe[id*="imgFrame"], iframe[class*="docFrame"], iframe');
+
+      if (!iframeElement) {
+        throw new Error('Could not find PDF iframe on detail page');
+      }
+
+      this.log(`✅ Found PDF iframe`);
+
+      // Get the iframe's content frame
+      const frame = await iframeElement.contentFrame();
+
+      if (!frame) {
+        throw new Error('Could not access iframe content');
+      }
+
+      this.log(`✅ Accessed iframe content`);
+
+      // Wait for PDF viewer to load in iframe
+      await this.randomWait(2000, 3000);
+
+      // Look for "Save Document" button in the iframe (upper right corner)
+      // Based on inspection, the button has id="SaveDoc" and title="Save Document"
+      this.log(`🔍 Looking for "Save Document" button...`);
+
+      // Wait for the button to be available
+      await frame.waitForSelector('#SaveDoc', { timeout: 10000 });
+
+      this.log(`🔘 Found "Save Document" button (id=SaveDoc)`);
+
+      // Use evaluate to click the button directly in the iframe context
+      // This avoids "not clickable" errors
+      await frame.evaluate(() => {
+        const btn = document.querySelector('#SaveDoc');
+        if (btn) {
+          btn.click();
+          return true;
+        }
+        return false;
       });
 
-      this.log(`📋 Page status: disclaimer=${pageStatus.hasDisclaimer}, login=${pageStatus.hasLogin}, search=${pageStatus.hasSearch}`);
+      this.log(`✅ Clicked "Save Document" button`)
 
-      // Handle disclaimer if present
-      if (pageStatus.hasDisclaimer) {
-        this.log(`📋 Accepting disclaimer...`);
-        const disclaimerAccepted = await this.page.evaluate(() => {
-          const buttons = Array.from(document.querySelectorAll('button, input[type="submit"], input[type="button"], a'));
-          for (const btn of buttons) {
-            const text = (btn.textContent || btn.value || '').toLowerCase();
-            if (text.includes('accept') || text.includes('agree') || text.includes('continue')) {
-              btn.click();
-              return true;
-            }
-          }
-          return false;
-        });
+      // Wait for download to complete
+      this.log(`⏳ Waiting for PDF download to complete...`);
+      await this.randomWait(5000, 8000);
 
-        if (disclaimerAccepted) {
-          this.log(`✅ Accepted disclaimer`);
-          await this.randomWait(3000, 5000);
-        }
+      // Find the downloaded PDF
+      const files = fs.readdirSync(downloadPath);
+      const pdfFiles = files.filter(f => f.toLowerCase().endsWith('.pdf'));
+
+      if (pdfFiles.length === 0) {
+        throw new Error('No PDF file found in download directory');
       }
 
-      // If instrument number is available, use Clerk File Number search
-      if (transaction.instrumentNumber) {
-        return await this.searchByInstrumentNumber(transaction.instrumentNumber);
+      // Get the most recent PDF
+      const latestPdf = pdfFiles.sort((a, b) => {
+        const statA = fs.statSync(path.join(downloadPath, a));
+        const statB = fs.statSync(path.join(downloadPath, b));
+        return statB.mtime.getTime() - statA.mtime.getTime();
+      })[0];
+
+      const filepath = path.join(downloadPath, latestPdf);
+      const stats = fs.statSync(filepath);
+
+      // Read the PDF to get base64
+      const pdfBuffer = fs.readFileSync(filepath);
+      const pdfBase64 = pdfBuffer.toString('base64');
+
+      this.log(`✅ PDF downloaded successfully: ${latestPdf}`);
+      this.log(`💾 File size: ${(stats.size / 1024).toFixed(2)} KB`);
+
+      // Rename to standard format
+      const filename = `brevard_deed_${transaction.bookNumber}_${transaction.pageNumber}.pdf`;
+      const newFilepath = path.join(downloadPath, filename);
+
+      if (filepath !== newFilepath) {
+        fs.renameSync(filepath, newFilepath);
+        this.log(`📝 Renamed to: ${filename}`);
       }
 
-      // Otherwise, use Book/Page search
-      if (transaction.bookNumber && transaction.pageNumber) {
-        return await this.searchByBookPage(transaction.bookNumber, transaction.pageNumber);
-      }
-
-      throw new Error('No instrument number or book/page available for search');
+      return {
+        success: true,
+        filename,
+        downloadPath,
+        filepath: newFilepath,
+        bookNumber: transaction.bookNumber,
+        pageNumber: transaction.pageNumber,
+        bookPage: transaction.bookPage,
+        pdfUrl: detailPageUrl,
+        timestamp: new Date().toISOString(),
+        fileSize: stats.size,
+        pdfBase64
+      };
 
     } catch (error) {
       this.log(`❌ Failed to download deed: ${error.message}`);
