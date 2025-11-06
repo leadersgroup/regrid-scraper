@@ -361,7 +361,11 @@ app.post('/api/getPriorDeed', async (req, res) => {
     console.log(`   County: ${normalizedCounty}, ${normalizedState}`);
     console.log(`${'='.repeat(80)}\n`);
 
-    const result = await processDeedDownload(address, county, state);
+    const result = await processDeedDownload(address, county, state, {
+      verbose: true,  // Enable detailed logging for Railway debugging
+      headless: true,
+      timeout: 120000
+    });
     const duration = ((Date.now() - startTime) / 1000).toFixed(2);
 
     console.log(`\n${'='.repeat(80)}`);
