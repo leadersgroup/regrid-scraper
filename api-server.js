@@ -236,72 +236,35 @@ async function processDeedDownload(address, county, state, options = {}) {
 
   console.log(`🔍 Routing request: County="${detectedCounty}", State="${detectedState}"`);
 
+  // Default options for Railway deployment with verbose logging enabled
+  const scraperOptions = {
+    headless: options?.headless !== false, // Default to headless
+    timeout: options?.timeout || 120000,
+    verbose: options?.verbose !== false  // Default to true for Railway debugging
+  };
+
   if (detectedCounty === 'Orange' && detectedState === 'FL') {
-    scraper = new OrangeCountyFloridaScraper({
-      headless: options?.headless !== false, // Default to headless
-      timeout: options?.timeout || 120000,
-      verbose: options?.verbose || false
-    });
+    scraper = new OrangeCountyFloridaScraper(scraperOptions);
   } else if (detectedCounty === 'Hillsborough' && detectedState === 'FL') {
-    scraper = new HillsboroughCountyFloridaScraper({
-      headless: options?.headless !== false, // Default to headless
-      timeout: options?.timeout || 120000,
-      verbose: options?.verbose || false
-    });
+    scraper = new HillsboroughCountyFloridaScraper(scraperOptions);
   } else if (detectedCounty === 'Duval' && detectedState === 'FL') {
-    scraper = new DuvalCountyFloridaScraper({
-      headless: options?.headless !== false,
-      timeout: options?.timeout || 120000,
-      verbose: options?.verbose || false
-    });
+    scraper = new DuvalCountyFloridaScraper(scraperOptions);
   } else if (detectedCounty === 'Davidson' && detectedState === 'TN') {
-    scraper = new DavidsonCountyTennesseeScraper({
-      headless: options?.headless !== false,
-      timeout: options?.timeout || 120000,
-      verbose: options?.verbose || false
-    });
+    scraper = new DavidsonCountyTennesseeScraper(scraperOptions);
   } else if (detectedCounty === 'Polk' && detectedState === 'FL') {
-    scraper = new PolkCountyFloridaScraper({
-      headless: options?.headless !== false,
-      timeout: options?.timeout || 120000,
-      verbose: options?.verbose || false
-    });
+    scraper = new PolkCountyFloridaScraper(scraperOptions);
   } else if (detectedCounty === 'Pinellas' && detectedState === 'FL') {
-    scraper = new PinellasCountyFloridaScraper({
-      headless: options?.headless !== false,
-      timeout: options?.timeout || 120000,
-      verbose: options?.verbose || false
-    });
+    scraper = new PinellasCountyFloridaScraper(scraperOptions);
   } else if (detectedCounty === 'Brevard' && detectedState === 'FL') {
-    scraper = new BrevardCountyFloridaScraper({
-      headless: options?.headless !== false,
-      timeout: options?.timeout || 120000,
-      verbose: options?.verbose || false
-    });
+    scraper = new BrevardCountyFloridaScraper(scraperOptions);
   } else if (detectedCounty === 'Lee' && detectedState === 'FL') {
-    scraper = new LeeCountyFloridaScraper({
-      headless: options?.headless !== false,
-      timeout: options?.timeout || 120000,
-      verbose: options?.verbose || false
-    });
+    scraper = new LeeCountyFloridaScraper(scraperOptions);
   } else if (detectedCounty === 'Palm Beach' && detectedState === 'FL') {
-    scraper = new PalmBeachCountyFloridaScraper({
-      headless: options?.headless !== false,
-      timeout: options?.timeout || 120000,
-      verbose: options?.verbose || false
-    });
+    scraper = new PalmBeachCountyFloridaScraper(scraperOptions);
   } else if (detectedCounty === 'Miami-Dade' && detectedState === 'FL') {
-    scraper = new MiamiDadeCountyFloridaScraper({
-      headless: options?.headless !== false, // Default to headless
-      timeout: options?.timeout || 120000,
-      verbose: options?.verbose || false
-    });
+    scraper = new MiamiDadeCountyFloridaScraper(scraperOptions);
   } else if (detectedCounty === 'Broward' && detectedState === 'FL') {
-    scraper = new BrowardCountyFloridaScraper({
-      headless: options?.headless !== false, // Default to headless
-      timeout: options?.timeout || 120000,
-      verbose: options?.verbose || false
-    });
+    scraper = new BrowardCountyFloridaScraper(scraperOptions);
   } else {
     throw new Error(`County "${detectedCounty}, ${detectedState}" is not yet supported`);
   }

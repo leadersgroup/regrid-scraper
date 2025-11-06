@@ -439,13 +439,51 @@ class LeeCountyFloridaScraper extends DeedScraper {
       this.log(`⏳ Waiting ${waitTime2}ms before submitting...`);
       await this.randomWait(1000, 2000);
 
-      // Press Enter to submit the search (simpler than clicking button)
-      this.log(`⌨️  Pressing Enter key to submit search...`);
-      await this.page.keyboard.press('Enter');
+      // Try to submit the form by clicking the search button
+      // ASP.NET forms often require clicking the actual submit button
+      this.log(`🔍 Looking for search/submit button...`);
 
-      this.log(`✅ Enter key pressed`);
+      const submitButtonClicked = await this.page.evaluate(() => {
+        // Look for submit button with various patterns
+        const buttonSelectors = [
+          'input[type="submit"]',
+          'input[type="button"]',
+          'button[type="submit"]',
+          'button'
+        ];
+
+        for (const selector of buttonSelectors) {
+          const buttons = Array.from(document.querySelectorAll(selector));
+          for (const btn of buttons) {
+            const value = (btn.value || '').toLowerCase();
+            const text = (btn.textContent || '').toLowerCase();
+            const id = (btn.id || '').toLowerCase();
+
+            // Look for search-related buttons
+            if (value.includes('search') || text.includes('search') ||
+                id.includes('search') || id.includes('submit')) {
+              const style = window.getComputedStyle(btn);
+              if (style.display !== 'none' && style.visibility !== 'hidden') {
+                console.log(`Found submit button: ${btn.id || btn.value || btn.textContent}`);
+                btn.click();
+                return { clicked: true, button: btn.id || btn.value || btn.textContent || 'unknown' };
+              }
+            }
+          }
+        }
+        return { clicked: false };
+      });
+
+      if (submitButtonClicked && submitButtonClicked.clicked) {
+        this.log(`✅ Clicked search button: ${submitButtonClicked.button}`);
+      } else {
+        this.log(`⚠️  No search button found, trying Enter key...`);
+        await this.page.keyboard.press('Enter');
+        this.log(`✅ Enter key pressed`);
+      }
+
       const urlAfterSubmit = this.page.url();
-      this.log(`📍 Current URL: ${urlAfterSubmit}`);
+      this.log(`📍 Current URL after submit: ${urlAfterSubmit}`);
 
       // Wait for search results to load (match table)
       this.log(`⏳ Waiting for search results to load...`);
