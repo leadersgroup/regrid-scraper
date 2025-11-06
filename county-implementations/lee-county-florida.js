@@ -9,6 +9,8 @@
 const DeedScraper = require('../deed-scraper');
 const puppeteer = require('puppeteer-extra');
 const StealthPlugin = require('puppeteer-extra-plugin-stealth');
+const path = require('path');
+const fs = require('fs');
 
 // Use stealth plugin to avoid bot detection on Lee County website
 puppeteer.use(StealthPlugin());
@@ -58,8 +60,14 @@ class LeeCountyFloridaScraper extends DeedScraper {
     }
 
     this.log('   Launching browser...');
+
+    // For Lee County, use Chrome's new headless mode if headless is requested
+    // The new headless mode has better JavaScript/AJAX compatibility
+    const headlessMode = this.headless === true ? 'new' : this.headless;
+    this.log(`   Headless setting: ${headlessMode}`);
+
     this.browser = await puppeteer.launch({
-      headless: this.headless,
+      headless: headlessMode,
       ...(executablePath && { executablePath }),
       protocolTimeout: 600000, // 10 minute timeout for protocol operations (increased from 5 min)
       args: [
@@ -69,7 +77,8 @@ class LeeCountyFloridaScraper extends DeedScraper {
         '--disable-blink-features=AutomationControlled',
         '--window-size=1920,1080',
         '--disable-web-security',
-        '--disable-features=IsolateOrigins,site-per-process'
+        '--disable-features=IsolateOrigins,site-per-process',
+        '--enable-features=NetworkService,NetworkServiceInProcess'
       ]
     });
     this.log('   ✅ Browser launched');
@@ -319,7 +328,33 @@ class LeeCountyFloridaScraper extends DeedScraper {
       this.log(`⏳ Waiting ${waitTime}ms before proceeding...`);
       await this.randomWait(3000, 5000);
 
-      // Check for and dismiss any popups or overlays
+      // Check for and dismiss the privacy policy popup
+      this.log(`🔍 Checking for privacy policy popup...`);
+      const privacyPopupHandled = await this.page.evaluate(() => {
+        // Look for "Continue" button in privacy policy popup
+        const buttons = Array.from(document.querySelectorAll('button, input[type="button"], input[type="submit"]'));
+        for (const btn of buttons) {
+          const text = (btn.textContent || btn.value || '').toLowerCase().trim();
+          if (text === 'continue') {
+            const style = window.getComputedStyle(btn);
+            if (style.display !== 'none' && style.visibility !== 'hidden') {
+              console.log('Found Continue button, clicking...');
+              btn.click();
+              return true;
+            }
+          }
+        }
+        return false;
+      });
+
+      if (privacyPopupHandled) {
+        this.log(`✅ Clicked "Continue" on privacy policy popup`);
+        await this.randomWait(2000, 3000);
+      } else {
+        this.log(`   No privacy policy popup found`);
+      }
+
+      // Check for and dismiss any other popups or overlays
       const popupDismissed = await this.page.evaluate(() => {
         // Look for close buttons on modals/dialogs
         const closeButtons = Array.from(document.querySelectorAll('button, a, [class*="close"], [class*="dismiss"]'));
@@ -337,7 +372,7 @@ class LeeCountyFloridaScraper extends DeedScraper {
       });
 
       if (popupDismissed) {
-        this.log(`✅ Dismissed popup`);
+        this.log(`✅ Dismissed other popup`);
         await this.randomWait(1000, 2000);
       }
 
@@ -395,18 +430,22 @@ class LeeCountyFloridaScraper extends DeedScraper {
 
         // Capture screenshot for debugging
         try {
-          const screenshotPath = path.join(this.downloadPath, 'lee_error_no_input.png');
+          const downloadPath = path.resolve(process.env.DEED_DOWNLOAD_PATH || './downloads');
+          if (!fs.existsSync(downloadPath)) {
+            fs.mkdirSync(downloadPath, { recursive: true });
+          }
+          const screenshotPath = path.join(downloadPath, 'lee_error_no_input.png');
           await this.page.screenshot({ path: screenshotPath, fullPage: true });
           this.log(`📸 Screenshot saved to: ${screenshotPath}`);
-        } catch (err) {
-          this.log(`⚠️  Failed to capture screenshot: ${err.message}`);
-        }
 
-        // Log HTML content for debugging
-        const htmlContent = await this.page.content();
-        const htmlPath = path.join(this.downloadPath, 'lee_error_no_input.html');
-        await fs.promises.writeFile(htmlPath, htmlContent);
-        this.log(`📄 HTML saved to: ${htmlPath}`);
+          // Log HTML content for debugging
+          const htmlContent = await this.page.content();
+          const htmlPath = path.join(downloadPath, 'lee_error_no_input.html');
+          await fs.promises.writeFile(htmlPath, htmlContent);
+          this.log(`📄 HTML saved to: ${htmlPath}`);
+        } catch (err) {
+          this.log(`⚠️  Failed to save debug files: ${err.message}`);
+        }
 
         throw new Error('Could not find street address input field');
       }
@@ -485,23 +524,81 @@ class LeeCountyFloridaScraper extends DeedScraper {
       const urlAfterSubmit = this.page.url();
       this.log(`📍 Current URL after submit: ${urlAfterSubmit}`);
 
-      // Wait for search results to load (match table)
-      this.log(`⏳ Waiting for search results to load...`);
+      // Wait extra time for the search to process (ASP.NET postback can be slow)
+      this.log(`⏳ Waiting for search to process...`);
       await this.randomWait(5000, 7000);
 
-      // Wait for match table to appear
-      try {
-        await this.page.waitForFunction(() => {
-          const text = document.body.innerText.toLowerCase();
-          return text.includes('match') ||
-                 text.includes('results') ||
-                 text.includes('folio') ||
-                 text.includes('parcel');
-        }, { timeout: 30000 });
+      // Handle privacy policy popup that might appear after clicking search
+      this.log(`🔍 Checking for privacy policy popup after search submit...`);
+      await this.randomWait(2000, 3000);
 
-        this.log(`✅ Search results loaded`);
+      const privacyPopupAfterSearch = await this.page.evaluate(() => {
+        // Look for "Continue" button in privacy policy popup
+        const buttons = Array.from(document.querySelectorAll('button, input[type="button"], input[type="submit"]'));
+        for (const btn of buttons) {
+          const text = (btn.textContent || btn.value || '').toLowerCase().trim();
+          if (text === 'continue') {
+            const style = window.getComputedStyle(btn);
+            if (style.display !== 'none' && style.visibility !== 'hidden') {
+              console.log('Found Continue button after search, clicking...');
+              btn.click();
+              return true;
+            }
+          }
+        }
+        return false;
+      });
+
+      if (privacyPopupAfterSearch) {
+        this.log(`✅ Clicked "Continue" on privacy policy popup after search`);
+        await this.randomWait(2000, 3000);
+      } else {
+        this.log(`   No privacy policy popup found after search`);
+      }
+
+      // Wait for search results to load (match table)
+      this.log(`⏳ Waiting for search results to load...`);
+
+      // Check if there's a postback happening (ASP.NET specific)
+      const postbackCheck = await this.page.evaluate(() => {
+        // Check if there's an __EVENTTARGET hidden field (ASP.NET)
+        const eventTarget = document.querySelector('input[name="__EVENTTARGET"]');
+        const viewState = document.querySelector('input[name="__VIEWSTATE"]');
+        return {
+          hasEventTarget: !!eventTarget,
+          hasViewState: !!viewState,
+          eventTargetValue: eventTarget ? eventTarget.value : null,
+          pageRequestManagerExists: typeof window.Sys !== 'undefined' && typeof window.Sys.WebForms !== 'undefined'
+        };
+      });
+
+      this.log(`📋 ASP.NET postback check:`);
+      this.log(`   Has __EVENTTARGET: ${postbackCheck.hasEventTarget}`);
+      this.log(`   Has __VIEWSTATE: ${postbackCheck.hasViewState}`);
+      this.log(`   __EVENTTARGET value: ${postbackCheck.eventTargetValue}`);
+      this.log(`   Page has AJAX UpdatePanel: ${postbackCheck.pageRequestManagerExists}`);
+
+      // Wait for match table to appear or navigation to occur
+      try {
+        await Promise.race([
+          // Wait for navigation to results page
+          this.page.waitForNavigation({ waitUntil: 'networkidle2', timeout: 30000 }).then(() => 'navigation'),
+          // OR wait for results to appear on same page
+          this.page.waitForFunction(() => {
+            const text = document.body.innerText.toLowerCase();
+            return text.includes('match') ||
+                   text.includes('results') ||
+                   text.includes('folio') ||
+                   text.includes('parcel') ||
+                   text.includes('search results');
+          }, { timeout: 30000 }).then(() => 'results_on_page')
+        ]).then((result) => {
+          this.log(`✅ Search completed via: ${result}`);
+        });
       } catch (waitError) {
-        this.log(`⚠️ Timeout waiting for results, checking page content anyway...`);
+        this.log(`⚠️  Timeout waiting for results: ${waitError.message}`);
+        this.log(`   Current URL: ${this.page.url()}`);
+        this.log(`   Continuing to check page content...`);
       }
 
       await this.randomWait(2000, 3000);
@@ -601,18 +698,22 @@ class LeeCountyFloridaScraper extends DeedScraper {
 
         // Capture screenshot for debugging
         try {
-          const screenshotPath = path.join(this.downloadPath, 'lee_error_no_results.png');
+          const downloadPath = path.resolve(process.env.DEED_DOWNLOAD_PATH || './downloads');
+          if (!fs.existsSync(downloadPath)) {
+            fs.mkdirSync(downloadPath, { recursive: true });
+          }
+          const screenshotPath = path.join(downloadPath, 'lee_error_no_results.png');
           await this.page.screenshot({ path: screenshotPath, fullPage: true });
           this.log(`📸 Screenshot saved to: ${screenshotPath}`);
-        } catch (err) {
-          this.log(`⚠️  Failed to capture screenshot: ${err.message}`);
-        }
 
-        // Log HTML content for debugging
-        const htmlContent = await this.page.content();
-        const htmlPath = path.join(this.downloadPath, 'lee_error_no_results.html');
-        await fs.promises.writeFile(htmlPath, htmlContent);
-        this.log(`📄 HTML saved to: ${htmlPath}`);
+          // Log HTML content for debugging
+          const htmlContent = await this.page.content();
+          const htmlPath = path.join(downloadPath, 'lee_error_no_results.html');
+          await fs.promises.writeFile(htmlPath, htmlContent);
+          this.log(`📄 HTML saved to: ${htmlPath}`);
+        } catch (err) {
+          this.log(`⚠️  Failed to save debug files: ${err.message}`);
+        }
 
         throw new Error('Could not find "Parcel Details" button or link');
       }
@@ -657,6 +758,35 @@ class LeeCountyFloridaScraper extends DeedScraper {
 
       if (currentUrl.includes('DisplayParcel.aspx')) {
         this.log(`✅ Successfully navigated to parcel details page`);
+
+        // Handle privacy policy popup that appears on parcel details page
+        this.log(`🔍 Checking for privacy policy popup on parcel details page...`);
+        await this.randomWait(2000, 3000);
+
+        const privacyPopupHandled = await this.page.evaluate(() => {
+          // Look for "Continue" button in privacy policy popup
+          const buttons = Array.from(document.querySelectorAll('button, input[type="button"], input[type="submit"]'));
+          for (const btn of buttons) {
+            const text = (btn.textContent || btn.value || '').toLowerCase().trim();
+            if (text === 'continue') {
+              const style = window.getComputedStyle(btn);
+              if (style.display !== 'none' && style.visibility !== 'hidden') {
+                console.log('Found Continue button on parcel page, clicking...');
+                btn.click();
+                return true;
+              }
+            }
+          }
+          return false;
+        });
+
+        if (privacyPopupHandled) {
+          this.log(`✅ Clicked "Continue" on privacy policy popup`);
+          await this.randomWait(2000, 3000);
+        } else {
+          this.log(`   No privacy policy popup found on parcel details page`);
+        }
+
         return {
           success: true,
           message: 'Property found and navigated to parcel details'
@@ -677,60 +807,151 @@ class LeeCountyFloridaScraper extends DeedScraper {
   /**
    * Navigate to Sales/Transactions tab and extract Clerk file number
    * Workflow:
-   * 1. Click on 'Sales/Transactions' tab to open it
-   * 2. Click on 1st entry in "Clerk file number" column (e.g., 2022000220622)
+   * 1. First try to find clerk file numbers in the page HTML (may be pre-loaded)
+   * 2. If not found, click on 'Sales/Transactions' tab to load via AJAX
+   * 3. Extract clerk file numbers from the loaded content
    */
   async extractTransactionRecords() {
     this.log('📋 Extracting transaction records from Property Appraiser...');
 
     try {
-      await this.randomWait(2000, 3000);
+      // STRATEGY 1: Try to find clerk file numbers in the page source first
+      // Many sites pre-load this data and just hide it with CSS
+      this.log('🔍 Strategy 1: Searching entire page HTML for clerk file numbers...');
 
-      // Try to expand 'Sales/Transactions' section via JavaScript manipulation
-      // The expand button has href that causes navigation, so we prevent default and trigger manually
-      this.log('🔍 Looking for "Sales/Transactions" expand button...');
+      const clerkNumbersInHTML = await this.page.evaluate(() => {
+        const html = document.documentElement.innerHTML;
+        const text = document.body.innerText;
+        const results = [];
 
-      const salesExpandResult = await this.page.evaluate(() => {
-        // Find the Sales/Transactions section
-        const salesSection = document.querySelector('#SalesDetails');
-        if (!salesSection) {
-          return { success: false, error: 'SalesDetails section not found' };
+        // Pattern for 13-digit clerk file numbers (year + sequence)
+        // Example: 2022000220622
+        const patterns = [
+          /\b(20\d{11})\b/g,  // 13 digits starting with 20
+          /\b(\d{13})\b/g,     // Any 13 digits
+          /CFN[:\s=]*(\d{13})/gi,  // CFN: or CFN= prefix
+          /clerk[\s]*file[\s]*(?:number|#)[:\s]*(\d{13})/gi  // Clerk file number: prefix
+        ];
+
+        for (const pattern of patterns) {
+          const htmlMatches = [...html.matchAll(pattern)];
+          const textMatches = [...text.matchAll(pattern)];
+          const allMatches = [...htmlMatches, ...textMatches];
+
+          for (const match of allMatches) {
+            const number = match[1];
+            if (number && number.length === 13 && !results.includes(number)) {
+              // Verify it starts with a reasonable year (2000-2099)
+              const year = parseInt(number.substring(0, 4));
+              if (year >= 2000 && year <= 2099) {
+                results.push(number);
+              }
+            }
+          }
         }
 
-        // Find the expand link
-        const expandLink = salesSection.querySelector('#SalesHyperLink') ||
-                          salesSection.querySelector('a.showHideLink');
+        return results;
+      });
 
-        if (!expandLink) {
-          return { success: false, error: 'Expand link not found' };
-        }
-
-        // Prevent the default navigation by setting href to javascript:void(0)
-        const originalHref = expandLink.href;
-        expandLink.href = 'javascript:void(0)';
-
-        // Now click it
-        expandLink.click();
+      if (clerkNumbersInHTML.length > 0) {
+        this.log(`✅ Found ${clerkNumbersInHTML.length} clerk file number(s) in page HTML!`);
+        clerkNumbersInHTML.forEach((cfn, i) => {
+          this.log(`   📄 Clerk File #${i+1}: ${cfn}`);
+        });
 
         return {
           success: true,
-          method: 'prevented-default',
-          originalHref: originalHref,
-          linkId: expandLink.id
+          transactions: clerkNumbersInHTML.map(cfn => ({
+            instrumentNumber: cfn,
+            clerkFileNumber: cfn,
+            type: 'clerk_file',
+            source: 'Lee County Property Appraiser - Page HTML'
+          }))
         };
-      });
-
-      if (!salesExpandResult || !salesExpandResult.success) {
-        throw new Error(`Could not expand Sales/Transactions: ${salesExpandResult?.error || 'unknown error'}`);
       }
 
-      this.log(`✅ Clicked Sales/Transactions expand button (prevented navigation from ${salesExpandResult.originalHref})`);
+      this.log('⚠️  No clerk file numbers found in page HTML');
+      this.log('🔍 Strategy 2: Trying to load Sales/Transactions via AJAX...');
+
+      // STRATEGY 2: Click the Sales/Transactions tab to load via AJAX
+      // Wait longer for JavaScript to fully load
+      this.log('⏳ Waiting for page JavaScript to fully initialize...');
+      await this.randomWait(5000, 7000);
+
+      // Try to expand 'Sales/Transactions' section using Puppeteer's click method
+      // which handles events more realistically than page.evaluate().click()
+      this.log('🔍 Looking for "Sales/Transactions" expand button...');
+
+      // First, check if the expand button exists
+      const expandButtonExists = await this.page.evaluate(() => {
+        const expandButton = document.querySelector('#SalesHyperLink');
+        return expandButton ? true : false;
+      });
+
+      if (!expandButtonExists) {
+        throw new Error('SalesHyperLink expand button not found');
+      }
+
+      this.log('✅ Found expand button #SalesHyperLink');
+
+      // Try clicking using multiple methods to ensure it works
+      this.log('🖱️  Attempting to click expand button...');
+
+      // Method 1: Try Puppeteer's native click first
+      let clicked = false;
+      try {
+        // Check if element is visible and clickable
+        const isVisible = await this.page.evaluate(() => {
+          const el = document.querySelector('#SalesHyperLink');
+          if (!el) return false;
+          const rect = el.getBoundingClientRect();
+          const style = window.getComputedStyle(el);
+          return style.display !== 'none' &&
+                 style.visibility !== 'hidden' &&
+                 rect.width > 0 &&
+                 rect.height > 0;
+        });
+
+        if (!isVisible) {
+          this.log('⚠️  Element not visible, scrolling into view...');
+          await this.page.evaluate(() => {
+            const el = document.querySelector('#SalesHyperLink');
+            if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+          });
+          await this.randomWait(1000, 2000);
+        }
+
+        // Try clicking with Puppeteer
+        await this.page.click('#SalesHyperLink');
+        clicked = true;
+        this.log('✅ Clicked with Puppeteer click()');
+      } catch (clickError) {
+        this.log(`⚠️  Puppeteer click failed: ${clickError.message}`);
+      }
+
+      // Method 2: If Puppeteer click failed, try JavaScript click
+      if (!clicked) {
+        this.log('🖱️  Trying JavaScript click...');
+        clicked = await this.page.evaluate(() => {
+          const el = document.querySelector('#SalesHyperLink');
+          if (el) {
+            el.click();
+            return true;
+          }
+          return false;
+        });
+
+        if (clicked) {
+          this.log('✅ Clicked with JavaScript click()');
+        } else {
+          throw new Error('Could not click Sales/Transactions button with any method');
+        }
+      }
+
+      this.log('✅ Sales/Transactions expand button clicked successfully');
 
       // Wait for AJAX content to load into the page
       this.log(`⏳ Waiting for Sales/Transactions content to load via AJAX...`);
-
-      // Wait for the content to be loaded - the overFlowDiv should be populated
-      await this.randomWait(3000, 5000);
 
       // Check if we got redirected (shouldn't happen with expand button)
       const currentUrl = this.page.url();
@@ -740,6 +961,33 @@ class LeeCountyFloridaScraper extends DeedScraper {
       }
 
       this.log(`📍 Still on correct page: ${currentUrl}`);
+
+      // Wait for the content to be loaded - specifically wait for table or content to appear
+      try {
+        await this.page.waitForFunction(() => {
+          const salesSection = document.querySelector('#SalesDetails');
+          if (!salesSection) return false;
+
+          // Check if there's a table with content
+          const tables = salesSection.querySelectorAll('table');
+          if (tables.length === 0) return false;
+
+          // Check if the table has rows with data (not just header)
+          for (const table of tables) {
+            const rows = table.querySelectorAll('tr');
+            if (rows.length > 1) { // More than just header row
+              return true;
+            }
+          }
+
+          return false;
+        }, { timeout: 30000 });
+
+        this.log(`✅ Sales/Transactions table loaded with data`);
+      } catch (waitError) {
+        this.log(`⚠️  Timeout waiting for table data: ${waitError.message}`);
+        this.log(`   Continuing anyway to check what content is available...`);
+      }
 
       // Scroll to ensure content is loaded
       await this.page.evaluate(() => {
@@ -755,12 +1003,30 @@ class LeeCountyFloridaScraper extends DeedScraper {
         }
 
         const overFlowDiv = salesSection.querySelector('.overFlowDiv');
+        const tables = salesSection.querySelectorAll('table');
+
+        // Get more detailed table info
+        const tableInfo = Array.from(tables).map(table => {
+          const rows = table.querySelectorAll('tr');
+          const cells = table.querySelectorAll('td, th');
+          return {
+            rowCount: rows.length,
+            cellCount: cells.length,
+            firstRowText: rows[0] ? rows[0].innerText.substring(0, 100) : '',
+            hasClerkFileText: table.innerText.toLowerCase().includes('clerk file')
+          };
+        });
+
         return {
           found: true,
           sectionHTML: salesSection.innerHTML.substring(0, 1000),
           overFlowDivHTML: overFlowDiv ? overFlowDiv.innerHTML.substring(0, 500) : 'no overFlowDiv',
-          hasTable: !!salesSection.querySelector('table'),
-          tableCount: salesSection.querySelectorAll('table').length
+          overFlowDivText: overFlowDiv ? overFlowDiv.innerText.substring(0, 300) : 'no overFlowDiv',
+          hasTable: tables.length > 0,
+          tableCount: tables.length,
+          tableInfo: tableInfo,
+          sectionClasses: salesSection.className,
+          sectionStyle: salesSection.style.cssText
         };
       });
 
@@ -768,7 +1034,15 @@ class LeeCountyFloridaScraper extends DeedScraper {
       this.log(`   Has section: ${salesDebugInfo.found}`);
       this.log(`   Has table: ${salesDebugInfo.hasTable}`);
       this.log(`   Table count: ${salesDebugInfo.tableCount}`);
-      this.log(`   overFlowDiv content: ${salesDebugInfo.overFlowDivHTML?.substring(0, 200)}`);
+      this.log(`   Section classes: ${salesDebugInfo.sectionClasses}`);
+      this.log(`   Section style: ${salesDebugInfo.sectionStyle}`);
+      if (salesDebugInfo.tableInfo && salesDebugInfo.tableInfo.length > 0) {
+        salesDebugInfo.tableInfo.forEach((info, i) => {
+          this.log(`   Table ${i+1}: ${info.rowCount} rows, ${info.cellCount} cells, has 'clerk file': ${info.hasClerkFileText}`);
+          this.log(`      First row: ${info.firstRowText}`);
+        });
+      }
+      this.log(`   overFlowDiv text: ${salesDebugInfo.overFlowDivText?.substring(0, 200)}`);
 
       // Extract Clerk file numbers from the table
       this.log('🔍 Extracting Clerk file numbers from Sales/Transactions table...');
@@ -881,14 +1155,16 @@ class LeeCountyFloridaScraper extends DeedScraper {
 
       // Debug: Save screenshot and HTML
       try {
-        const path = require('path');
-        const fs = require('fs');
-        const screenshotPath = path.join(this.downloadPath, 'lee_error_no_transactions.png');
+        const downloadPath = path.resolve(process.env.DEED_DOWNLOAD_PATH || './downloads');
+        if (!fs.existsSync(downloadPath)) {
+          fs.mkdirSync(downloadPath, { recursive: true });
+        }
+        const screenshotPath = path.join(downloadPath, 'lee_error_no_transactions.png');
         await this.page.screenshot({ path: screenshotPath, fullPage: true });
         this.log(`📸 Screenshot saved to: ${screenshotPath}`);
 
         const htmlContent = await this.page.content();
-        const htmlPath = path.join(this.downloadPath, 'lee_error_no_transactions.html');
+        const htmlPath = path.join(downloadPath, 'lee_error_no_transactions.html');
         await fs.promises.writeFile(htmlPath, htmlContent);
         this.log(`📄 HTML saved to: ${htmlPath}`);
       } catch (err) {
