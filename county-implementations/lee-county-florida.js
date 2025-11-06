@@ -782,7 +782,18 @@ class LeeCountyFloridaScraper extends DeedScraper {
 
         if (privacyPopupHandled) {
           this.log(`✅ Clicked "Continue" on privacy policy popup`);
-          await this.randomWait(2000, 3000);
+          // Wait longer for any page reloads/navigation after clicking Continue
+          await this.randomWait(3000, 5000);
+
+          // Wait for the page to fully stabilize
+          try {
+            await this.page.waitForFunction(() => {
+              return document.readyState === 'complete';
+            }, { timeout: 10000 });
+            this.log(`   Page stabilized after Continue click`);
+          } catch (err) {
+            this.log(`   Warning: Page stabilization wait timed out: ${err.message}`);
+          }
         } else {
           this.log(`   No privacy policy popup found on parcel details page`);
         }
