@@ -1258,7 +1258,7 @@ class LeeCountyFloridaScraper extends DeedScraper {
         // Old Book/Page format
         const book = transaction.bookNumber;
         const page = transaction.pageNumber;
-        pdfUrl = `https://or.leeclerk.org/LandMarkWeb/Document/GetDocumentByBP/?book=${book}&page=${page}`;
+        pdfUrl = `https://or.leeclerk.org/LandmarkWeb/Document/GetDocumentByBookPage/?booktype=OR&Booknumber=${book}&Pagenumber=${page}`;
         deedReference = `Book ${book} Page ${page}`;
         this.log(`📋 Using Book/Page: ${book}/${page}`);
       } else {
