@@ -443,8 +443,11 @@ class DavidsonCountyTennesseeScraper extends DeedScraper {
         return { clicked: false };
       });
 
+      let linkText = null;
+
       if (parcelLinkClicked.clicked) {
-        this.log(`✅ Clicked parcel link: ${parcelLinkClicked.parcel}`);
+        this.log(`✅ Found parcel link: ${parcelLinkClicked.parcel}`);
+        linkText = parcelLinkClicked.parcel;
       } else {
         this.log(`⚠️  Could not find parcel number link with expected pattern`);
 
@@ -470,18 +473,17 @@ class DavidsonCountyTennesseeScraper extends DeedScraper {
                   !text.toLowerCase().includes('assessor') &&
                   !text.toLowerCase().includes('property') &&
                   text.length < 50) {
-                console.log(`Found potential parcel link in table: ${text}`);
-                link.click();
-                return { clicked: true, text: text };
+                return { found: true, text: text };
               }
             }
           }
 
-          return { clicked: false };
+          return { found: false };
         });
 
-        if (altParcelLink.clicked) {
-          this.log(`✅ Clicked parcel link: ${altParcelLink.text}`);
+        if (altParcelLink.found) {
+          this.log(`✅ Found parcel link: ${altParcelLink.text}`);
+          linkText = altParcelLink.text;
         } else {
           this.log(`⚠️  Could not find any suitable parcel link`);
           return {
@@ -491,8 +493,33 @@ class DavidsonCountyTennesseeScraper extends DeedScraper {
         }
       }
 
-      // Wait for parcel details page to load
-      await this.randomWait(3000, 5000);
+      // Now click the link and wait for navigation
+      this.log(`🖱️  Clicking parcel link and waiting for navigation...`);
+
+      try {
+        await Promise.all([
+          this.page.waitForNavigation({ waitUntil: 'networkidle2', timeout: 30000 }),
+          this.page.evaluate((text) => {
+            // Find and click the link with this text
+            const links = Array.from(document.querySelectorAll('a'));
+            for (const link of links) {
+              if (link.textContent?.trim() === text) {
+                link.click();
+                return true;
+              }
+            }
+            return false;
+          }, linkText)
+        ]);
+      } catch (error) {
+        // Execution context destroyed is expected during navigation
+        if (!error.message.includes('Execution context was destroyed')) {
+          throw error;
+        }
+      }
+
+      // Wait a bit more for the page to fully load
+      await this.randomWait(2000, 3000);
 
       this.log(`✅ Successfully navigated to parcel details`);
 
