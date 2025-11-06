@@ -442,44 +442,55 @@ class HarrisCountyTexasScraper extends DeedScraper {
       // Additional wait for table to fully render
       await this.randomWait(2000, 3000);
 
-      // Click on first search result (account number link) inside iframe
+      // Click on first search result (account number) inside iframe
       const accountClicked = await searchFrame.evaluate(() => {
-        // First try: Look for account number links in table rows
-        const rows = Array.from(document.querySelectorAll('tr'));
+        // Look for tbody rows (data rows, not headers)
+        const rows = Array.from(document.querySelectorAll('tbody tr'));
+
         for (const row of rows) {
           const cells = row.querySelectorAll('td');
           if (cells.length > 0) {
             // First cell typically contains the account number
             const firstCell = cells[0];
-            const link = firstCell.querySelector('a');
-            if (link) {
-              const text = link.textContent?.trim() || '';
-              // HCAD account numbers are 13 digits
-              if (/^\d{13}$/.test(text)) {
+            const cellText = firstCell.textContent?.trim() || '';
+
+            // HCAD account numbers are 13 digits
+            if (/\d{13}/.test(cellText)) {
+              // Extract the 13-digit number
+              const accountNumber = cellText.match(/\d{13}/)[0];
+
+              // Try to click on a link if it exists
+              const link = firstCell.querySelector('a') || firstCell.querySelector('b') || firstCell;
+
+              // Click the element
+              if (link.click) {
                 link.click();
-                return { clicked: true, accountNumber: text, method: 'table' };
+              } else if (link.onclick) {
+                link.onclick();
               }
+
+              return { clicked: true, accountNumber: accountNumber, method: 'table-cell' };
             }
           }
         }
 
-        // Second try: Look for account number links anywhere
+        // Fallback: Look for account number links anywhere
         const links = Array.from(document.querySelectorAll('a'));
         const allLinks = links.map(l => l.textContent?.trim()).filter(t => t && t.length > 0);
 
         for (const link of links) {
           const text = link.textContent?.trim() || '';
-          // HCAD account numbers are 13 digits
-          if (/^\d{13}$/.test(text)) {
+          if (/\d{13}/.test(text)) {
+            const accountNumber = text.match(/\d{13}/)[0];
             link.click();
-            return { clicked: true, accountNumber: text, method: 'link' };
+            return { clicked: true, accountNumber: accountNumber, method: 'link' };
           }
         }
 
         // Return diagnostic info if no account number found
         return {
           clicked: false,
-          allLinks: allLinks.slice(0, 10),  // First 10 links for debugging
+          allLinks: allLinks.slice(0, 10),
           pageText: document.body.innerText.substring(0, 500)
         };
       });
