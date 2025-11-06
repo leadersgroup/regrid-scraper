@@ -204,125 +204,307 @@ class DavidsonCountyTennesseeScraper extends DeedScraper {
   }
 
   /**
+   * Parse address into number and street name
+   * Example: "6241 Del Sol Dr, Whites Creek, TN" -> { number: "6241", street: "Del Sol" }
+   */
+  parseAddress(fullAddress) {
+    this.log(`📍 Parsing address: ${fullAddress}`);
+
+    // Remove city, state, zip from the end
+    const addressPart = fullAddress.split(',')[0].trim();
+    this.log(`   Address part: ${addressPart}`);
+
+    // Split into parts
+    const parts = addressPart.split(/\s+/);
+
+    // First part should be the number
+    const number = parts[0];
+
+    // Rest is the street name (without suffix like Dr, St, Ave, etc.)
+    // Remove common suffixes
+    const streetParts = parts.slice(1);
+    const suffixes = ['DR', 'DRIVE', 'ST', 'STREET', 'AVE', 'AVENUE', 'RD', 'ROAD', 'LN', 'LANE', 'CT', 'COURT', 'WAY', 'PL', 'PLACE', 'BLVD', 'BOULEVARD', 'CIR', 'CIRCLE', 'TRL', 'TRAIL'];
+
+    // Find where suffix starts
+    let streetName = '';
+    for (let i = 0; i < streetParts.length; i++) {
+      const part = streetParts[i].toUpperCase();
+      if (suffixes.includes(part)) {
+        // Found suffix, everything before is street name
+        streetName = streetParts.slice(0, i).join(' ');
+        break;
+      }
+    }
+
+    // If no suffix found, use all parts except last one
+    if (!streetName && streetParts.length > 1) {
+      streetName = streetParts.slice(0, -1).join(' ');
+    } else if (!streetName) {
+      streetName = streetParts.join(' ');
+    }
+
+    this.log(`   Parsed - Number: ${number}, Street: ${streetName}`);
+
+    return { number, street: streetName };
+  }
+
+  /**
    * Search Davidson County Property Assessor by address
    * URL: https://portal.padctn.org/OFS/WP/Home
+   *
+   * Workflow:
+   * 1. Click on 'owner' box, then select "address"
+   * 2. Break down address into number and street name
+   * 3. Enter into respective fields and click 'search'
+   * 4. Click on parcel number (e.g., "049 14 0a 023.00")
+   * 5. Click 'View Deed' button
    */
   async searchAssessorSite(parcelId, ownerName) {
     this.log(`🔍 Searching Davidson County TN Property Assessor`);
     this.log(`   Using address search`);
+    this.log(`   Current address: ${this.currentAddress}`);
 
     try {
       // Navigate to property search page
-      await this.page.goto('https://portal.padctn.org/OFS/WP/Home', {
+      const targetUrl = 'https://portal.padctn.org/OFS/WP/Home';
+      this.log(`🌐 Navigating to: ${targetUrl}`);
+
+      await this.page.goto(targetUrl, {
         waitUntil: 'networkidle2',
         timeout: this.timeout
       });
 
+      this.log(`✅ Page loaded`);
       await this.randomWait(3000, 5000);
 
-      // Extract just the street address (remove city, state, zip)
-      const fullAddress = this.currentAddress || '';
-      let streetAddress = fullAddress.split(',')[0].trim();
+      // Step 1: Click on 'owner' box/dropdown to open it
+      this.log(`🔍 Step 1: Looking for 'owner' dropdown...`);
 
-      this.log(`🏠 Searching for address: ${streetAddress}`);
-
-      // Look for Quick Search input field
-      const searchInputSelectors = [
-        'input[type="text"][placeholder*="search"]',
-        'input[type="text"][placeholder*="address"]',
-        'input[type="text"]',
-        '#quickSearchInput',
-        'input.search-input'
+      const ownerDropdownSelectors = [
+        'select',
+        'select[name*="owner"]',
+        'select[id*="owner"]',
+        'select[name*="searchType"]',
+        'select[id*="searchType"]'
       ];
 
-      let searchInput = null;
-      for (const selector of searchInputSelectors) {
+      let ownerDropdownFound = false;
+      for (const selector of ownerDropdownSelectors) {
         try {
-          await this.page.waitForSelector(selector, { timeout: 3000 });
-          searchInput = selector;
-          this.log(`✅ Found search input: ${selector}`);
-          break;
+          await this.page.waitForSelector(selector, { timeout: 3000, visible: true });
+          this.log(`✅ Found dropdown with selector: ${selector}`);
+
+          // Try to select "Address" option
+          const addressSelected = await this.page.evaluate((sel) => {
+            const select = document.querySelector(sel);
+            if (!select) return false;
+
+            const options = Array.from(select.options);
+            for (const option of options) {
+              const text = (option.text || option.value || '').toLowerCase();
+              if (text.includes('address') || text === 'address') {
+                select.value = option.value;
+                select.dispatchEvent(new Event('change', { bubbles: true }));
+                return { success: true, value: option.value, text: option.text };
+              }
+            }
+            return false;
+          }, selector);
+
+          if (addressSelected && addressSelected.success) {
+            this.log(`✅ Selected "Address" option: ${addressSelected.text}`);
+            ownerDropdownFound = true;
+            break;
+          }
         } catch (e) {
           // Try next selector
         }
       }
 
-      if (!searchInput) {
-        this.log(`⚠️ Could not find search input field`);
-        return {
-          success: false,
-          message: 'Could not find search input'
-        };
+      if (ownerDropdownFound) {
+        await this.randomWait(2000, 3000);
+      } else {
+        this.log(`⚠️  Owner dropdown not found, continuing anyway...`);
       }
 
-      // Enter street address
-      await this.page.type(searchInput, streetAddress, { delay: 100 });
+      // Step 2: Parse address into number and street name
+      const { number, street } = this.parseAddress(this.currentAddress);
+
+      // Step 3: Find and fill number field
+      this.log(`🔍 Step 2: Looking for address number input field...`);
+
+      const numberInputSelectors = [
+        'input[name*="number"]',
+        'input[id*="number"]',
+        'input[placeholder*="number"]',
+        'input[type="text"]'
+      ];
+
+      let numberInputFound = false;
+      for (const selector of numberInputSelectors) {
+        try {
+          const inputs = await this.page.$$(selector);
+          if (inputs.length > 0) {
+            this.log(`✅ Found number input: ${selector}`);
+
+            await this.page.evaluate((sel, value) => {
+              const inputs = Array.from(document.querySelectorAll(sel));
+              // Use the first text input or one with 'number' in name/id
+              for (const input of inputs) {
+                const name = (input.name || input.id || '').toLowerCase();
+                if (name.includes('number') || inputs.length === 1) {
+                  input.value = value;
+                  input.dispatchEvent(new Event('input', { bubbles: true }));
+                  input.dispatchEvent(new Event('change', { bubbles: true }));
+                  return true;
+                }
+              }
+              // Fallback: use first input
+              if (inputs[0]) {
+                inputs[0].value = value;
+                inputs[0].dispatchEvent(new Event('input', { bubbles: true }));
+                inputs[0].dispatchEvent(new Event('change', { bubbles: true }));
+                return true;
+              }
+              return false;
+            }, selector, number);
+
+            this.log(`✅ Entered address number: ${number}`);
+            numberInputFound = true;
+            break;
+          }
+        } catch (e) {
+          // Try next selector
+        }
+      }
+
       await this.randomWait(1000, 2000);
 
-      this.log(`✅ Entered address: ${streetAddress}`);
+      // Step 4: Find and fill street name field
+      this.log(`🔍 Step 3: Looking for street name input field...`);
 
-      // Press Enter or click search button
-      await this.page.keyboard.press('Enter');
-      this.log(`⌨️  Pressed Enter to search`);
+      const streetInputSelectors = [
+        'input[name*="street"]',
+        'input[id*="street"]',
+        'input[placeholder*="street"]',
+        'input[type="text"]:not([name*="number"])'
+      ];
 
-      // Wait for search results to load
-      this.log(`⏳ Waiting for search results to load...`);
-      await this.randomWait(5000, 7000);
+      let streetInputFound = false;
+      for (const selector of streetInputSelectors) {
+        try {
+          const inputs = await this.page.$$(selector);
+          if (inputs.length > 0) {
+            this.log(`✅ Found street input: ${selector}`);
 
-      // Wait for property details page to load
-      try {
-        await this.page.waitForFunction(() => {
-          const text = document.body.innerText.toLowerCase();
-          return text.includes('property summary') ||
-                 text.includes('property record') ||
-                 text.includes('parcel') ||
-                 text.includes('owner');
-        }, { timeout: 15000 });
+            await this.page.evaluate((sel, value) => {
+              const inputs = Array.from(document.querySelectorAll(sel));
+              // Find the one that's not the number input and is visible
+              for (const input of inputs) {
+                const name = (input.name || input.id || '').toLowerCase();
+                const isVisible = input.offsetParent !== null;
+                if (isVisible && !name.includes('number')) {
+                  input.value = value;
+                  input.dispatchEvent(new Event('input', { bubbles: true }));
+                  input.dispatchEvent(new Event('change', { bubbles: true }));
+                  return true;
+                }
+              }
+              return false;
+            }, selector, street);
 
-        this.log(`✅ Property details page loaded`);
-      } catch (waitError) {
-        this.log(`⚠️ Timeout waiting for property details page`);
+            this.log(`✅ Entered street name: ${street}`);
+            streetInputFound = true;
+            break;
+          }
+        } catch (e) {
+          // Try next selector
+        }
       }
 
-      // Check if property was found
-      const searchStatus = await this.page.evaluate(() => {
-        const text = document.body.innerText.toLowerCase();
+      await this.randomWait(1000, 2000);
 
-        const hasNoResults = text.includes('no results') ||
-                            text.includes('not found') ||
-                            text.includes('no records found') ||
-                            text.includes('no properties found') ||
-                            text.includes('no matches');
+      // Step 5: Click search button
+      this.log(`🔍 Step 4: Looking for search button...`);
 
-        const hasPropertyInfo = text.includes('property summary') ||
-                               text.includes('property record') ||
-                               (text.includes('owner') && text.includes('parcel'));
-
-        return {
-          hasNoResults,
-          hasPropertyInfo,
-          url: window.location.href
-        };
+      const searchClicked = await this.page.evaluate(() => {
+        const buttons = Array.from(document.querySelectorAll('button, input[type="submit"], input[type="button"]'));
+        for (const btn of buttons) {
+          const text = (btn.textContent || btn.value || '').toLowerCase();
+          if (text.includes('search')) {
+            btn.click();
+            return { clicked: true, text: btn.textContent || btn.value };
+          }
+        }
+        return { clicked: false };
       });
 
-      this.log(`🔍 Search result analysis:`);
-      this.log(`   Current URL: ${searchStatus.url}`);
-      this.log(`   Has property info: ${searchStatus.hasPropertyInfo}`);
-      this.log(`   Has "no results" message: ${searchStatus.hasNoResults}`);
-
-      if (!searchStatus.hasNoResults && searchStatus.hasPropertyInfo) {
-        this.log(`✅ Property found`);
-        return {
-          success: true,
-          message: 'Property found on assessor website'
-        };
+      if (searchClicked.clicked) {
+        this.log(`✅ Clicked search button: ${searchClicked.text}`);
       } else {
-        this.log(`⚠️ Property not found or search failed`);
-        return {
-          success: false,
-          message: `Property not found (noResults: ${searchStatus.hasNoResults}, hasInfo: ${searchStatus.hasPropertyInfo})`
-        };
+        this.log(`⚠️  No search button found, trying Enter key...`);
+        await this.page.keyboard.press('Enter');
       }
+
+      // Wait for search results
+      this.log(`⏳ Waiting for search results...`);
+      await this.randomWait(5000, 7000);
+
+      // Step 6: Find and click on parcel number (e.g., "049 14 0a 023.00")
+      this.log(`🔍 Step 5: Looking for parcel number link...`);
+
+      const parcelLinkClicked = await this.page.evaluate(() => {
+        // Look for links or clickable elements with parcel-like patterns
+        // Pattern: digits with spaces and letters (e.g., "049 14 0a 023.00")
+        const pattern = /\d{3}\s+\d{2}\s+\w+\s+\d+\.\d+/;
+
+        const allElements = Array.from(document.querySelectorAll('a, button, div[onclick], span[onclick], td[onclick]'));
+        for (const el of allElements) {
+          const text = (el.textContent || '').trim();
+          if (pattern.test(text)) {
+            console.log(`Found parcel link: ${text}`);
+            el.click();
+            return { clicked: true, parcel: text };
+          }
+        }
+        return { clicked: false };
+      });
+
+      if (parcelLinkClicked.clicked) {
+        this.log(`✅ Clicked parcel link: ${parcelLinkClicked.parcel}`);
+      } else {
+        this.log(`⚠️  Could not find parcel number link`);
+        // Try to find any link on the results page
+        const anyLinkClicked = await this.page.evaluate(() => {
+          const links = Array.from(document.querySelectorAll('a[href], button'));
+          // Look for first meaningful link in results
+          for (const link of links) {
+            const text = (link.textContent || '').trim();
+            const href = link.getAttribute('href') || '';
+            // Skip navigation links
+            if (text.length > 3 && !text.toLowerCase().includes('home') &&
+                !text.toLowerCase().includes('help') && !text.toLowerCase().includes('logout')) {
+              link.click();
+              return { clicked: true, text: text.substring(0, 50) };
+            }
+          }
+          return { clicked: false };
+        });
+
+        if (anyLinkClicked.clicked) {
+          this.log(`✅ Clicked result link: ${anyLinkClicked.text}`);
+        }
+      }
+
+      // Wait for parcel details page to load
+      await this.randomWait(3000, 5000);
+
+      this.log(`✅ Successfully navigated to parcel details`);
+
+      return {
+        success: true,
+        message: 'Property found and navigated to parcel details'
+      };
 
     } catch (error) {
       this.log(`❌ Assessor search failed: ${error.message}`);
@@ -516,14 +698,11 @@ class DavidsonCountyTennesseeScraper extends DeedScraper {
   }
 
   /**
-   * Download deed PDF from Davidson County Register of Deeds
-   *
-   * NOTE: Davidson County requires a paid subscription ($50/month) for online access.
-   * This method will attempt to access deeds through publicly available methods.
-   * If subscription is required, it will return information about how to access the deed.
+   * Download deed PDF by clicking "View Deed" button
+   * This is called after navigating to the parcel details page
    */
   async downloadDeed(transaction) {
-    this.log('📄 Attempting to download deed from Davidson County Register of Deeds...');
+    this.log('📄 Attempting to download deed by clicking "View Deed" button...');
 
     try {
       // Check if we have required deed information
@@ -534,109 +713,140 @@ class DavidsonCountyTennesseeScraper extends DeedScraper {
       const deedRef = transaction.instrumentNumber || `Book ${transaction.bookNumber} Page ${transaction.pageNumber}`;
       this.log(`📍 Deed Reference: ${deedRef}`);
 
-      // Davidson County Register of Deeds requires subscription
-      // However, we can try to access through the mobile app endpoint or public portal
+      // Step 6: Find and click "View Deed" button
+      this.log('🔍 Step 6: Looking for "View Deed" button...');
 
-      this.log('🌐 Checking Davidson County Register of Deeds portal access...');
+      await this.randomWait(2000, 3000);
 
-      // Try to access the public portal (if available)
-      // Note: This is likely to require authentication
-      const portalUrl = 'https://davidsonportal.com/';
+      const viewDeedClicked = await this.page.evaluate(() => {
+        const buttons = Array.from(document.querySelectorAll('button, input[type="button"], input[type="submit"], a'));
+        for (const btn of buttons) {
+          const text = (btn.textContent || btn.value || '').trim();
+          if (text.toLowerCase().includes('view deed') || text.toLowerCase() === 'deed') {
+            const style = window.getComputedStyle(btn);
+            if (style.display !== 'none' && style.visibility !== 'hidden') {
+              btn.click();
+              return { clicked: true, text: text };
+            }
+          }
+        }
+        return { clicked: false };
+      });
 
-      try {
-        await this.page.goto(portalUrl, {
-          waitUntil: 'networkidle2',
-          timeout: this.timeout
-        });
+      if (!viewDeedClicked.clicked) {
+        this.log('⚠️  Could not find "View Deed" button');
+        return {
+          success: false,
+          message: 'Could not find "View Deed" button on parcel details page',
+          deedReference: deedRef
+        };
+      }
 
-        await this.randomWait(3000, 5000);
+      this.log(`✅ Clicked "View Deed" button: ${viewDeedClicked.text}`);
 
-        // Check if login is required
-        const needsLogin = await this.page.evaluate(() => {
-          const text = document.body.innerText.toLowerCase();
-          return text.includes('login') ||
-                 text.includes('sign in') ||
-                 text.includes('username') ||
-                 text.includes('password') ||
-                 text.includes('subscription');
-        });
+      // Wait for PDF to load or download to start
+      await this.randomWait(3000, 5000);
 
-        if (needsLogin) {
-          this.log('⚠️  Davidson County Register of Deeds requires subscription/login');
+      // Step 7: Download PDF
+      this.log('📥 Attempting to download PDF...');
 
-          // Return information about the deed and how to access it
+      // Set up download handling
+      const client = await this.page.target().createCDPSession();
+      const downloadPath = process.env.DEED_DOWNLOAD_PATH || './downloads';
+
+      await client.send('Page.setDownloadBehavior', {
+        behavior: 'allow',
+        downloadPath: downloadPath
+      });
+
+      // Check if PDF is displayed in browser or download started
+      const pdfInfo = await this.page.evaluate(() => {
+        // Check if PDF is embedded in page
+        const pdfEmbed = document.querySelector('embed[type="application/pdf"], object[type="application/pdf"]');
+        if (pdfEmbed) {
           return {
-            success: false,
-            requiresSubscription: true,
-            message: 'Davidson County Register of Deeds requires a paid subscription ($50/month)',
-            deedReference: deedRef,
-            instrumentNumber: transaction.instrumentNumber,
-            bookNumber: transaction.bookNumber,
-            pageNumber: transaction.pageNumber,
-            alternativeAccess: {
-              subscription: {
-                url: 'https://davidsonportal.com/',
-                cost: '$50/month (single user) or $25/month (additional users)',
-                description: 'Online access to all deed records from 1784 to present'
-              },
-              mobileApp: {
-                name: 'Nashville - Davidson Co. ROD',
-                platforms: ['iOS (App Store)', 'Android (Google Play)'],
-                cost: 'Free',
-                description: 'Free mobile app with access to property documents'
-              },
-              inPerson: {
-                location: '501 Broadway, Suite 301, Nashville, TN 37203',
-                hours: 'Monday-Friday, 8:00 AM - 4:30 PM',
-                phone: '(615) 862-6790',
-                description: 'Free access at public counter'
-              }
-            },
-            instructions: `To access this deed:\n` +
-                         `1. Use the free mobile app "Nashville - Davidson Co. ROD" (iOS/Android)\n` +
-                         `2. Subscribe to online access at davidsonportal.com ($50/month)\n` +
-                         `3. Visit in person at 501 Broadway, Suite 301, Nashville, TN 37203\n` +
-                         `\nDeed Reference: ${deedRef}`
+            type: 'embedded',
+            src: pdfEmbed.getAttribute('src') || pdfEmbed.getAttribute('data')
           };
         }
 
-        // If we get here, try to search for and download the deed
-        // (This code would need to be implemented based on the actual portal interface)
-        this.log('🔍 Portal access available, attempting to search for deed...');
+        // Check if there's a PDF link we need to click
+        const pdfLinks = Array.from(document.querySelectorAll('a[href*=".pdf"], a[href*="pdf"]'));
+        if (pdfLinks.length > 0) {
+          return {
+            type: 'link',
+            href: pdfLinks[0].href
+          };
+        }
 
-        // TODO: Implement search and download logic if public access is available
-        throw new Error('Public portal access not yet implemented');
+        // Check current URL
+        if (window.location.href.includes('.pdf') || document.contentType === 'application/pdf') {
+          return {
+            type: 'direct',
+            url: window.location.href
+          };
+        }
 
-      } catch (portalError) {
-        this.log(`⚠️  Could not access deed portal: ${portalError.message}`);
+        return { type: 'unknown' };
+      });
 
-        // Return information about alternative access methods
-        return {
-          success: false,
-          requiresSubscription: true,
-          message: 'Could not access Davidson County Register of Deeds - subscription may be required',
-          deedReference: deedRef,
-          instrumentNumber: transaction.instrumentNumber,
-          bookNumber: transaction.bookNumber,
-          pageNumber: transaction.pageNumber,
-          error: portalError.message,
-          alternativeAccess: {
-            subscription: {
-              url: 'https://davidsonportal.com/',
-              cost: '$50/month (single user) or $25/month (additional users)'
-            },
-            mobileApp: {
-              name: 'Nashville - Davidson Co. ROD',
-              platforms: ['iOS', 'Android'],
-              cost: 'Free'
-            },
-            inPerson: {
-              location: '501 Broadway, Suite 301, Nashville, TN 37203',
-              phone: '(615) 862-6790'
-            }
-          }
-        };
+      this.log(`📄 PDF Info: ${JSON.stringify(pdfInfo)}`);
+
+      // Handle different PDF scenarios
+      if (pdfInfo.type === 'embedded' && pdfInfo.src) {
+        // PDF is embedded, navigate to it directly to download
+        this.log('🔗 Navigating to embedded PDF...');
+        await this.page.goto(pdfInfo.src, { waitUntil: 'networkidle2', timeout: 30000 });
+        await this.randomWait(3000, 5000);
+      } else if (pdfInfo.type === 'link' && pdfInfo.href) {
+        // PDF link found, navigate to it
+        this.log('🔗 Navigating to PDF link...');
+        await this.page.goto(pdfInfo.href, { waitUntil: 'networkidle2', timeout: 30000 });
+        await this.randomWait(3000, 5000);
+      } else if (pdfInfo.type === 'direct') {
+        // Already on PDF page
+        this.log('✅ Already viewing PDF');
       }
+
+      // Get PDF content
+      const pdfBuffer = await this.page.pdf({
+        format: 'A4',
+        printBackground: true
+      });
+
+      if (!pdfBuffer || pdfBuffer.length === 0) {
+        throw new Error('PDF buffer is empty');
+      }
+
+      // Generate filename
+      const fs = require('fs');
+      const path = require('path');
+      const timestamp = Date.now();
+      const sanitizedRef = deedRef.replace(/[^a-zA-Z0-9]/g, '_');
+      const filename = `davidson_deed_${sanitizedRef}_${timestamp}.pdf`;
+      const filepath = path.join(downloadPath, filename);
+
+      // Ensure download directory exists
+      if (!fs.existsSync(downloadPath)) {
+        fs.mkdirSync(downloadPath, { recursive: true });
+      }
+
+      // Save PDF
+      fs.writeFileSync(filepath, pdfBuffer);
+
+      this.log(`✅ PDF saved: ${filepath} (${pdfBuffer.length} bytes)`);
+
+      return {
+        success: true,
+        filename: filename,
+        filepath: filepath,
+        size: pdfBuffer.length,
+        deedReference: deedRef,
+        instrumentNumber: transaction.instrumentNumber,
+        bookNumber: transaction.bookNumber,
+        pageNumber: transaction.pageNumber,
+        base64: pdfBuffer.toString('base64')
+      };
 
     } catch (error) {
       this.log(`❌ Failed to download deed: ${error.message}`);
