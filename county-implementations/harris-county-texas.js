@@ -921,21 +921,86 @@ class HarrisCountyTexasScraper extends DeedScraper {
             this.log(`✅ Login successful! Attempting to download PDF...`);
 
             // Wait for PDF to load in viewer
-            await this.randomWait(5000, 7000);
+            await this.randomWait(3000, 5000);
 
-            // Use CDP to print the PDF page (captures the embedded PDF)
+            // Set up CDP to intercept network requests for PDF
             try {
               const pdfClient = await pdfPage.target().createCDPSession();
 
-              this.log(`📥 Capturing PDF using Chrome DevTools Protocol...`);
+              // Enable network domain to intercept requests
+              await pdfClient.send('Network.enable');
+              await pdfClient.send('Page.enable');
 
-              const {data} = await pdfClient.send('Page.printToPDF', {
-                printBackground: true,
-                preferCSSPageSize: true
+              this.log(`📥 Intercepting PDF download...`);
+
+              // Listen for response that contains PDF data
+              let pdfBuffer = null;
+
+              pdfClient.on('Network.responseReceived', async (params) => {
+                const url = params.response.url;
+                const contentType = params.response.mimeType || '';
+
+                // Check if this is a PDF response
+                if (contentType.includes('pdf') || url.includes('.pdf')) {
+                  this.log(`🔍 Found PDF response: ${url.substring(0, 100)}...`);
+
+                  try {
+                    // Get the response body
+                    const responseBody = await pdfClient.send('Network.getResponseBody', {
+                      requestId: params.requestId
+                    });
+
+                    if (responseBody.base64Encoded) {
+                      pdfBuffer = Buffer.from(responseBody.body, 'base64');
+                    } else {
+                      pdfBuffer = Buffer.from(responseBody.body);
+                    }
+
+                    this.log(`✅ Captured PDF data: ${pdfBuffer.length} bytes`);
+                  } catch (e) {
+                    this.log(`⚠️  Could not get response body: ${e.message}`);
+                  }
+                }
               });
 
-              // Convert base64 to buffer
-              const pdfBuffer = Buffer.from(data, 'base64');
+              // Wait for the PDF to be loaded and captured
+              await this.randomWait(8000, 10000);
+
+              // If we didn't capture via network interception, try alternative method
+              if (!pdfBuffer) {
+                this.log(`⚠️  PDF not captured via network, trying alternative method...`);
+
+                // Try to get the PDF from the page's resources
+                const resourceTree = await pdfClient.send('Page.getResourceTree');
+
+                for (const resource of resourceTree.frameTree.resources || []) {
+                  if (resource.mimeType && resource.mimeType.includes('pdf')) {
+                    this.log(`🔍 Found PDF resource: ${resource.url.substring(0, 100)}`);
+
+                    try {
+                      const content = await pdfClient.send('Page.getResourceContent', {
+                        frameId: resourceTree.frameTree.frame.id,
+                        url: resource.url
+                      });
+
+                      if (content.base64Encoded) {
+                        pdfBuffer = Buffer.from(content.content, 'base64');
+                      } else {
+                        pdfBuffer = Buffer.from(content.content);
+                      }
+
+                      this.log(`✅ Captured PDF from resources: ${pdfBuffer.length} bytes`);
+                      break;
+                    } catch (e) {
+                      this.log(`⚠️  Could not get resource content: ${e.message}`);
+                    }
+                  }
+                }
+              }
+
+              if (!pdfBuffer) {
+                throw new Error('Could not capture PDF data');
+              }
 
               const isPDF = pdfBuffer.slice(0, 4).toString() === '%PDF';
               this.log(`🔍 PDF validation: isPDF=${isPDF}, size=${pdfBuffer.length} bytes`);
