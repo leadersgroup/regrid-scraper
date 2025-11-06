@@ -432,7 +432,26 @@ class HarrisCountyTexasScraper extends DeedScraper {
 
       // Click on first search result (account number link) inside iframe
       const accountClicked = await searchFrame.evaluate(() => {
-        // Look for account number links (13-digit numbers)
+        // First try: Look for account number links in table rows
+        const rows = Array.from(document.querySelectorAll('tr'));
+        for (const row of rows) {
+          const cells = row.querySelectorAll('td');
+          if (cells.length > 0) {
+            // First cell typically contains the account number
+            const firstCell = cells[0];
+            const link = firstCell.querySelector('a');
+            if (link) {
+              const text = link.textContent?.trim() || '';
+              // HCAD account numbers are 13 digits
+              if (/^\d{13}$/.test(text)) {
+                link.click();
+                return { clicked: true, accountNumber: text, method: 'table' };
+              }
+            }
+          }
+        }
+
+        // Second try: Look for account number links anywhere
         const links = Array.from(document.querySelectorAll('a'));
         const allLinks = links.map(l => l.textContent?.trim()).filter(t => t && t.length > 0);
 
@@ -441,7 +460,7 @@ class HarrisCountyTexasScraper extends DeedScraper {
           // HCAD account numbers are 13 digits
           if (/^\d{13}$/.test(text)) {
             link.click();
-            return { clicked: true, accountNumber: text };
+            return { clicked: true, accountNumber: text, method: 'link' };
           }
         }
 
@@ -470,7 +489,7 @@ class HarrisCountyTexasScraper extends DeedScraper {
         };
       }
 
-      this.log(`✅ Clicked on account number: ${accountClicked.accountNumber}`);
+      this.log(`✅ Clicked on account number: ${accountClicked.accountNumber} (found in ${accountClicked.method})`);
 
       // Wait for property detail page to load (inside iframe)
       await this.randomWait(3000, 5000);
