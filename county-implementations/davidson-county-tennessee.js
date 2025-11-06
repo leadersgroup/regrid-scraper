@@ -122,7 +122,7 @@ class DavidsonCountyTennesseeScraper extends DeedScraper {
         originalAddress: address
       };
 
-      // STEP 2: Search Property Assessor for property
+      // STEP 2: Search Property Assessor and click "View Deed"
       this.log(`📋 Step 2: Searching county property assessor for: ${this.county} County, ${this.state}`);
       this.log(`🌐 Navigating to assessor: https://portal.padctn.org/OFS/WP/Home`);
 
@@ -130,11 +130,11 @@ class DavidsonCountyTennesseeScraper extends DeedScraper {
 
       if (!assessorResult.success) {
         result.success = false;
-        result.message = 'Could not find property on assessor website';
+        result.message = assessorResult.error || 'Could not find property on assessor website';
         result.duration = `${((Date.now() - startTime) / 1000).toFixed(2)}s`;
         result.steps.step2 = {
           success: false,
-          message: 'Could not find property on assessor website',
+          message: assessorResult.error || 'Could not find property',
           originalAddress: address,
           county: 'Davidson',
           state: 'TN'
@@ -142,34 +142,22 @@ class DavidsonCountyTennesseeScraper extends DeedScraper {
         return result;
       }
 
-      // Extract transaction records
-      const transactionResult = await this.extractTransactionRecords();
+      // STEP 3: Download the deed PDF
+      this.log(`📥 Step 3: Attempting to download deed PDF...`);
+
+      const downloadResult = await this.downloadDeedPDF();
 
       result.steps.step2 = {
-        success: transactionResult.success,
-        transactions: transactionResult.transactions || [],
+        success: downloadResult.success,
         assessorUrl: 'https://portal.padctn.org/OFS/WP/Home',
         originalAddress: address,
         county: 'Davidson',
         state: 'TN'
       };
 
-      if (!transactionResult.success || !transactionResult.transactions || transactionResult.transactions.length === 0) {
-        result.success = false;
-        result.message = 'No transactions found on Property Assessor';
-        result.duration = `${((Date.now() - startTime) / 1000).toFixed(2)}s`;
-        return result;
-      }
-
-      // STEP 3: Download the most recent deed
-      const mostRecentDeed = transactionResult.transactions[0];
-      const deedId = mostRecentDeed.instrumentNumber || `Book ${mostRecentDeed.bookNumber} Page ${mostRecentDeed.pageNumber}`;
-      this.log(`📥 Attempting to download most recent deed: ${deedId}`);
-
-      const downloadResult = await this.downloadDeed(mostRecentDeed);
-
       result.download = downloadResult;
       result.success = downloadResult.success;
+      result.message = downloadResult.success ? 'Deed downloaded successfully' : (downloadResult.error || 'Failed to download deed');
       result.duration = `${((Date.now() - startTime) / 1000).toFixed(2)}s`;
 
       return result;
@@ -423,109 +411,105 @@ class DavidsonCountyTennesseeScraper extends DeedScraper {
       this.log(`⏳ Waiting for search results...`);
       await this.randomWait(5000, 7000);
 
-      // Step 6: Find and click on parcel number (e.g., "049 14 0a 023.00")
-      this.log(`🔍 Step 6: Looking for parcel number link...`);
+      // Step 6: Find and click on parcel number card (e.g., "049 14 0a 023.00")
+      // NOTE: This appears on the SAME PAGE as the search results, not a new page
+      this.log(`🔍 Step 6: Looking for parcel number card...`);
 
-      const parcelLinkClicked = await this.page.evaluate(() => {
-        // Look for links or clickable elements with parcel-like patterns
-        // Pattern: digits with spaces and letters (e.g., "049 14 0a 023.00")
-        const pattern = /\d{3}\s+\d{2}\s+\w+\s+\d+\.\d+/;
+      const parcelCardClicked = await this.page.evaluate(() => {
+        // Look for parcel number with pattern like "049 14 0A 023.00"
+        const pattern = /^\d{3}\s+\d{2}\s+\w+\s+\d+\.\d+$/i;
 
-        const allElements = Array.from(document.querySelectorAll('a, button, div[onclick], span[onclick], td[onclick]'));
+        // Check all elements that might be clickable
+        const allElements = Array.from(document.querySelectorAll('a, button, div, span, td'));
         for (const el of allElements) {
           const text = (el.textContent || '').trim();
-          if (pattern.test(text)) {
-            console.log(`Found parcel link: ${text}`);
+          // Match ONLY the parcel number, not text containing it
+          const firstLine = text.split('\n')[0].trim();
+          if (pattern.test(firstLine)) {
+            console.log(`Found parcel card: ${firstLine}`);
             el.click();
-            return { clicked: true, parcel: text };
+            return { clicked: true, parcel: firstLine };
           }
         }
         return { clicked: false };
       });
 
-      let linkText = null;
-
-      if (parcelLinkClicked.clicked) {
-        this.log(`✅ Found parcel link: ${parcelLinkClicked.parcel}`);
-        linkText = parcelLinkClicked.parcel;
-      } else {
-        this.log(`⚠️  Could not find parcel number link with expected pattern`);
-
-        // Try broader patterns for parcel numbers
-        const altParcelLink = await this.page.evaluate(() => {
-          // Look for links in tables or results containers
-          const tables = Array.from(document.querySelectorAll('table'));
-
-          for (const table of tables) {
-            const links = Array.from(table.querySelectorAll('a[href]'));
-            for (const link of links) {
-              const text = (link.textContent || '').trim();
-              const href = link.getAttribute('href') || '';
-
-              // Look for links that might be parcel IDs:
-              // - Contains numbers and spaces/dashes
-              // - In a table (likely results)
-              // - Not obviously a navigation link
-              if (text.match(/\d+/) &&
-                  !text.toLowerCase().includes('home') &&
-                  !text.toLowerCase().includes('help') &&
-                  !text.toLowerCase().includes('search') &&
-                  !text.toLowerCase().includes('assessor') &&
-                  !text.toLowerCase().includes('property') &&
-                  text.length < 50) {
-                return { found: true, text: text };
-              }
-            }
-          }
-
-          return { found: false };
-        });
-
-        if (altParcelLink.found) {
-          this.log(`✅ Found parcel link: ${altParcelLink.text}`);
-          linkText = altParcelLink.text;
-        } else {
-          this.log(`⚠️  Could not find any suitable parcel link`);
-          return {
-            success: false,
-            error: 'No parcel link found in search results'
-          };
-        }
+      if (!parcelCardClicked.clicked) {
+        this.log(`⚠️  Could not find parcel card`);
+        return {
+          success: false,
+          error: 'No parcel card found in search results'
+        };
       }
 
-      // Now click the link and wait for navigation
-      this.log(`🖱️  Clicking parcel link and waiting for navigation...`);
+      this.log(`✅ Clicked parcel card: ${parcelCardClicked.parcel}`);
 
-      try {
-        await Promise.all([
-          this.page.waitForNavigation({ waitUntil: 'networkidle2', timeout: 30000 }),
-          this.page.evaluate((text) => {
-            // Find and click the link with this text
-            const links = Array.from(document.querySelectorAll('a'));
-            for (const link of links) {
-              if (link.textContent?.trim() === text) {
-                link.click();
-                return true;
-              }
-            }
-            return false;
-          }, linkText)
-        ]);
-      } catch (error) {
-        // Execution context destroyed is expected during navigation
-        if (!error.message.includes('Execution context was destroyed')) {
-          throw error;
-        }
-      }
-
-      // Wait a bit more for the page to fully load
+      // Wait for the card to expand or show more details
       await this.randomWait(2000, 3000);
 
-      this.log(`✅ Successfully navigated to parcel details`);
+      // Step 7: Find and click "View Deed" button
+      this.log(`🔍 Step 7: Looking for "View Deed" button...`);
+
+      const viewDeedResult = await this.page.evaluate(() => {
+        const allButtons = Array.from(document.querySelectorAll('button, input[type="button"], input[type="submit"], a, div[onclick], span[onclick]'));
+
+        // Log all visible buttons for debugging
+        const visibleButtons = allButtons
+          .filter(btn => {
+            const style = window.getComputedStyle(btn);
+            return style.display !== 'none' && style.visibility !== 'hidden';
+          })
+          .map(btn => ({
+            tag: btn.tagName,
+            text: (btn.textContent || btn.value || '').trim().substring(0, 50),
+            onclick: btn.getAttribute('onclick')
+          }))
+          .filter(b => b.text.length > 0);
+
+        // Try to find "View Deed" button
+        for (const btn of allButtons) {
+          const text = (btn.textContent || btn.value || '').trim().toLowerCase();
+          const onclick = (btn.getAttribute('onclick') || '').toLowerCase();
+
+          if (text.includes('deed') || onclick.includes('deed')) {
+            const style = window.getComputedStyle(btn);
+            if (style.display !== 'none' && style.visibility !== 'hidden') {
+              btn.click();
+              return { clicked: true, text: btn.textContent || btn.value || btn.getAttribute('onclick'), allButtons: visibleButtons };
+            }
+          }
+        }
+
+        return { clicked: false, allButtons: visibleButtons };
+      });
+
+      if (viewDeedResult.allButtons) {
+        this.log(`📋 Visible buttons/links found: ${viewDeedResult.allButtons.length}`);
+        viewDeedResult.allButtons.forEach((btn, i) => {
+          if (i < 10) { // Log first 10
+            this.log(`   ${i + 1}. [${btn.tag}] "${btn.text}"`);
+          }
+        });
+      }
+
+      const viewDeedClicked = { clicked: viewDeedResult.clicked, text: viewDeedResult.text };
+
+      if (!viewDeedClicked.clicked) {
+        this.log('⚠️  Could not find "View Deed" button');
+        return {
+          success: false,
+          error: 'Could not find "View Deed" button after clicking parcel card'
+        };
+      }
+
+      this.log(`✅ Clicked "View Deed" button: ${viewDeedClicked.text}`);
+
+      // Wait for deed viewer/download to appear
+      await this.randomWait(3000, 5000);
 
       return {
         success: true,
-        message: 'Property found and navigated to parcel details'
+        message: 'Found property and clicked View Deed button'
       };
 
     } catch (error) {
@@ -720,7 +704,149 @@ class DavidsonCountyTennesseeScraper extends DeedScraper {
   }
 
   /**
-   * Download deed PDF by clicking "View Deed" button
+   * Download deed PDF after "View Deed" button has been clicked
+   */
+  async downloadDeedPDF() {
+    this.log('📥 Downloading deed PDF...');
+
+    try {
+      // Wait for PDF to load
+      await this.randomWait(3000, 5000);
+
+      // Check if PDF is displayed in browser or needs to be downloaded
+      const pdfInfo = await this.page.evaluate(() => {
+        // Check if PDF is embedded in page
+        const pdfEmbed = document.querySelector('embed[type="application/pdf"], object[type="application/pdf"], iframe[src*="pdf"]');
+        if (pdfEmbed) {
+          return {
+            type: 'embedded',
+            src: pdfEmbed.getAttribute('src') || pdfEmbed.getAttribute('data')
+          };
+        }
+
+        // Check current URL
+        if (window.location.href.includes('.pdf') || document.contentType === 'application/pdf') {
+          return {
+            type: 'direct',
+            url: window.location.href
+          };
+        }
+
+        // Check for PDF links
+        const pdfLinks = Array.from(document.querySelectorAll('a[href*=".pdf"], a[href*="pdf"]'));
+        if (pdfLinks.length > 0) {
+          return {
+            type: 'link',
+            href: pdfLinks[0].href
+          };
+        }
+
+        return { type: 'unknown' };
+      });
+
+      this.log(`📄 PDF Info: ${JSON.stringify(pdfInfo)}`);
+
+      let pdfUrl = null;
+
+      if (pdfInfo.type === 'embedded' && pdfInfo.src) {
+        pdfUrl = pdfInfo.src;
+      } else if (pdfInfo.type === 'direct') {
+        pdfUrl = pdfInfo.url;
+      } else if (pdfInfo.type === 'link') {
+        pdfUrl = pdfInfo.href;
+      }
+
+      if (!pdfUrl) {
+        this.log('⚠️  Could not find PDF URL');
+        return {
+          success: false,
+          error: 'Could not find PDF URL'
+        };
+      }
+
+      this.log(`📍 PDF URL: ${pdfUrl}`);
+
+      // Download the PDF using CDP or navigate to it
+      const fs = require('fs');
+      const path = require('path');
+      const axios = require('axios');
+
+      const downloadPath = process.env.DEED_DOWNLOAD_PATH || './downloads';
+      const timestamp = Date.now();
+      const filename = `davidson_deed_${timestamp}.pdf`;
+      const filepath = path.join(downloadPath, filename);
+
+      // Ensure download directory exists
+      if (!fs.existsSync(downloadPath)) {
+        fs.mkdirSync(downloadPath, { recursive: true });
+      }
+
+      // Try to get PDF content
+      try {
+        // If it's a relative URL, make it absolute
+        if (pdfUrl.startsWith('/')) {
+          const baseUrl = await this.page.evaluate(() => window.location.origin);
+          pdfUrl = baseUrl + pdfUrl;
+        }
+
+        // Get cookies for the request
+        const cookies = await this.page.cookies();
+        const cookieString = cookies.map(c => `${c.name}=${c.value}`).join('; ');
+
+        const response = await axios.get(pdfUrl, {
+          responseType: 'arraybuffer',
+          headers: {
+            'Cookie': cookieString,
+            'User-Agent': await this.page.evaluate(() => navigator.userAgent)
+          }
+        });
+
+        fs.writeFileSync(filepath, Buffer.from(response.data));
+
+        this.log(`✅ PDF saved: ${filepath} (${response.data.byteLength} bytes)`);
+
+        return {
+          success: true,
+          filename: filename,
+          filepath: filepath,
+          size: response.data.byteLength,
+          base64: Buffer.from(response.data).toString('base64')
+        };
+
+      } catch (downloadError) {
+        this.log(`⚠️  Failed to download via axios: ${downloadError.message}`);
+        this.log(`   Trying page.pdf() fallback...`);
+
+        // Fallback: use page.pdf()
+        const pdfBuffer = await this.page.pdf({
+          format: 'A4',
+          printBackground: true
+        });
+
+        fs.writeFileSync(filepath, pdfBuffer);
+
+        this.log(`✅ PDF saved via fallback: ${filepath} (${pdfBuffer.length} bytes)`);
+
+        return {
+          success: true,
+          filename: filename,
+          filepath: filepath,
+          size: pdfBuffer.length,
+          base64: pdfBuffer.toString('base64')
+        };
+      }
+
+    } catch (error) {
+      this.log(`❌ Failed to download deed: ${error.message}`);
+      return {
+        success: false,
+        error: error.message
+      };
+    }
+  }
+
+  /**
+   * Download deed PDF by clicking "View Deed" button (DEPRECATED - kept for compatibility)
    * This is called after navigating to the parcel details page
    */
   async downloadDeed(transaction) {
