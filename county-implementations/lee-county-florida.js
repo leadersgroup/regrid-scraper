@@ -1055,26 +1055,28 @@ class LeeCountyFloridaScraper extends DeedScraper {
       }
       this.log(`   overFlowDiv text: ${salesDebugInfo.overFlowDivText?.substring(0, 200)}`);
 
-      // Extract Clerk file numbers from the table
-      this.log('🔍 Extracting Clerk file numbers from Sales/Transactions table...');
+      // Extract Clerk file numbers AND Book/Page references from the table
+      this.log('🔍 Extracting deed references from Sales/Transactions table...');
 
       const transactions = await this.page.evaluate(() => {
         const results = [];
 
-        // Look for table with Clerk file number column
+        // Look for table with deed reference columns
         const tables = Array.from(document.querySelectorAll('table'));
         console.log(`Found ${tables.length} tables on page`);
 
         for (const table of tables) {
           const tableText = (table.innerText || table.textContent || '').toLowerCase();
-          console.log(`Table text includes: clerk=${tableText.includes('clerk file')}, instrument=${tableText.includes('instrument')}, sale=${tableText.includes('sale')}`);
+          console.log(`Table text includes: clerk=${tableText.includes('clerk file')}, instrument=${tableText.includes('instrument')}, sale=${tableText.includes('sale')}, file number=${tableText.includes('file number')}`);
 
-          // Check if this table contains "clerk file" or similar
+          // Check if this table contains deed-related information
           if (tableText.includes('clerk file') ||
               tableText.includes('clerk') ||
               tableText.includes('instrument') ||
               tableText.includes('sale') ||
-              tableText.includes('deed')) {
+              tableText.includes('deed') ||
+              tableText.includes('file number') ||
+              tableText.includes('book')) {
 
             console.log('Found relevant table, checking rows...');
 
@@ -1084,22 +1086,22 @@ class LeeCountyFloridaScraper extends DeedScraper {
 
             for (const row of rows) {
               const cells = Array.from(row.querySelectorAll('td'));
+              const rowText = cells.map(c => (c.textContent || '').trim()).join(' ');
 
               // Look for clerk file numbers in cells (typically 13 digits like 2022000220622)
               for (const cell of cells) {
                 const text = (cell.textContent || '').trim();
 
-                // Clerk file number format: YYYYXXXXXXXXX (year + sequence)
+                // Pattern 1: Clerk file number format: YYYYXXXXXXXXX (year + sequence)
                 // Example: 2022000220622 (13 digits starting with year)
-                // Also try more flexible patterns
-                const patterns = [
+                const clerkFilePatterns = [
                   /^(20\d{11})$/,           // Exact 13 digits starting with 20
                   /(20\d{11})/,             // 13 digits starting with 20 anywhere in text
                   /^\d{13}$/,               // Any 13 digits
                   /(\d{13})/                // 13 digits anywhere in text
                 ];
 
-                for (const pattern of patterns) {
+                for (const pattern of clerkFilePatterns) {
                   const match = text.match(pattern);
                   if (match) {
                     const clerkFileNumber = match[1] || match[0];
@@ -1114,6 +1116,25 @@ class LeeCountyFloridaScraper extends DeedScraper {
                       });
                       break; // Found a match, no need to try other patterns
                     }
+                  }
+                }
+
+                // Pattern 2: Book/Page format: XXX/XXX or XXXX/XXXX
+                // Example: 595/615, 1234/5678
+                const bookPageMatch = text.match(/^(\d{2,5})\/(\d{2,5})$/);
+                if (bookPageMatch) {
+                  const book = bookPageMatch[1];
+                  const page = bookPageMatch[2];
+                  const exists = results.some(r => r.bookNumber === book && r.pageNumber === page);
+                  if (!exists) {
+                    console.log(`Found Book/Page: ${book}/${page}`);
+                    results.push({
+                      bookNumber: book,
+                      pageNumber: page,
+                      type: 'book_page',
+                      source: 'Lee County Property Appraiser - Sales/Transactions',
+                      rawText: text
+                    });
                   }
                 }
 
@@ -1146,23 +1167,38 @@ class LeeCountyFloridaScraper extends DeedScraper {
       });
 
       if (transactions.length > 0) {
-        this.log(`🔍 Extracted ${transactions.length} clerk file number(s)`);
+        this.log(`🔍 Extracted ${transactions.length} deed reference(s)`);
         transactions.forEach((t, i) => {
-          this.log(`   📄 Clerk File #${i+1}: ${t.clerkFileNumber}`);
+          if (t.type === 'clerk_file') {
+            this.log(`   📄 #${i+1}: Clerk File Number ${t.clerkFileNumber}`);
+          } else if (t.type === 'book_page') {
+            this.log(`   📄 #${i+1}: Book ${t.bookNumber} Page ${t.pageNumber}`);
+          }
         });
 
         return {
           success: true,
-          transactions: transactions.map(t => ({
-            instrumentNumber: t.clerkFileNumber,  // Use instrumentNumber for compatibility
-            clerkFileNumber: t.clerkFileNumber,
-            type: 'clerk_file',
-            source: t.source
-          }))
+          transactions: transactions.map(t => {
+            if (t.type === 'clerk_file') {
+              return {
+                instrumentNumber: t.clerkFileNumber,
+                clerkFileNumber: t.clerkFileNumber,
+                type: 'clerk_file',
+                source: t.source
+              };
+            } else if (t.type === 'book_page') {
+              return {
+                bookNumber: t.bookNumber,
+                pageNumber: t.pageNumber,
+                type: 'book_page',
+                source: t.source
+              };
+            }
+          })
         };
       }
 
-      this.log(`⚠️ No clerk file numbers found in Sales/Transactions table`);
+      this.log(`⚠️ No deed references found in Sales/Transactions table`);
 
       // Debug: Save screenshot and HTML
       try {
@@ -1208,14 +1244,27 @@ class LeeCountyFloridaScraper extends DeedScraper {
     this.log('📄 Downloading deed from Lee County Clerk...');
 
     try {
-      const clerkFileNumber = transaction.clerkFileNumber || transaction.instrumentNumber;
+      // Determine which type of reference we have
+      let pdfUrl;
+      let deedReference;
 
-      if (!clerkFileNumber) {
-        throw new Error('No clerk file number found in transaction record');
+      if (transaction.clerkFileNumber || transaction.instrumentNumber) {
+        // Modern Clerk File Number format
+        const clerkFileNumber = transaction.clerkFileNumber || transaction.instrumentNumber;
+        pdfUrl = `https://or.leeclerk.org/LandMarkWeb/Document/GetDocumentByCFN/?cfn=${clerkFileNumber}`;
+        deedReference = `CFN ${clerkFileNumber}`;
+        this.log(`📋 Using Clerk File Number: ${clerkFileNumber}`);
+      } else if (transaction.bookNumber && transaction.pageNumber) {
+        // Old Book/Page format
+        const book = transaction.bookNumber;
+        const page = transaction.pageNumber;
+        pdfUrl = `https://or.leeclerk.org/LandMarkWeb/Document/GetDocumentByBP/?book=${book}&page=${page}`;
+        deedReference = `Book ${book} Page ${page}`;
+        this.log(`📋 Using Book/Page: ${book}/${page}`);
+      } else {
+        throw new Error('No deed reference found in transaction record (need CFN or Book/Page)');
       }
 
-      // Construct direct PDF URL
-      const pdfUrl = `https://or.leeclerk.org/LandMarkWeb/Document/GetDocumentByCFN/?cfn=${clerkFileNumber}`;
       this.log(`🌐 Navigating to PDF page: ${pdfUrl}`);
 
       // Set up download handling BEFORE navigating
@@ -1374,7 +1423,8 @@ class LeeCountyFloridaScraper extends DeedScraper {
             this.log(`💾 File size: ${(stats.size / 1024).toFixed(2)} KB`);
 
             // Rename to standard format
-            const filename = `lee_deed_${clerkFileNumber}.pdf`;
+            const sanitizedRef = deedReference.replace(/[^a-zA-Z0-9]/g, '_');
+            const filename = `lee_deed_${sanitizedRef}.pdf`;
             const newFilepath = path.join(downloadPath, filename);
 
             if (filepath !== newFilepath) {
@@ -1387,7 +1437,10 @@ class LeeCountyFloridaScraper extends DeedScraper {
               filename,
               downloadPath,
               filepath: newFilepath,
-              clerkFileNumber,
+              deedReference,
+              clerkFileNumber: transaction.clerkFileNumber,
+              bookNumber: transaction.bookNumber,
+              pageNumber: transaction.pageNumber,
               instrumentNumber: clerkFileNumber,
               pdfUrl,
               timestamp: new Date().toISOString(),
@@ -1436,7 +1489,8 @@ class LeeCountyFloridaScraper extends DeedScraper {
 
       this.log(`✅ PDF downloaded successfully (${pdfBuffer.length} bytes)`);
 
-      const filename = `lee_deed_${clerkFileNumber}.pdf`;
+      const sanitizedRef = deedReference.replace(/[^a-zA-Z0-9]/g, '_');
+      const filename = `lee_deed_${sanitizedRef}.pdf`;
       const filepath = path.join(downloadPath, filename);
 
       fs.writeFileSync(filepath, pdfBuffer);
@@ -1447,8 +1501,11 @@ class LeeCountyFloridaScraper extends DeedScraper {
         filename,
         downloadPath,
         filepath,
-        clerkFileNumber,
-        instrumentNumber: clerkFileNumber,
+        deedReference,
+        clerkFileNumber: transaction.clerkFileNumber,
+        bookNumber: transaction.bookNumber,
+        pageNumber: transaction.pageNumber,
+        instrumentNumber: transaction.clerkFileNumber || transaction.instrumentNumber,
         pdfUrl,
         timestamp: new Date().toISOString(),
         fileSize: pdfBuffer.length,

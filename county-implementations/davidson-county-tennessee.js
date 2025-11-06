@@ -473,26 +473,48 @@ class DavidsonCountyTennesseeScraper extends DeedScraper {
       if (parcelLinkClicked.clicked) {
         this.log(`✅ Clicked parcel link: ${parcelLinkClicked.parcel}`);
       } else {
-        this.log(`⚠️  Could not find parcel number link`);
-        // Try to find any link on the results page
-        const anyLinkClicked = await this.page.evaluate(() => {
-          const links = Array.from(document.querySelectorAll('a[href], button'));
-          // Look for first meaningful link in results
-          for (const link of links) {
-            const text = (link.textContent || '').trim();
-            const href = link.getAttribute('href') || '';
-            // Skip navigation links
-            if (text.length > 3 && !text.toLowerCase().includes('home') &&
-                !text.toLowerCase().includes('help') && !text.toLowerCase().includes('logout')) {
-              link.click();
-              return { clicked: true, text: text.substring(0, 50) };
+        this.log(`⚠️  Could not find parcel number link with expected pattern`);
+
+        // Try broader patterns for parcel numbers
+        const altParcelLink = await this.page.evaluate(() => {
+          // Look for links in tables or results containers
+          const tables = Array.from(document.querySelectorAll('table'));
+
+          for (const table of tables) {
+            const links = Array.from(table.querySelectorAll('a[href]'));
+            for (const link of links) {
+              const text = (link.textContent || '').trim();
+              const href = link.getAttribute('href') || '';
+
+              // Look for links that might be parcel IDs:
+              // - Contains numbers and spaces/dashes
+              // - In a table (likely results)
+              // - Not obviously a navigation link
+              if (text.match(/\d+/) &&
+                  !text.toLowerCase().includes('home') &&
+                  !text.toLowerCase().includes('help') &&
+                  !text.toLowerCase().includes('search') &&
+                  !text.toLowerCase().includes('assessor') &&
+                  !text.toLowerCase().includes('property') &&
+                  text.length < 50) {
+                console.log(`Found potential parcel link in table: ${text}`);
+                link.click();
+                return { clicked: true, text: text };
+              }
             }
           }
+
           return { clicked: false };
         });
 
-        if (anyLinkClicked.clicked) {
-          this.log(`✅ Clicked result link: ${anyLinkClicked.text}`);
+        if (altParcelLink.clicked) {
+          this.log(`✅ Clicked parcel link: ${altParcelLink.text}`);
+        } else {
+          this.log(`⚠️  Could not find any suitable parcel link`);
+          return {
+            success: false,
+            error: 'No parcel link found in search results'
+          };
         }
       }
 
