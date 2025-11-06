@@ -35,6 +35,7 @@ const PalmBeachCountyFloridaScraper = require('./county-implementations/palm-bea
 const MiamiDadeCountyFloridaScraper = require('./county-implementations/miami-dade-county-florida');
 const BrowardCountyFloridaScraper = require('./county-implementations/broward-county-florida');
 const ShelbyCountyTennesseeScraper = require('./county-implementations/shelby-county-tennessee');
+const HarrisCountyTexasScraper = require('./county-implementations/harris-county-texas');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -281,6 +282,8 @@ async function processDeedDownload(address, county, state, options = {}) {
     scraper = new BrowardCountyFloridaScraper(scraperOptions);
   } else if (detectedCounty === 'Shelby' && detectedState === 'TN') {
     scraper = new ShelbyCountyTennesseeScraper(scraperOptions);
+  } else if (detectedCounty === 'Harris' && detectedState === 'TX') {
+    scraper = new HarrisCountyTexasScraper(scraperOptions);
   } else {
     throw new Error(`County "${detectedCounty}, ${detectedState}" is not yet supported`);
   }
