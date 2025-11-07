@@ -36,6 +36,7 @@ const MiamiDadeCountyFloridaScraper = require('./county-implementations/miami-da
 const BrowardCountyFloridaScraper = require('./county-implementations/broward-county-florida');
 const ShelbyCountyTennesseeScraper = require('./county-implementations/shelby-county-tennessee');
 const HarrisCountyTexasScraper = require('./county-implementations/harris-county-texas');
+const TarrantCountyTexasScraper = require('./county-implementations/tarrant-county-texas');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -213,6 +214,19 @@ app.get('/api/counties', (req, res) => {
           'Register of Deeds integration'
         ],
         cost: 'Free (no CAPTCHA)'
+      },
+      {
+        name: 'Tarrant County',
+        state: 'TX',
+        stateCode: 'Texas',
+        features: [
+          'TAD property search',
+          'Account number detection',
+          'Instrument number extraction',
+          'Automatic login',
+          'Full PDF download'
+        ],
+        cost: 'Free (no CAPTCHA)'
       }
     ]
   });
@@ -284,6 +298,8 @@ async function processDeedDownload(address, county, state, options = {}) {
     scraper = new ShelbyCountyTennesseeScraper(scraperOptions);
   } else if (detectedCounty === 'Harris' && detectedState === 'TX') {
     scraper = new HarrisCountyTexasScraper(scraperOptions);
+  } else if (detectedCounty === 'Tarrant' && detectedState === 'TX') {
+    scraper = new TarrantCountyTexasScraper(scraperOptions);
   } else {
     throw new Error(`County "${detectedCounty}, ${detectedState}" is not yet supported`);
   }
