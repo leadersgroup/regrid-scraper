@@ -946,13 +946,18 @@ class HarrisCountyTexasScraper extends DeedScraper {
                 hostname: pdfUrl.hostname,
                 port: 443,
                 path: pdfUrl.pathname + pdfUrl.search,
-                method: 'POST',  // Use POST as server expects it
+                method: 'GET',  // Use GET to retrieve the PDF
                 headers: {
                   'Cookie': cookieHeader,
                   'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36',
-                  'Accept': 'application/pdf,*/*',
-                  'Referer': pdfViewerUrl,
-                  'Cache-Control': 'no-cache'
+                  'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7',
+                  'Accept-Language': 'en-US,en;q=0.9',
+                  'Referer': 'https://www.cclerk.hctx.net/Applications/WebSearch/RP.aspx',
+                  'Sec-Fetch-Dest': 'document',
+                  'Sec-Fetch-Mode': 'navigate',
+                  'Sec-Fetch-Site': 'same-origin',
+                  'Upgrade-Insecure-Requests': '1',
+                  'Cache-Control': 'max-age=0'
                 }
               };
 
