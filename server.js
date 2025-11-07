@@ -102,6 +102,19 @@ app.get('/api/counties', (req, res) => {
           'Cloudflare bypass with 2Captcha'
         ],
         cost: '$0.003 per deed (with 2Captcha API, if needed)'
+      },
+      {
+        name: 'Tarrant County',
+        state: 'TX',
+        stateCode: 'Texas',
+        features: [
+          'TAD property search',
+          'Account number detection',
+          'Instrument number extraction',
+          'Automatic login',
+          'Full PDF download'
+        ],
+        cost: 'Free (no CAPTCHA)'
       }
     ],
     timestamp: new Date().toISOString()
@@ -155,6 +168,13 @@ app.post('/api/deed', async (req, res) => {
     } else if (detectedCounty === 'Harris' && detectedState === 'TX') {
       const HarrisCountyTexasScraper = require('./county-implementations/harris-county-texas');
       scraper = new HarrisCountyTexasScraper({
+        headless: true,
+        timeout: 120000,
+        verbose: true
+      });
+    } else if (detectedCounty === 'Tarrant' && detectedState === 'TX') {
+      const TarrantCountyTexasScraper = require('./county-implementations/tarrant-county-texas');
+      scraper = new TarrantCountyTexasScraper({
         headless: true,
         timeout: 120000,
         verbose: true
