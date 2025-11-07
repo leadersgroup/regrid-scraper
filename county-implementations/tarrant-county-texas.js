@@ -641,10 +641,6 @@ class TarrantCountyTexasScraper extends DeedScraper {
           timestamp: new Date().toISOString()
         };
 
-      } else {
-        throw new Error('Could not find Download button');
-      }
-
     } catch (error) {
       this.log(`❌ Download failed: ${error.message}`);
       return {
