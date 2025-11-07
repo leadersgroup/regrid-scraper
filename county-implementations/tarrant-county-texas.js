@@ -625,6 +625,13 @@ class TarrantCountyTexasScraper extends DeedScraper {
   }
 
   /**
+   * getPriorDeed - Alias for scrape() to match server API expectations
+   */
+  async getPriorDeed(address) {
+    return await this.scrape(address);
+  }
+
+  /**
    * Random wait helper
    */
   async randomWait(min, max) {
