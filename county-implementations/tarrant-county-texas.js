@@ -166,7 +166,16 @@ class TarrantCountyTexasScraper extends DeedScraper {
         throw new Error('Could not find search input field');
       }
 
-      await this.page.click(searchInput);
+      // Clear and type in search input
+      await this.page.evaluate((selector) => {
+        const input = document.querySelector(selector);
+        if (input) {
+          input.value = '';
+          input.focus();
+        }
+      }, searchInput);
+
+      await this.randomWait(500, 1000);
       await this.page.type(searchInput, addressParts, { delay: 50 });
 
       await this.randomWait(1000, 2000);
