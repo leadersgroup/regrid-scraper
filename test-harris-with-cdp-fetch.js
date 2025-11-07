@@ -22,9 +22,16 @@ const path = require('path');
 
   await new Promise(resolve => setTimeout(resolve, 3000));
 
-  // Enter search parameters
-  await page.type('input[name*="From"]', '07/25/2023');
-  await page.type('input[name*="To"]', '07/25/2023');
+  // Enter search parameters (To date = From date + 30 days)
+  const fromDate = '07/25/2023';
+  const fromDateObj = new Date('2023-07-25');
+  const toDateObj = new Date(fromDateObj);
+  toDateObj.setDate(toDateObj.getDate() + 30);
+  const toDate = `${String(toDateObj.getMonth() + 1).padStart(2, '0')}/${String(toDateObj.getDate()).padStart(2, '0')}/${toDateObj.getFullYear()}`;
+
+  await page.type('input[name*="From"]', fromDate);
+  await page.type('input[name*="To"]', toDate);
+  console.log(`📅 Date range: ${fromDate} to ${toDate}`);
   await new Promise(resolve => setTimeout(resolve, 1000));
 
   const searchButton = await page.$('input[type="submit"]');

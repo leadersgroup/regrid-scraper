@@ -716,14 +716,22 @@ class HarrisCountyTexasScraper extends DeedScraper {
       }
 
       if (dateToInput) {
+        // Calculate "To" date as effectiveDate + 30 days
+        const fromDate = new Date(effectiveDate);
+        const toDate = new Date(fromDate);
+        toDate.setDate(toDate.getDate() + 30);
+
+        // Format as MM/DD/YYYY to match the From date format
+        const toDateStr = `${String(toDate.getMonth() + 1).padStart(2, '0')}/${String(toDate.getDate()).padStart(2, '0')}/${toDate.getFullYear()}`;
+
         await this.page.click(dateToInput);
         // Clear existing value first
         await this.page.evaluate((sel) => {
           const input = document.querySelector(sel);
           if (input) input.value = '';
         }, dateToInput);
-        await this.page.type(dateToInput, effectiveDate, { delay: 50 });
-        this.log(`✅ Entered Date To: ${effectiveDate}`);
+        await this.page.type(dateToInput, toDateStr, { delay: 50 });
+        this.log(`✅ Entered Date To: ${toDateStr} (From: ${effectiveDate} + 30 days)`);
       } else {
         this.log(`⚠️ Could not find Date To input field`);
       }
