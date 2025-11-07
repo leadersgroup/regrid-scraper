@@ -115,6 +115,19 @@ app.get('/api/counties', (req, res) => {
           'Full PDF download'
         ],
         cost: 'Free (no CAPTCHA)'
+      },
+      {
+        name: 'Dallas County',
+        state: 'TX',
+        stateCode: 'Texas',
+        features: [
+          'Dallas CAD property search',
+          'Legal description extraction',
+          'Instrument number detection',
+          'Book/Page support',
+          'Full PDF download'
+        ],
+        cost: 'Free (no CAPTCHA)'
       }
     ],
     timestamp: new Date().toISOString()
@@ -175,6 +188,13 @@ app.post('/api/deed', async (req, res) => {
     } else if (detectedCounty === 'Tarrant' && detectedState === 'TX') {
       const TarrantCountyTexasScraper = require('./county-implementations/tarrant-county-texas');
       scraper = new TarrantCountyTexasScraper({
+        headless: true,
+        timeout: 120000,
+        verbose: true
+      });
+    } else if (detectedCounty === 'Dallas' && detectedState === 'TX') {
+      const DallasCountyTexasScraper = require('./county-implementations/dallas-county-texas');
+      scraper = new DallasCountyTexasScraper({
         headless: true,
         timeout: 120000,
         verbose: true
