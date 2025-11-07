@@ -262,14 +262,17 @@ class TarrantCountyTexasScraper extends DeedScraper {
 
       this.log(`✅ Clicked on account number: ${accountClicked.accountNumber}`);
 
-      await this.randomWait(5000, 7000);
+      // Wait for navigation to property detail page
+      this.log('⏳ Waiting for property detail page to load...');
+      await this.page.waitForNavigation({ waitUntil: 'networkidle2', timeout: 30000 }).catch(() => {
+        this.log('⚠️ Navigation timeout, checking if page loaded...');
+      });
 
-      // Wait for property detail page to load
+      await this.randomWait(2000, 3000);
+
+      // Wait for property detail page to load (wait for URL to change)
       await this.page.waitForFunction(() => {
-        const text = document.body.innerText.toLowerCase();
-        return text.includes('owner information') ||
-               text.includes('instrument') ||
-               text.includes('property');
+        return window.location.href.includes('/property?account=');
       }, { timeout: 30000 });
 
       this.log('✅ Property detail page loaded');
