@@ -213,38 +213,53 @@ class TarrantCountyTexasScraper extends DeedScraper {
       this.log('🖱️ Looking for account number...');
 
       const accountClicked = await this.page.evaluate(() => {
-        // Look for 8-digit account numbers
-        const links = Array.from(document.querySelectorAll('a, td, div, span'));
+        // Look for 8-digit account numbers - prioritize links first
+        const accountPattern = /\b\d{8}\b/;
         const debugInfo = [];
 
-        for (const element of links) {
+        // Strategy 1: Find direct links with account numbers
+        const allLinks = Array.from(document.querySelectorAll('a'));
+        for (const link of allLinks) {
+          const text = link.textContent?.trim() || '';
+          const match = text.match(accountPattern);
+          if (match) {
+            const accountNumber = match[0];
+            debugInfo.push(`Found ${accountNumber} in <A> tag`);
+            link.click();
+            return { clicked: true, accountNumber, debugInfo };
+          }
+        }
+
+        // Strategy 2: Find account number in any element and look for nearby link
+        const allElements = Array.from(document.querySelectorAll('td, div, span'));
+        for (const element of allElements) {
           const text = element.textContent?.trim() || '';
-          const match = text.match(/\b\d{8}\b/);
+          const match = text.match(accountPattern);
 
           if (match) {
             const accountNumber = match[0];
             debugInfo.push(`Found ${accountNumber} in ${element.tagName}`);
 
-            // Try to click if it's a link
-            if (element.tagName === 'A') {
-              element.click();
-              return { clicked: true, accountNumber, debugInfo };
-            }
-
-            // If it's in a table cell, try to find a link in the same row
+            // If it's in a table cell, find link in the same row
             if (element.tagName === 'TD') {
               const row = element.closest('tr');
               const link = row?.querySelector('a');
               if (link) {
+                debugInfo.push(`Clicking link in same row`);
                 link.click();
                 return { clicked: true, accountNumber, debugInfo };
               }
             }
 
-            // Try clicking the element itself
-            if (typeof element.click === 'function') {
-              element.click();
-              return { clicked: true, accountNumber, debugInfo };
+            // Look for a clickable parent or ancestor
+            let current = element;
+            while (current && current !== document.body) {
+              if (current.tagName === 'A') {
+                debugInfo.push(`Clicking parent <A> tag`);
+                current.click();
+                return { clicked: true, accountNumber, debugInfo };
+              }
+              current = current.parentElement;
             }
           }
         }
