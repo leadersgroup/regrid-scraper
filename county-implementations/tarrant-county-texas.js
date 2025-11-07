@@ -539,6 +539,59 @@ class TarrantCountyTexasScraper extends DeedScraper {
         if (loginClicked) {
           this.log('✅ Clicked login button');
           await this.randomWait(5000, 7000);
+
+          // After login, we're back on the search results page
+          // We need to click the deed row AGAIN to navigate to the document preview page
+          this.log('🔄 After login, clicking deed row again to navigate to document preview...');
+
+          // Wait for search results page to load
+          await publicSearchPage.waitForFunction(() => {
+            const text = document.body.innerText;
+            return text.includes('SEARCH RESULTS') || text.includes('results');
+          }, { timeout: 15000 }).catch(() => {
+            this.log('⚠️ Search results page did not load after login');
+          });
+
+          await this.randomWait(2000, 3000);
+
+          // Click on the instrument number column specifically
+          const secondClickDone = await publicSearchPage.evaluate((instNum) => {
+            const rows = document.querySelectorAll('tbody tr');
+
+            for (const row of rows) {
+              if (row.textContent.includes(instNum)) {
+                // Click the instrument number column specifically
+                const instrumentCol = row.querySelector('.col-7');
+                if (instrumentCol) {
+                  instrumentCol.click();
+                  return { clicked: true, method: 'col-7' };
+                }
+
+                // Fallback to clicking the row
+                row.click();
+                return { clicked: true, method: 'row' };
+              }
+            }
+
+            return { clicked: false };
+          }, instrumentNumber);
+
+          if (secondClickDone.clicked) {
+            this.log(`✅ Clicked deed row (${secondClickDone.method}) to navigate to document preview`);
+
+            // Wait for navigation to document preview page
+            await publicSearchPage.waitForFunction(() => {
+              return window.location.href.includes('/doc/') &&
+                     document.body.innerText.toLowerCase().includes('download');
+            }, { timeout: 15000 }).catch(() => {
+              this.log('⚠️ Document preview page did not load');
+            });
+
+            await this.randomWait(2000, 3000);
+            this.log('✅ Document preview page loaded');
+          } else {
+            this.log('⚠️ Could not click deed row after login');
+          }
         } else {
           this.log('⚠️ Could not find login button');
         }
@@ -587,7 +640,7 @@ class TarrantCountyTexasScraper extends DeedScraper {
 
         this.log('✅ CDP Fetch domain enabled');
 
-        const pdfBuffer = await new Promise((resolve, reject) => {
+        const pdfBuffer = await new Promise(async (resolve, reject) => {
           const timeout = setTimeout(() => {
             reject(new Error('PDF download timeout after 30 seconds'));
           }, 30000);
@@ -640,9 +693,39 @@ class TarrantCountyTexasScraper extends DeedScraper {
             }
           });
 
-          // Trigger download by reloading
-          this.log(`🔄 Triggering PDF download...`);
-          pdfPage.reload({ waitUntil: 'networkidle2' }).catch(() => {});
+          // Trigger download by clicking the "Download (Free)" button
+          this.log(`🔄 Clicking Download button to trigger PDF download...`);
+
+          const downloadButtonClicked = await pdfPage.evaluate(() => {
+            // Look for Download button
+            const buttons = Array.from(document.querySelectorAll('button, a'));
+
+            for (const btn of buttons) {
+              const text = (btn.textContent || '').toLowerCase();
+              if (text.includes('download') && text.includes('free')) {
+                btn.click();
+                return true;
+              }
+            }
+
+            // Fallback: look for any download button
+            for (const btn of buttons) {
+              const text = (btn.textContent || '').toLowerCase();
+              if (text.includes('download')) {
+                btn.click();
+                return true;
+              }
+            }
+
+            return false;
+          });
+
+          if (!downloadButtonClicked) {
+            this.log('⚠️ Could not find download button, trying reload...');
+            pdfPage.reload({ waitUntil: 'networkidle2' }).catch(() => {});
+          } else {
+            this.log('✅ Clicked Download button');
+          }
         });
 
         this.log(`✅ PDF downloaded successfully`);
