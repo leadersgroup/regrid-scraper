@@ -730,46 +730,6 @@ class HarrisCountyTexasScraper extends DeedScraper {
 
       await this.randomWait(1000, 2000);
 
-      // Find and fill Grantee Name field (owner name)
-      this.log(`🔍 Looking for Grantee Name field...`);
-      const granteeSelectors = [
-        'input[name*="Grantee"]',
-        'input[name*="grantee"]',
-        'input[id*="Grantee"]',
-        'input[id*="grantee"]',
-        'input[name*="GranteeName"]',
-        'input[placeholder*="Grantee"]'
-      ];
-
-      let granteeInput = null;
-      for (const selector of granteeSelectors) {
-        try {
-          await this.page.waitForSelector(selector, { timeout: 2000 });
-          granteeInput = selector;
-          this.log(`✅ Found Grantee Name input: ${selector}`);
-          break;
-        } catch (e) {
-          // Try next selector
-        }
-      }
-
-      if (granteeInput && owner) {
-        await this.page.click(granteeInput);
-        // Clear existing value first
-        await this.page.evaluate((sel) => {
-          const input = document.querySelector(sel);
-          if (input) input.value = '';
-        }, granteeInput);
-        await this.page.type(granteeInput, owner, { delay: 50 });
-        this.log(`✅ Entered Grantee Name: ${owner}`);
-      } else if (!granteeInput) {
-        this.log(`⚠️ Could not find Grantee Name input field`);
-      } else {
-        this.log(`⚠️ No owner name available to enter in Grantee field`);
-      }
-
-      await this.randomWait(1000, 2000);
-
       // Click search button
       const searchButtonSelectors = [
         'input[type="submit"]',
