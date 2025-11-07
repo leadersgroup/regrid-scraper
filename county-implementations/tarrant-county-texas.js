@@ -321,25 +321,37 @@ class TarrantCountyTexasScraper extends DeedScraper {
     this.log(`📄 Downloading deed PDF: ${instrumentNumber}`);
 
     try {
-      // Click on instrument number to view details
+      // Step 1: Click on instrument number link on TAD property page
+      // This opens a new tab to tarrant.tx.publicsearch.us
       this.log(`🖱️ Clicking on instrument number: ${instrumentNumber}...`);
 
+      // Set up listener for new page/tab BEFORE clicking
+      const newPagePromise = new Promise((resolve) => {
+        const handler = async (target) => {
+          if (target.type() === 'page') {
+            const newPage = await target.page();
+            this.browser.off('targetcreated', handler);
+            resolve(newPage);
+          }
+        };
+        this.browser.on('targetcreated', handler);
+
+        // Timeout after 15 seconds
+        setTimeout(() => {
+          this.browser.off('targetcreated', handler);
+          resolve(null);
+        }, 15000);
+      });
+
+      // Click the instrument number link (which is an <A> tag)
       const firstClickDone = await this.page.evaluate((instNum) => {
-        const elements = Array.from(document.querySelectorAll('a, td, div, span'));
+        const links = Array.from(document.querySelectorAll('a'));
 
-        for (const element of elements) {
-          const text = element.textContent?.trim() || '';
-
+        for (const link of links) {
+          const text = link.textContent?.trim() || '';
           if (text === instNum) {
-            if (element.tagName === 'A') {
-              element.click();
-              return true;
-            }
-
-            if (element.click) {
-              element.click();
-              return true;
-            }
+            link.click();
+            return true;
           }
         }
 
@@ -350,154 +362,157 @@ class TarrantCountyTexasScraper extends DeedScraper {
         throw new Error(`Could not click on instrument number: ${instrumentNumber}`);
       }
 
-      this.log('✅ Clicked on first instrument number link');
-      await this.randomWait(5000, 7000);
+      this.log('✅ Clicked on instrument number link');
 
-      // Click on instrument number again to view PDF
-      this.log(`🖱️ Clicking on instrument number again to view PDF...`);
+      // Wait for new tab to open
+      const publicSearchPage = await newPagePromise;
 
-      const secondClickDone = await this.page.evaluate((instNum) => {
-        const elements = Array.from(document.querySelectorAll('a, td, div, span'));
+      if (!publicSearchPage) {
+        throw new Error('New tab did not open after clicking instrument number');
+      }
 
-        for (const element of elements) {
-          const text = element.textContent?.trim() || '';
+      this.log('✅ New tab opened to publicsearch.us');
+      await this.randomWait(3000, 5000);
 
-          if (text.includes(instNum) || text === instNum) {
-            if (element.tagName === 'A') {
-              element.click();
+      // Step 2: On the publicsearch.us page, click on the deed row to open details
+      this.log(`🖱️ Clicking on deed row to view details...`);
+
+      // Wait for results table to load
+      await publicSearchPage.waitForFunction(() => {
+        const text = document.body.innerText;
+        return text.includes('SEARCH RESULTS') || text.includes('results');
+      }, { timeout: 15000 });
+
+      // Click on the row containing the instrument number
+      const rowClickDone = await publicSearchPage.evaluate((instNum) => {
+        const rows = Array.from(document.querySelectorAll('tr, [role="row"]'));
+
+        for (const row of rows) {
+          const text = row.textContent || '';
+          if (text.includes(instNum)) {
+            // Check if row has click handler
+            if (row.onclick || row.style.cursor === 'pointer') {
+              row.click();
               return true;
             }
 
-            if (element.click) {
-              element.click();
-              return true;
-            }
+            // Try clicking the row anyway
+            row.click();
+            return true;
           }
         }
 
         return false;
       }, instrumentNumber);
 
-      if (!secondClickDone) {
-        this.log('⚠️ Could not click instrument number second time, trying to find Download button');
-      } else {
-        this.log('✅ Clicked on second instrument number link');
-        await this.randomWait(5000, 7000);
+      if (!rowClickDone) {
+        this.log('⚠️ Could not click on deed row');
+        throw new Error('Could not click on deed row');
       }
 
-      // Look for Download (Free) button and login if needed
-      this.log('🔍 Looking for Download button...');
+      this.log('✅ Clicked on deed row');
+      await this.randomWait(3000, 5000);
 
-      const downloadButtonFound = await this.page.evaluate(() => {
-        const buttons = Array.from(document.querySelectorAll('button, a, input[type="button"], input[type="submit"]'));
+      // Step 3: Check if login is required or if download is available
+      this.log('🔍 Checking for login or download options...');
 
-        for (const button of buttons) {
-          const text = (button.textContent || button.value || '').toLowerCase();
-
-          if (text.includes('download') && (text.includes('free') || text.includes('pdf'))) {
-            return true;
-          }
-        }
-
-        return false;
+      // Check if we need to login
+      const needsLogin = await publicSearchPage.evaluate(() => {
+        return document.body.innerText.toLowerCase().includes('sign in');
       });
 
-      if (downloadButtonFound) {
-        this.log('✅ Found Download button');
+      if (needsLogin) {
+        this.log('🔐 Login required, clicking Sign In...');
 
-        // Check if we need to login
-        const needsLogin = await this.page.evaluate(() => {
-          return document.body.innerText.toLowerCase().includes('login') ||
-                 document.body.innerText.toLowerCase().includes('sign in');
+        // Click "Sign In" link
+        await publicSearchPage.evaluate(() => {
+          const links = Array.from(document.querySelectorAll('a'));
+          for (const link of links) {
+            if (link.textContent.trim().toLowerCase() === 'sign in') {
+              link.click();
+              return;
+            }
+          }
         });
 
-        if (needsLogin) {
-          this.log('🔐 Login required, attempting to log in...');
+        await this.randomWait(3000, 5000);
 
-          const email = process.env.TARRANT_COUNTY_EMAIL || 'ericatl828@gmail.com';
-          const password = process.env.TARRANT_COUNTY_PASSWORD || 'Cdma2000@1';
+        // Wait for login form
+        await publicSearchPage.waitForFunction(() => {
+          return document.body.innerText.toLowerCase().includes('email') ||
+                 document.body.innerText.toLowerCase().includes('username');
+        }, { timeout: 10000 }).catch(() => {
+          this.log('⚠️ Login form did not appear');
+        });
 
-          // Fill in login credentials
-          const emailSelectors = [
-            'input[type="email"]',
-            'input[name*="email"]',
-            'input[name*="Email"]',
-            'input[id*="email"]',
-            'input[id*="Email"]'
-          ];
+        const email = process.env.TARRANT_COUNTY_EMAIL || 'ericatl828@gmail.com';
+        const password = process.env.TARRANT_COUNTY_PASSWORD || 'Cdma2000@1';
 
-          let emailInput = null;
-          for (const selector of emailSelectors) {
-            try {
-              await this.page.waitForSelector(selector, { timeout: 3000 });
-              emailInput = selector;
-              break;
-            } catch (e) {
-              // Try next
-            }
-          }
+        this.log(`📧 Entering email: ${email}`);
 
-          if (emailInput) {
-            await this.page.type(emailInput, email);
-            this.log('✅ Entered email');
-          }
+        // Fill in login credentials
+        const emailSelectors = [
+          'input[type="email"]',
+          'input[name*="email"]',
+          'input[name*="Email"]',
+          'input[id*="email"]',
+          'input[id*="Email"]',
+          'input[name*="username"]',
+          'input[name*="Username"]'
+        ];
 
-          const passwordSelectors = [
-            'input[type="password"]',
-            'input[name*="password"]',
-            'input[name*="Password"]'
-          ];
-
-          let passwordInput = null;
-          for (const selector of passwordSelectors) {
-            try {
-              await this.page.waitForSelector(selector, { timeout: 3000 });
-              passwordInput = selector;
-              break;
-            } catch (e) {
-              // Try next
-            }
-          }
-
-          if (passwordInput) {
-            await this.page.type(passwordInput, password);
-            this.log('✅ Entered password');
-          }
-
-          await this.randomWait(1000, 2000);
-
-          // Click login button
-          const loginClicked = await this.page.evaluate(() => {
-            const buttons = Array.from(document.querySelectorAll('button, input[type="submit"], input[type="button"]'));
-
-            for (const button of buttons) {
-              const text = (button.textContent || button.value || '').toLowerCase();
-
-              if (text.includes('login') || text.includes('sign in') || text.includes('submit')) {
-                button.click();
-                return true;
-              }
-            }
-
-            return false;
-          });
-
-          if (loginClicked) {
-            this.log('✅ Clicked login button');
-            await this.randomWait(5000, 7000);
+        let emailInput = null;
+        for (const selector of emailSelectors) {
+          try {
+            await publicSearchPage.waitForSelector(selector, { timeout: 2000 });
+            emailInput = selector;
+            break;
+          } catch (e) {
+            // Try next
           }
         }
 
-        // Now click Download button
-        this.log('📥 Clicking Download button...');
+        if (emailInput) {
+          await publicSearchPage.type(emailInput, email, { delay: 50 });
+          this.log('✅ Entered email');
+        } else {
+          this.log('⚠️ Could not find email input');
+        }
 
-        const downloadClicked = await this.page.evaluate(() => {
-          const buttons = Array.from(document.querySelectorAll('button, a, input[type="button"], input[type="submit"]'));
+        const passwordSelectors = [
+          'input[type="password"]',
+          'input[name*="password"]',
+          'input[name*="Password"]'
+        ];
+
+        let passwordInput = null;
+        for (const selector of passwordSelectors) {
+          try {
+            await publicSearchPage.waitForSelector(selector, { timeout: 2000 });
+            passwordInput = selector;
+            break;
+          } catch (e) {
+            // Try next
+          }
+        }
+
+        if (passwordInput) {
+          await publicSearchPage.type(passwordInput, password, { delay: 50 });
+          this.log('✅ Entered password');
+        } else {
+          this.log('⚠️ Could not find password input');
+        }
+
+        await this.randomWait(1000, 2000);
+
+        // Click login button
+        const loginClicked = await publicSearchPage.evaluate(() => {
+          const buttons = Array.from(document.querySelectorAll('button, input[type="submit"], input[type="button"], a'));
 
           for (const button of buttons) {
-            const text = (button.textContent || button.value || '').toLowerCase();
+            const text = (button.textContent || button.value || '').trim().toLowerCase();
 
-            if (text.includes('download')) {
+            if (text.includes('login') || text.includes('sign in') || text === 'submit') {
               button.click();
               return true;
             }
@@ -506,16 +521,45 @@ class TarrantCountyTexasScraper extends DeedScraper {
           return false;
         });
 
-        if (!downloadClicked) {
-          throw new Error('Could not click Download button');
+        if (loginClicked) {
+          this.log('✅ Clicked login button');
+          await this.randomWait(5000, 7000);
+        } else {
+          this.log('⚠️ Could not find login button');
+        }
+      } else {
+        this.log('✅ No login required (unofficial copies are free)');
+      }
+
+      // Step 4: Look for and click download button
+      this.log('📥 Looking for download/view button...');
+
+      const downloadClicked = await publicSearchPage.evaluate(() => {
+        const buttons = Array.from(document.querySelectorAll('button, a, input[type="button"], input[type="submit"]'));
+
+        for (const button of buttons) {
+          const text = (button.textContent || button.value || '').toLowerCase();
+
+          if (text.includes('download') || text.includes('view') || text.includes('pdf') || text.includes('unofficial')) {
+            console.log('Found button:', text);
+            button.click();
+            return { clicked: true, text };
+          }
         }
 
-        this.log('✅ Clicked Download button');
-        await this.randomWait(5000, 7000);
+        return { clicked: false };
+      });
 
-        // Use CDP Fetch domain to intercept PDF response
-        const pdfPage = this.page;
-        const client = await pdfPage.target().createCDPSession();
+      if (!downloadClicked.clicked) {
+        this.log('⚠️ Could not find download button, checking if PDF loaded directly...');
+      } else {
+        this.log(`✅ Clicked button: ${downloadClicked.text}`);
+        await this.randomWait(3000, 5000);
+      }
+
+      // Step 5: Use CDP Fetch domain to intercept PDF response
+      const pdfPage = publicSearchPage;
+      const client = await pdfPage.target().createCDPSession();
 
         await client.send('Fetch.enable', {
           patterns: [
