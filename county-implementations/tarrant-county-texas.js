@@ -163,98 +163,42 @@ class TarrantCountyTexasScraper extends DeedScraper {
 
       // Enter search address (without city and state)
       // Remove city and state from address: "1009 WICKWOOD Ct. FORT WORTH, TX 76131" -> "1009 WICKWOOD Ct"
-      const addressParts = address.split(',')[0].trim(); // Get everything before first comma
+      let addressParts = address.split(',')[0].trim(); // Get everything before first comma
+
+      // Remove common Tarrant County city names
+      const cities = ['FORT WORTH', 'ARLINGTON', 'GRAND PRAIRIE', 'MANSFIELD', 'EULESS', 'BEDFORD', 'HURST', 'KELLER', 'SOUTHLAKE', 'COLLEYVILLE', 'GRAPEVINE', 'NORTH RICHLAND HILLS', 'RICHLAND HILLS'];
+      for (const city of cities) {
+        if (addressParts.toUpperCase().includes(city)) {
+          // Remove the city name from the end
+          addressParts = addressParts.replace(new RegExp(`\\s+${city}\\s*$`, 'i'), '').trim();
+          break;
+        }
+      }
+
       this.log(`📝 Entering address: ${addressParts}`);
 
-      // Find search input box
-      const searchInputSelectors = [
-        'input[name*="search"]',
-        'input[id*="search"]',
-        'input[placeholder*="search"]',
-        'input[type="text"]'
-      ];
+      // Find search input box (TAD uses #query as the search input)
+      const searchInput = '#query';
+      await this.page.waitForSelector(searchInput, { timeout: 10000 });
+      this.log(`✅ Found search input: ${searchInput}`);
 
-      let searchInput = null;
-      for (const selector of searchInputSelectors) {
-        try {
-          await this.page.waitForSelector(selector, { timeout: 3000 });
-          searchInput = selector;
-          this.log(`✅ Found search input: ${selector}`);
-          break;
-        } catch (e) {
-          // Try next selector
-        }
-      }
-
-      if (!searchInput) {
-        throw new Error('Could not find search input field');
-      }
-
-      // Clear and type in search input
-      await this.page.evaluate((selector) => {
-        const input = document.querySelector(selector);
-        if (input) {
-          input.value = '';
-          input.focus();
-        }
-      }, searchInput);
-
-      await this.randomWait(500, 1000);
+      // Type address in search input and press Enter
       await this.page.type(searchInput, addressParts, { delay: 50 });
+      await this.randomWait(500, 1000);
 
-      await this.randomWait(1000, 2000);
+      this.log('🔍 Pressing Enter to submit search...');
 
-      // Submit the search form
-      this.log('🔍 Submitting search...');
-
-      const formSubmitted = await this.page.evaluate(() => {
-        // Strategy 1: Find and click search button
-        const buttons = Array.from(document.querySelectorAll('button, input[type="submit"], input[type="button"], a'));
-        for (const button of buttons) {
-          const text = (button.textContent || button.value || button.innerText || '').toLowerCase();
-          if (text.includes('search') || text.includes('find') || text.includes('go')) {
-            try {
-              button.click();
-              return { method: 'button', text };
-            } catch (e) {
-              // Continue to next strategy
-            }
-          }
-        }
-
-        // Strategy 2: Submit the form directly
-        const forms = document.querySelectorAll('form');
-        for (const form of forms) {
-          const formText = form.innerText.toLowerCase();
-          if (formText.includes('property') || formText.includes('search') || formText.includes('address')) {
-            try {
-              form.submit();
-              return { method: 'form' };
-            } catch (e) {
-              // Continue
-            }
-          }
-        }
-
-        return { method: 'none' };
+      // Press Enter to submit the form and wait for navigation
+      const navigationPromise = this.page.waitForNavigation({
+        waitUntil: 'networkidle2',
+        timeout: 30000
       });
 
-      this.log(`📝 Form submission: ${formSubmitted.method}`);
-
-      if (formSubmitted.method === 'none') {
-        // Fallback: Press Enter in the search field
-        this.log('⚠️ Trying Enter key as fallback...');
-        await this.page.keyboard.press('Enter');
-      }
+      await this.page.keyboard.press('Enter');
+      await navigationPromise;
 
       this.log('⏳ Waiting for search results...');
-      await this.randomWait(7000, 10000);
-
-      // Wait for results to load
-      await this.page.waitForFunction(() => {
-        const text = document.body.innerText;
-        return text.includes('Account') || text.includes('account') || /\d{8}/.test(text);
-      }, { timeout: 30000 });
+      await this.randomWait(2000, 3000);
 
       this.log('✅ Search results loaded');
 
