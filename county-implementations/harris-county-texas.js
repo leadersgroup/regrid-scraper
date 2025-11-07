@@ -633,7 +633,10 @@ class HarrisCountyTexasScraper extends DeedScraper {
       this.log(`✅ Loaded Clerk Records search page`);
 
       // Find and fill Grantee field (owner name)
+      // The grantee field is txtEE on Harris County Clerk form
       const granteeInputSelectors = [
+        'input[name*="txtEE"]',
+        'input[id*="txtEE"]',
         'input[name*="Grantee"]',
         'input[name*="grantee"]',
         'input[id*="Grantee"]',
@@ -653,11 +656,19 @@ class HarrisCountyTexasScraper extends DeedScraper {
       }
 
       if (granteeInput) {
+        // Clear existing value first
         await this.page.click(granteeInput);
+        await this.page.evaluate((sel) => {
+          const input = document.querySelector(sel);
+          if (input) input.value = '';
+        }, granteeInput);
+
+        // Format: Last Name First - No Punctuation
         await this.page.type(granteeInput, owner, { delay: 50 });
-        this.log(`✅ Entered Grantee: ${owner}`);
+        this.log(`✅ Entered Grantee (txtEE): ${owner}`);
       } else {
-        this.log(`⚠️ Could not find Grantee input field`);
+        this.log(`❌ ERROR: Could not find Grantee input field - search will fail without it`);
+        throw new Error('Grantee field is required but could not be found');
       }
 
       // Find and fill Date From field
