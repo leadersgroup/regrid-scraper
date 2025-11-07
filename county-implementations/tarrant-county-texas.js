@@ -99,9 +99,33 @@ class TarrantCountyTexasScraper extends DeedScraper {
       // Set search type to "property address"
       this.log('📝 Setting search type to Property Address...');
 
-      // Look for dropdown/select for search type
+      // Look for dropdown/select for search type (under "Property Search" text)
       const searchTypeSet = await this.page.evaluate(() => {
-        // Try to find and set property address option
+        // Strategy 1: Find "Property Search" text and look for dropdown nearby
+        const allText = Array.from(document.querySelectorAll('*'));
+        for (const element of allText) {
+          const text = element.textContent?.trim() || '';
+          if (text === 'Property Search' || text.toLowerCase().includes('property search')) {
+            // Look for select dropdown in the same container or nearby
+            const parent = element.closest('div, form, section');
+            if (parent) {
+              const select = parent.querySelector('select');
+              if (select) {
+                const options = Array.from(select.options);
+                for (const option of options) {
+                  if (option.textContent.toLowerCase().includes('property address') ||
+                      option.textContent.toLowerCase().includes('address')) {
+                    select.value = option.value;
+                    select.dispatchEvent(new Event('change', { bubbles: true }));
+                    return { success: true, method: 'dropdown-near-text' };
+                  }
+                }
+              }
+            }
+          }
+        }
+
+        // Strategy 2: Try all select elements
         const selects = Array.from(document.querySelectorAll('select'));
         for (const select of selects) {
           const options = Array.from(select.options);
@@ -110,27 +134,27 @@ class TarrantCountyTexasScraper extends DeedScraper {
                 option.textContent.toLowerCase().includes('address')) {
               select.value = option.value;
               select.dispatchEvent(new Event('change', { bubbles: true }));
-              return true;
+              return { success: true, method: 'dropdown-all' };
             }
           }
         }
 
-        // Try radio buttons
+        // Strategy 3: Try radio buttons
         const radios = Array.from(document.querySelectorAll('input[type="radio"]'));
         for (const radio of radios) {
           const label = radio.parentElement?.textContent || '';
           if (label.toLowerCase().includes('property address') ||
               label.toLowerCase().includes('address')) {
             radio.click();
-            return true;
+            return { success: true, method: 'radio' };
           }
         }
 
-        return false;
+        return { success: false };
       });
 
-      if (searchTypeSet) {
-        this.log('✅ Set search type to Property Address');
+      if (searchTypeSet.success) {
+        this.log(`✅ Set search type to Property Address (${searchTypeSet.method})`);
       } else {
         this.log('⚠️ Could not find property address option, continuing anyway');
       }
