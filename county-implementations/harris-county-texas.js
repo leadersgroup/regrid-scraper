@@ -921,81 +921,101 @@ class HarrisCountyTexasScraper extends DeedScraper {
             this.log(`✅ Login successful!`);
 
             // Wait for PDF viewer to load
-            await this.randomWait(3000, 5000);
+            await this.randomWait(2000, 3000);
 
             // Get the PDF viewer URL
             const pdfViewerUrl = pdfPage.url();
             this.log(`📄 PDF Viewer URL: ${pdfViewerUrl}`);
 
-            // Download PDF using external HTTPS request with session cookies
+            // Download PDF using CDP Fetch domain to intercept the response
             // This is necessary because Chrome's PDF viewer intercepts the response
-            // before Puppeteer can capture it
-            this.log(`📥 Downloading PDF using authenticated session...`);
+            // before standard Puppeteer methods can capture it
+            this.log(`📥 Downloading PDF using CDP Fetch domain interception...`);
 
             try {
-              const https = require('https');
-              const {URL} = require('url');
+              // Get CDP session for the PDF page
+              const client = await pdfPage.target().createCDPSession();
 
-              // Get cookies from the logged-in session
-              const cookies = await pdfPage.cookies();
-              const cookieHeader = cookies.map(c => `${c.name}=${c.value}`).join('; ');
-
-              const pdfUrl = new URL(pdfViewerUrl);
-
-              const options = {
-                hostname: pdfUrl.hostname,
-                port: 443,
-                path: pdfUrl.pathname + pdfUrl.search,
-                method: 'GET',  // Use GET to retrieve the PDF
-                headers: {
-                  'Cookie': cookieHeader,
-                  'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36',
-                  'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7',
-                  'Accept-Language': 'en-US,en;q=0.9',
-                  'Referer': 'https://www.cclerk.hctx.net/Applications/WebSearch/RP.aspx',
-                  'Sec-Fetch-Dest': 'document',
-                  'Sec-Fetch-Mode': 'navigate',
-                  'Sec-Fetch-Site': 'same-origin',
-                  'Upgrade-Insecure-Requests': '1',
-                  'Cache-Control': 'max-age=0'
-                }
-              };
-
-              const pdfBuffer = await new Promise((resolve, reject) => {
-                const chunks = [];
-
-                const req = https.request(options, (res) => {
-                  this.log(`   Response status: ${res.statusCode}`);
-                  this.log(`   Content-Type: ${res.headers['content-type']}`);
-                  this.log(`   Content-Length: ${res.headers['content-length']}`);
-
-                  res.on('data', (chunk) => {
-                    chunks.push(chunk);
-                  });
-
-                  res.on('end', () => {
-                    const buffer = Buffer.concat(chunks);
-                    this.log(`   Downloaded: ${buffer.length} bytes`);
-                    resolve(buffer);
-                  });
-                });
-
-                req.on('error', (e) => {
-                  reject(new Error(`HTTPS request failed: ${e.message}`));
-                });
-
-                req.end();
+              // Enable Fetch domain with Response interception
+              await client.send('Fetch.enable', {
+                patterns: [
+                  {
+                    urlPattern: '*ViewEdocs.aspx*',
+                    requestStage: 'Response'
+                  }
+                ]
               });
 
-              // Verify it's a PDF
-              const isPDF = pdfBuffer.slice(0, 4).toString() === '%PDF';
-              this.log(`🔍 PDF validation: isPDF=${isPDF}, size=${pdfBuffer.length} bytes`);
+              this.log(`✅ CDP Fetch domain enabled`);
 
-              if (!isPDF) {
-                this.log(`⚠️ Direct download returned HTML instead of PDF, trying alternative method...`);
-                // Fall back to returning the PDF viewer URL
-                throw new Error('Server returned HTML instead of PDF');
-              }
+              // Set up response interception handler
+              const pdfBuffer = await new Promise((resolve, reject) => {
+                const timeout = setTimeout(() => {
+                  reject(new Error('PDF download timeout after 30 seconds'));
+                }, 30000);
+
+                client.on('Fetch.requestPaused', async (event) => {
+                  try {
+                    if (event.responseHeaders) {
+                      const contentType = event.responseHeaders.find(h => h.name.toLowerCase() === 'content-type');
+                      const contentLength = event.responseHeaders.find(h => h.name.toLowerCase() === 'content-length');
+
+                      this.log(`   Response intercepted: ${event.request.url.substring(0, 80)}...`);
+                      this.log(`   Status: ${event.responseStatusCode}`);
+                      this.log(`   Content-Type: ${contentType ? contentType.value : 'N/A'}`);
+                      this.log(`   Content-Length: ${contentLength ? contentLength.value : 'N/A'}`);
+
+                      if (contentType && contentType.value.toLowerCase().includes('pdf')) {
+                        this.log(`🎉 PDF detected! Capturing response body...`);
+
+                        try {
+                          const response = await client.send('Fetch.getResponseBody', {
+                            requestId: event.requestId
+                          });
+
+                          let buffer;
+                          if (response.base64Encoded) {
+                            buffer = Buffer.from(response.body, 'base64');
+                          } else {
+                            buffer = Buffer.from(response.body);
+                          }
+
+                          clearTimeout(timeout);
+
+                          const isPDF = buffer.slice(0, 4).toString() === '%PDF';
+                          this.log(`   Buffer size: ${buffer.length} bytes, isPDF: ${isPDF}`);
+
+                          if (isPDF && buffer.length > 100000) {
+                            this.log(`✅ Full PDF captured successfully`);
+                            resolve(buffer);
+                          } else if (!isPDF) {
+                            reject(new Error(`Response is not a PDF (first bytes: ${buffer.slice(0, 20).toString()})`));
+                          } else {
+                            reject(new Error(`PDF too small: ${buffer.length} bytes`));
+                          }
+                        } catch (e) {
+                          reject(new Error(`Failed to get response body: ${e.message}`));
+                        }
+                      }
+                    }
+
+                    // Continue the request
+                    try {
+                      await client.send('Fetch.continueRequest', {
+                        requestId: event.requestId
+                      });
+                    } catch (e) {
+                      // Request may already be handled
+                    }
+                  } catch (e) {
+                    reject(e);
+                  }
+                });
+
+                // Reload the page to trigger the PDF download with interception active
+                this.log(`🔄 Reloading PDF page to trigger interception...`);
+                pdfPage.reload({ waitUntil: 'networkidle2' }).catch(() => {});
+              });
 
               if (pdfBuffer.length < 10000) {
                 this.log(`⚠️ PDF is suspiciously small (${pdfBuffer.length} bytes), may be incomplete`);
@@ -1028,17 +1048,13 @@ class HarrisCountyTexasScraper extends DeedScraper {
 
               // Return PDF viewer URL as fallback
               return {
-                success: true,
+                success: false,
                 requiresManualDownload: true,
                 filmCode: filmCode,
                 pdfViewerUrl: pdfViewerUrl,
-                message: 'Successfully logged in. PDF viewer URL provided (automatic download not available).',
-                timestamp: new Date().toISOString(),
-                instructions: [
-                  'The PDF is accessible at the provided pdfViewerUrl',
-                  'You are now logged in and can download the PDF manually if needed',
-                  `Film code: ${filmCode}`
-                ]
+                error: downloadError.message,
+                message: 'PDF download failed. Please retry or access PDF manually at viewer URL.',
+                timestamp: new Date().toISOString()
               };
             }
 
