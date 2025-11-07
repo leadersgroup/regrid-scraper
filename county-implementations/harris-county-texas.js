@@ -515,7 +515,7 @@ class HarrisCountyTexasScraper extends DeedScraper {
       this.log(`✅ Clicked on account number: ${accountClicked.accountNumber} (found in ${accountClicked.method})`);
 
       // Wait for property detail page to load (inside iframe)
-      await this.randomWait(3000, 5000);
+      await this.randomWait(5000, 7000);
 
       await searchFrame.waitForFunction(() => {
         const text = document.body.innerText.toLowerCase();
@@ -525,6 +525,11 @@ class HarrisCountyTexasScraper extends DeedScraper {
       }, { timeout: 30000 });
 
       this.log(`✅ Property detail page loaded`);
+
+      // Wait additional time for ownership history table to fully render
+      // The ownership history section can take time to load dynamically
+      this.log(`⏳ Waiting for ownership history to fully load...`);
+      await this.randomWait(5000, 7000);
 
       // Extract owner name and effective date from Ownership History (inside iframe)
       this.log(`🔍 Looking for Ownership History...`);
