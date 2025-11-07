@@ -180,28 +180,51 @@ class TarrantCountyTexasScraper extends DeedScraper {
 
       await this.randomWait(1000, 2000);
 
-      // Click search button
-      this.log('🔍 Clicking search button...');
+      // Submit the search form
+      this.log('🔍 Submitting search...');
 
-      const searchClicked = await this.page.evaluate(() => {
-        const buttons = Array.from(document.querySelectorAll('button, input[type="submit"], input[type="button"]'));
+      const formSubmitted = await this.page.evaluate(() => {
+        // Strategy 1: Find and click search button
+        const buttons = Array.from(document.querySelectorAll('button, input[type="submit"], input[type="button"], a'));
         for (const button of buttons) {
-          const text = (button.textContent || button.value || '').toLowerCase();
-          if (text.includes('search')) {
-            button.click();
-            return true;
+          const text = (button.textContent || button.value || button.innerText || '').toLowerCase();
+          if (text.includes('search') || text.includes('find') || text.includes('go')) {
+            try {
+              button.click();
+              return { method: 'button', text };
+            } catch (e) {
+              // Continue to next strategy
+            }
           }
         }
-        return false;
+
+        // Strategy 2: Submit the form directly
+        const forms = document.querySelectorAll('form');
+        for (const form of forms) {
+          const formText = form.innerText.toLowerCase();
+          if (formText.includes('property') || formText.includes('search') || formText.includes('address')) {
+            try {
+              form.submit();
+              return { method: 'form' };
+            } catch (e) {
+              // Continue
+            }
+          }
+        }
+
+        return { method: 'none' };
       });
 
-      if (!searchClicked) {
-        // Try pressing Enter as fallback
+      this.log(`📝 Form submission: ${formSubmitted.method}`);
+
+      if (formSubmitted.method === 'none') {
+        // Fallback: Press Enter in the search field
+        this.log('⚠️ Trying Enter key as fallback...');
         await this.page.keyboard.press('Enter');
       }
 
       this.log('⏳ Waiting for search results...');
-      await this.randomWait(5000, 7000);
+      await this.randomWait(7000, 10000);
 
       // Wait for results to load
       await this.page.waitForFunction(() => {
