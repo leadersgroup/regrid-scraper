@@ -1055,7 +1055,7 @@ class HarrisCountyTexasScraper extends DeedScraper {
               return {
                 success: true,
                 filmCode: filmCode,
-                pdfData: pdfBuffer,
+                pdfData: pdfBuffer.toString('base64'),
                 fileSize: pdfBuffer.length,
                 message: 'PDF downloaded successfully after authentication',
                 timestamp: new Date().toISOString()
