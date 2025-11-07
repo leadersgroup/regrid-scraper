@@ -113,8 +113,7 @@ class TarrantCountyTexasScraper extends DeedScraper {
               if (select) {
                 const options = Array.from(select.options);
                 for (const option of options) {
-                  if (option.textContent.toLowerCase().includes('property address') ||
-                      option.textContent.toLowerCase().includes('address')) {
+                  if (option.textContent.toLowerCase().includes('property address')) {
                     select.value = option.value;
                     select.dispatchEvent(new Event('change', { bubbles: true }));
                     return { success: true, method: 'dropdown-near-text' };
@@ -130,8 +129,7 @@ class TarrantCountyTexasScraper extends DeedScraper {
         for (const select of selects) {
           const options = Array.from(select.options);
           for (const option of options) {
-            if (option.textContent.toLowerCase().includes('property address') ||
-                option.textContent.toLowerCase().includes('address')) {
+            if (option.textContent.toLowerCase().includes('property address')) {
               select.value = option.value;
               select.dispatchEvent(new Event('change', { bubbles: true }));
               return { success: true, method: 'dropdown-all' };
@@ -143,8 +141,7 @@ class TarrantCountyTexasScraper extends DeedScraper {
         const radios = Array.from(document.querySelectorAll('input[type="radio"]'));
         for (const radio of radios) {
           const label = radio.parentElement?.textContent || '';
-          if (label.toLowerCase().includes('property address') ||
-              label.toLowerCase().includes('address')) {
+          if (label.toLowerCase().includes('property address')) {
             radio.click();
             return { success: true, method: 'radio' };
           }
