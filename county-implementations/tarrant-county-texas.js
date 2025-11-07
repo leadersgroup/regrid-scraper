@@ -211,12 +211,23 @@ class TarrantCountyTexasScraper extends DeedScraper {
 
       this.log('✅ Search results loaded');
 
+      // Log page content for debugging
+      const pageDebug = await this.page.evaluate(() => {
+        return {
+          url: window.location.href,
+          bodyText: document.body.innerText.substring(0, 300)
+        };
+      });
+      this.log(`📄 Current URL: ${pageDebug.url}`);
+      this.log(`📄 Page text: ${pageDebug.bodyText.substring(0, 150)}...`);
+
       // Click on account number (e.g., 07042744)
       this.log('🖱️ Looking for account number...');
 
       const accountClicked = await this.page.evaluate(() => {
         // Look for 8-digit account numbers
         const links = Array.from(document.querySelectorAll('a, td, div, span'));
+        const debugInfo = [];
 
         for (const element of links) {
           const text = element.textContent?.trim() || '';
@@ -224,11 +235,12 @@ class TarrantCountyTexasScraper extends DeedScraper {
 
           if (match) {
             const accountNumber = match[0];
+            debugInfo.push(`Found ${accountNumber} in ${element.tagName}`);
 
             // Try to click if it's a link
             if (element.tagName === 'A') {
               element.click();
-              return { clicked: true, accountNumber };
+              return { clicked: true, accountNumber, debugInfo };
             }
 
             // If it's in a table cell, try to find a link in the same row
@@ -237,20 +249,24 @@ class TarrantCountyTexasScraper extends DeedScraper {
               const link = row?.querySelector('a');
               if (link) {
                 link.click();
-                return { clicked: true, accountNumber };
+                return { clicked: true, accountNumber, debugInfo };
               }
             }
 
             // Try clicking the element itself
-            if (element.click) {
+            if (typeof element.click === 'function') {
               element.click();
-              return { clicked: true, accountNumber };
+              return { clicked: true, accountNumber, debugInfo };
             }
           }
         }
 
-        return { clicked: false };
+        return { clicked: false, debugInfo };
       });
+
+      if (accountClicked.debugInfo && accountClicked.debugInfo.length > 0) {
+        this.log(`🔍 Debug: ${accountClicked.debugInfo.join(', ')}`);
+      }
 
       if (!accountClicked.clicked) {
         throw new Error('Could not find or click account number');
