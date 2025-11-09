@@ -96,7 +96,39 @@ class BexarCountyTexasScraper extends DeedScraper {
     const streetNumber = numberMatch ? numberMatch[1] : '';
 
     // Street name is everything after the number
-    const streetName = streetPart.replace(/^\d+\s*/, '').trim();
+    let streetName = streetPart.replace(/^\d+\s*/, '').trim();
+
+    // Remove common street suffixes that might interfere with search
+    const suffixesToRemove = [
+      '\\bDr\\.?$',
+      '\\bDrive$',
+      '\\bSt\\.?$',
+      '\\bStreet$',
+      '\\bAve\\.?$',
+      '\\bAvenue$',
+      '\\bRd\\.?$',
+      '\\bRoad$',
+      '\\bLn\\.?$',
+      '\\bLane$',
+      '\\bCt\\.?$',
+      '\\bCourt$',
+      '\\bBlvd\\.?$',
+      '\\bBoulevard$',
+      '\\bPl\\.?$',
+      '\\bPlace$',
+      '\\bWay$',
+      '\\bCir\\.?$',
+      '\\bCircle$',
+      '\\bPkwy\\.?$',
+      '\\bParkway$',
+      '\\bTer\\.?$',
+      '\\bTerrace$'
+    ];
+
+    for (const suffix of suffixesToRemove) {
+      const regex = new RegExp(suffix, 'i');
+      streetName = streetName.replace(regex, '').trim();
+    }
 
     return { streetNumber, streetName };
   }
