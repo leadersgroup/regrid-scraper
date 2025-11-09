@@ -465,6 +465,19 @@ class TarrantCountyTexasScraper extends DeedScraper {
 
         this.log(`📧 Entering email: ${email}`);
 
+        // Debug: Check what inputs are on the page
+        const inputDebug = await publicSearchPage.evaluate(() => {
+          const inputs = Array.from(document.querySelectorAll('input'));
+          return inputs.map(input => ({
+            type: input.type,
+            name: input.name,
+            id: input.id,
+            placeholder: input.placeholder,
+            value: input.value
+          }));
+        });
+        this.log(`🔍 Found ${inputDebug.length} input fields: ${JSON.stringify(inputDebug, null, 2)}`);
+
         // Fill in login credentials
         const emailSelectors = [
           'input[type="email"]',
@@ -481,6 +494,7 @@ class TarrantCountyTexasScraper extends DeedScraper {
           try {
             await publicSearchPage.waitForSelector(selector, { timeout: 2000 });
             emailInput = selector;
+            this.log(`✅ Found email input: ${selector}`);
             break;
           } catch (e) {
             // Try next
@@ -488,8 +502,14 @@ class TarrantCountyTexasScraper extends DeedScraper {
         }
 
         if (emailInput) {
+          // Clear the field first
+          await publicSearchPage.click(emailInput, { clickCount: 3 });
           await publicSearchPage.type(emailInput, email, { delay: 50 });
           this.log('✅ Entered email');
+
+          // Verify email was entered
+          const emailValue = await publicSearchPage.$eval(emailInput, el => el.value);
+          this.log(`📧 Email field value: ${emailValue}`);
         } else {
           this.log('⚠️ Could not find email input');
         }
@@ -505,6 +525,7 @@ class TarrantCountyTexasScraper extends DeedScraper {
           try {
             await publicSearchPage.waitForSelector(selector, { timeout: 2000 });
             passwordInput = selector;
+            this.log(`✅ Found password input: ${selector}`);
             break;
           } catch (e) {
             // Try next
@@ -512,8 +533,14 @@ class TarrantCountyTexasScraper extends DeedScraper {
         }
 
         if (passwordInput) {
+          // Clear the field first
+          await publicSearchPage.click(passwordInput, { clickCount: 3 });
           await publicSearchPage.type(passwordInput, password, { delay: 50 });
           this.log('✅ Entered password');
+
+          // Verify password was entered (check length only for security)
+          const passwordValue = await publicSearchPage.$eval(passwordInput, el => el.value);
+          this.log(`🔑 Password field length: ${passwordValue.length}`);
         } else {
           this.log('⚠️ Could not find password input');
         }
@@ -557,11 +584,26 @@ class TarrantCountyTexasScraper extends DeedScraper {
 
           // Wait for navigation away from signin page
           this.log('⏳ Waiting for login redirect...');
-          await publicSearchPage.waitForFunction(() => {
+          const loginSucceeded = await publicSearchPage.waitForFunction(() => {
             return !window.location.href.includes('/signin');
           }, { timeout: 15000 }).catch(() => {
-            this.log('⚠️ Login redirect timeout, checking current URL...');
+            this.log('⚠️ Login redirect timeout, checking for errors...');
+            return null;
           });
+
+          if (!loginSucceeded) {
+            // Check for error messages on the login page
+            const errorInfo = await publicSearchPage.evaluate(() => {
+              return {
+                url: window.location.href,
+                bodyText: document.body.innerText,
+                errorMessages: Array.from(document.querySelectorAll('.error, .alert, [role="alert"]')).map(el => el.textContent.trim())
+              };
+            });
+            this.log(`❌ Still on signin page: ${errorInfo.url}`);
+            this.log(`⚠️ Error messages: ${errorInfo.errorMessages.join(', ') || 'none'}`);
+            this.log(`📄 Page text sample: ${errorInfo.bodyText.substring(0, 300)}`);
+          }
 
           await this.randomWait(3000, 5000);
 
