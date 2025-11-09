@@ -621,21 +621,68 @@ class DallasCountyTexasScraper extends DeedScraper {
       if (searchData.instrumentNumber) {
         this.log(`🔍 Searching by instrument number: ${searchData.instrumentNumber}`);
 
-        // Find search input
+        // Take a screenshot of the search page to understand the interface
+        const searchPageScreenshot = `/tmp/dallas-search-page-${Date.now()}.png`;
+        await this.page.screenshot({ path: searchPageScreenshot, fullPage: true });
+        this.log(`📸 Search page screenshot: ${searchPageScreenshot}`);
+
+        // Log all input fields on the page
+        const allInputs = await this.page.evaluate(() => {
+          return Array.from(document.querySelectorAll('input, select, textarea')).map(input => ({
+            type: input.type,
+            name: input.name,
+            id: input.id,
+            placeholder: input.placeholder,
+            value: input.value,
+            tagName: input.tagName
+          }));
+        });
+        this.log(`📝 All form inputs on page: ${JSON.stringify(allInputs, null, 2)}`);
+
+        // Find search input - be more specific about instrument/document number fields
         const searchInputSelectors = [
+          'input[name*="instrumentNumber"]',
+          'input[id*="instrumentNumber"]',
+          'input[name*="instrument"]',
+          'input[id*="instrument"]',
+          'input[name*="docNumber"]',
+          'input[id*="docNumber"]',
+          'input[name*="documentNumber"]',
+          'input[id*="documentNumber"]',
+          'input[placeholder*="instrument"]',
+          'input[placeholder*="document"]',
           'input[name*="query"]',
           'input[id*="query"]',
-          'input[type="text"]',
-          '#query'
+          'input[type="search"]',
+          'input[type="text"]'  // Fallback - least specific
         ];
 
         let searchInput = null;
+        let searchInputInfo = null;
+
         for (const selector of searchInputSelectors) {
           try {
-            await this.page.waitForSelector(selector, { timeout: 5000 });
-            searchInput = selector;
-            this.log(`✅ Found search input: ${selector}`);
-            break;
+            await this.page.waitForSelector(selector, { timeout: 3000 });
+
+            // Get info about this input
+            searchInputInfo = await this.page.evaluate((sel) => {
+              const input = document.querySelector(sel);
+              if (!input) return null;
+              return {
+                selector: sel,
+                name: input.name,
+                id: input.id,
+                placeholder: input.placeholder,
+                type: input.type
+              };
+            }, selector);
+
+            if (searchInputInfo) {
+              searchInput = selector;
+              this.log(`✅ Found search input: ${selector}`);
+              this.log(`   Input details: ${JSON.stringify(searchInputInfo)}`);
+              break;
+            }
           } catch (e) {
             this.log(`⚠️ Selector ${selector} not found`);
           }
@@ -645,13 +692,56 @@ class DallasCountyTexasScraper extends DeedScraper {
           throw new Error('Could not find search input on public search page');
         }
 
+        // Clear any existing value first
+        await this.page.evaluate((sel) => {
+          const input = document.querySelector(sel);
+          if (input) input.value = '';
+        }, searchInput);
+
         // Enter instrument number (without INT prefix)
         await this.page.type(searchInput, searchData.instrumentNumber, { delay: 100 });
+        this.log(`✅ Entered instrument number: ${searchData.instrumentNumber}`);
+
+        // Verify the value was entered
+        const enteredValue = await this.page.evaluate((sel) => {
+          const input = document.querySelector(sel);
+          return input ? input.value : null;
+        }, searchInput);
+        this.log(`✅ Verified input value: ${enteredValue}`);
+
         await this.randomWait(1000, 2000);
 
-        // Submit search (press Enter)
+        // Submit search - look for submit button or press Enter
         this.log('🔍 Submitting search...');
-        await this.page.keyboard.press('Enter');
+
+        // Try to find and click submit button first
+        const submitButtonSelectors = [
+          'button[type="submit"]',
+          'input[type="submit"]',
+          'button:has-text("Search")',
+          'button:has-text("Submit")',
+          'button[onclick*="search"]'
+        ];
+
+        let submitButtonClicked = false;
+        for (const selector of submitButtonSelectors) {
+          try {
+            const button = await this.page.$(selector);
+            if (button) {
+              this.log(`✅ Found submit button: ${selector}`);
+              await button.click();
+              submitButtonClicked = true;
+              break;
+            }
+          } catch (e) {
+            // Continue trying
+          }
+        }
+
+        if (!submitButtonClicked) {
+          this.log('⚠️ No submit button found, pressing Enter');
+          await this.page.keyboard.press('Enter');
+        }
 
       } else if (searchData.bookNumber && searchData.pageNumber) {
         this.log(`🔍 Using advanced search with Book: ${searchData.bookNumber}, Page: ${searchData.pageNumber}`);
@@ -744,6 +834,12 @@ class DallasCountyTexasScraper extends DeedScraper {
       this.log(`📍 Current page: ${pageInfo.url}`);
       this.log(`📄 Page title: ${pageInfo.title}`);
       this.log(`📝 Page preview: ${pageInfo.bodyText.substring(0, 200)}`);
+
+      // Verify the search was actually performed with our instrument number
+      if (searchData.instrumentNumber && !pageInfo.url.includes(searchData.instrumentNumber)) {
+        this.log(`⚠️ WARNING: Results URL does not contain instrument number ${searchData.instrumentNumber}`);
+        this.log(`   This suggests the search may not have filtered by instrument number`);
+      }
 
       // Wait for results to load (may require additional JavaScript execution)
       this.log('⏳ Waiting for results table to appear...');
