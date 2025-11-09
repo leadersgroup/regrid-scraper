@@ -134,8 +134,113 @@ app.get('/api/counties', (req, res) => {
   });
 });
 
-// Prior deed download endpoint
+// Prior deed download endpoint (primary)
+// Also available as /api/getPriorDeed for backward compatibility
 app.post('/api/deed', async (req, res) => {
+  let scraper = null;
+
+  try {
+    const { address, county, state } = req.body;
+
+    if (!address || typeof address !== 'string' || address.trim().length === 0) {
+      return res.status(400).json({
+        error: 'Invalid input',
+        message: 'Please provide a valid property address',
+        timestamp: new Date().toISOString()
+      });
+    }
+
+    console.log(`📄 Starting prior deed search for: ${address}`);
+    console.log(`📍 County: ${county || 'Not specified'}, State: ${state || 'Not specified'}`);
+
+    // Determine which county scraper to use
+    const detectedCounty = county || 'Orange';
+    const detectedState = state || 'FL';
+
+    // Initialize county-specific scraper
+    if (detectedCounty === 'Orange' && detectedState === 'FL') {
+      const OrangeCountyFloridaScraper = require('./county-implementations/orange-county-florida');
+      scraper = new OrangeCountyFloridaScraper({
+        headless: true,
+        timeout: 120000,
+        verbose: true
+      });
+    } else if (detectedCounty === 'Hillsborough' && detectedState === 'FL') {
+      const HillsboroughCountyFloridaScraper = require('./county-implementations/hillsborough-county-florida');
+      scraper = new HillsboroughCountyFloridaScraper({
+        headless: true,
+        timeout: 120000,
+        verbose: true
+      });
+    } else if (detectedCounty === 'Duval' && detectedState === 'FL') {
+      const DuvalCountyFloridaScraper = require('./county-implementations/duval-county-florida');
+      scraper = new DuvalCountyFloridaScraper({
+        headless: true,
+        timeout: 120000,
+        verbose: true
+      });
+    } else if (detectedCounty === 'Harris' && detectedState === 'TX') {
+      const HarrisCountyTexasScraper = require('./county-implementations/harris-county-texas');
+      scraper = new HarrisCountyTexasScraper({
+        headless: true,
+        timeout: 120000,
+        verbose: true
+      });
+    } else if (detectedCounty === 'Tarrant' && detectedState === 'TX') {
+      const TarrantCountyTexasScraper = require('./county-implementations/tarrant-county-texas');
+      scraper = new TarrantCountyTexasScraper({
+        headless: true,
+        timeout: 120000,
+        verbose: true
+      });
+    } else if (detectedCounty === 'Dallas' && detectedState === 'TX') {
+      const DallasCountyTexasScraper = require('./county-implementations/dallas-county-texas');
+      scraper = new DallasCountyTexasScraper({
+        headless: true,
+        timeout: 120000,
+        verbose: true
+      });
+    } else {
+      // Fallback to base DeedScraper for unsupported counties
+      console.log(`⚠️  Using base DeedScraper for ${detectedCounty}, ${detectedState}`);
+      const DeedScraper = require('./deed-scraper');
+      scraper = new DeedScraper({
+        headless: true,
+        timeout: 60000,
+        verbose: true
+      });
+    }
+
+    await scraper.initialize();
+
+    // Run complete workflow
+    const result = await scraper.getPriorDeed(address);
+
+    console.log(`📄 Deed search completed: ${result.success ? 'Success' : 'Failed'}`);
+
+    res.json({
+      success: result.success,
+      data: result,
+      timestamp: new Date().toISOString()
+    });
+
+  } catch (error) {
+    console.error('❌ Deed scraping error:', error);
+    res.status(500).json({
+      error: 'Deed scraping failed',
+      message: error.message,
+      timestamp: new Date().toISOString()
+    });
+  } finally {
+    if (scraper) {
+      await scraper.close();
+      console.log('🔒 Deed scraper closed');
+    }
+  }
+});
+
+// Alias endpoint for backward compatibility with frontend
+app.post('/api/getPriorDeed', async (req, res) => {
   let scraper = null;
 
   try {
