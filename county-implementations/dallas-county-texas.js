@@ -328,32 +328,96 @@ class DallasCountyTexasScraper extends DeedScraper {
       // Click on first result or extract account ID from results
       this.log('📋 Looking for property account...');
 
-      const accountLinkSelectors = [
-        'a[href*="AcctDetailRes.aspx"]',
-        'a[href*="ID="]',
-        'table a',
-        '.search-result a'
-      ];
+      // Debug: check what's on the results page
+      const resultsDebug = await this.page.evaluate(() => {
+        return {
+          url: window.location.href,
+          bodySnippet: document.body.innerText.substring(0, 300),
+          links: Array.from(document.querySelectorAll('a[href*="AcctDetail"]')).map(a => ({
+            href: a.href,
+            text: a.textContent?.trim()
+          })).slice(0, 5)
+        };
+      });
+      this.log(`📍 Results page URL: ${resultsDebug.url}`);
+      this.log(`📄 Results snippet: ${resultsDebug.bodySnippet}`);
+      this.log(`🔗 Account links found: ${JSON.stringify(resultsDebug.links, null, 2)}`);
 
-      let accountLink = null;
-      for (const selector of accountLinkSelectors) {
-        try {
-          await this.page.waitForSelector(selector, { timeout: 5000 });
-          accountLink = selector;
-          this.log(`✅ Found account link: ${selector}`);
-          break;
-        } catch (e) {
-          this.log(`⚠️ Link ${selector} not found`);
+      // Try to find account number in the first row of results
+      const accountInfo = await this.page.evaluate(() => {
+        // Look for table rows with account information
+        const rows = Array.from(document.querySelectorAll('table tr, .result-row'));
+
+        for (const row of rows) {
+          const text = row.textContent || '';
+
+          // Look for account number pattern (usually starts with specific digits for Dallas)
+          const accountMatch = text.match(/\b(\d{17,23})\b/); // Dallas account numbers are typically long
+          if (accountMatch) {
+            return {
+              accountNumber: accountMatch[1],
+              rowText: text.substring(0, 200)
+            };
+          }
+
+          // Also check for links to account detail pages
+          const link = row.querySelector('a[href*="AcctDetailRes.aspx"], a[href*="ID="]');
+          if (link) {
+            const href = link.getAttribute('href');
+            const idMatch = href?.match(/ID=([^&]+)/);
+            if (idMatch) {
+              return {
+                accountNumber: idMatch[1],
+                linkHref: href
+              };
+            }
+          }
         }
-      }
 
-      if (!accountLink) {
-        throw new Error('Could not find property account link in search results');
-      }
+        return null;
+      });
 
-      // Click on account link to view property details
-      await this.page.click(accountLink);
-      this.log('✅ Clicked on account link');
+      if (accountInfo) {
+        this.log(`✅ Found account: ${accountInfo.accountNumber}`);
+        if (accountInfo.linkHref) {
+          this.log(`🔗 Account link: ${accountInfo.linkHref}`);
+        }
+
+        // Navigate directly to the account detail page
+        const accountUrl = `https://www.dallascad.org/AcctDetailRes.aspx?ID=${accountInfo.accountNumber}`;
+        this.log(`📍 Navigating to: ${accountUrl}`);
+        await this.page.goto(accountUrl, { waitUntil: 'networkidle2', timeout: 30000 });
+      } else {
+        // Fallback: try clicking on first link
+        this.log('⚠️ Could not extract account number, trying link click...');
+
+        const accountLinkSelectors = [
+          'a[href*="AcctDetailRes.aspx"]',
+          'a[href*="ID="]',
+          'table a',
+          '.result-row a'
+        ];
+
+        let accountLink = null;
+        for (const selector of accountLinkSelectors) {
+          try {
+            await this.page.waitForSelector(selector, { timeout: 5000 });
+            accountLink = selector;
+            this.log(`✅ Found account link: ${selector}`);
+            break;
+          } catch (e) {
+            this.log(`⚠️ Link ${selector} not found`);
+          }
+        }
+
+        if (!accountLink) {
+          throw new Error('Could not find property account link in search results');
+        }
+
+        // Click on account link to view property details
+        await this.page.click(accountLink);
+        this.log('✅ Clicked on account link');
+      }
 
       // Wait for property detail page
       await this.page.waitForNavigation({ waitUntil: 'networkidle2', timeout: 30000 }).catch(() => {
