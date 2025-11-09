@@ -94,46 +94,181 @@ class DallasCountyTexasScraper extends DeedScraper {
     try {
       // Navigate to Dallas CAD property search
       this.log('📍 Loading Dallas CAD property search...');
-      await this.page.goto('https://www.dallascad.org/PropertySearch.aspx', {
+      await this.page.goto('https://www.dallascad.org/SearchAddr.aspx', {
         waitUntil: 'networkidle2',
         timeout: 60000
       });
 
       await this.randomWait(2000, 3000);
 
-      // Find and fill address search input
-      this.log('📝 Entering address...');
+      // Find and fill address search inputs
+      this.log('📝 Parsing and entering address...');
 
-      // Try multiple possible selectors for address search
-      const addressInputSelectors = [
-        'input[name*="Address"]',
-        'input[id*="Address"]',
-        'input[placeholder*="Address"]',
-        '#ctl00_cphContent_txtAddress',
-        'input[type="text"]'
+      // Debug: Log all input elements on the page
+      const allInputs = await this.page.evaluate(() => {
+        const inputs = Array.from(document.querySelectorAll('input'));
+        return inputs.map(input => ({
+          type: input.type,
+          name: input.name,
+          id: input.id,
+          placeholder: input.placeholder,
+          className: input.className
+        }));
+      });
+      this.log(`🔍 Found ${allInputs.length} input fields on page:`);
+      this.log(JSON.stringify(allInputs, null, 2));
+
+      // Parse address into components
+      // Example: "7012 Duffield Ct, Dallas, TX 75248" -> number: 7012, street: Duffield (without Ct)
+      const cleanAddress = address.replace(/,?\s*Dallas\s*,?\s*TX\s*\d*\s*/gi, '').trim();
+      this.log(`🧹 Cleaned address: ${cleanAddress}`);
+
+      // List of common street type suffixes to remove
+      const streetTypes = ['St', 'Street', 'Ave', 'Avenue', 'Blvd', 'Boulevard', 'Dr', 'Drive',
+                          'Ct', 'Court', 'Ln', 'Lane', 'Rd', 'Road', 'Way', 'Pl', 'Place',
+                          'Cir', 'Circle', 'Ter', 'Terrace', 'Pkwy', 'Parkway', 'Trl', 'Trail'];
+
+      // Parse components
+      const addressMatch = cleanAddress.match(/^(\d+)\s+(.+?)(?:\s+(?:Apt|Suite|Unit|#)\s*(.+))?$/i);
+
+      let addressNumber = '';
+      let streetName = '';
+      let suite = '';
+
+      if (addressMatch) {
+        addressNumber = addressMatch[1];
+        let fullStreetName = addressMatch[2];
+        suite = addressMatch[3] || '';
+
+        // Remove street type suffix from street name
+        const streetNameParts = fullStreetName.split(/\s+/);
+        const lastPart = streetNameParts[streetNameParts.length - 1];
+
+        // Check if last part is a street type suffix
+        if (streetTypes.some(type => type.toLowerCase() === lastPart.toLowerCase())) {
+          // Remove the suffix
+          streetName = streetNameParts.slice(0, -1).join(' ');
+          this.log(`🧹 Removed street type suffix "${lastPart}" from street name`);
+        } else {
+          streetName = fullStreetName;
+        }
+
+        this.log(`📍 Parsed - Number: ${addressNumber}, Street: ${streetName}, Suite: ${suite || 'N/A'}`);
+      } else {
+        // Fallback: just split on first space and remove street type
+        const parts = cleanAddress.split(/\s+/);
+        addressNumber = parts[0] || '';
+
+        const streetParts = parts.slice(1);
+        const lastPart = streetParts[streetParts.length - 1];
+
+        if (streetTypes.some(type => type.toLowerCase() === lastPart?.toLowerCase())) {
+          streetName = streetParts.slice(0, -1).join(' ');
+        } else {
+          streetName = streetParts.join(' ');
+        }
+
+        this.log(`📍 Fallback parse - Number: ${addressNumber}, Street: ${streetName}`);
+      }
+
+      // Try to find address number input
+      const numberInputSelectors = [
+        'input[name*="Number"]',
+        'input[name*="number"]',
+        'input[id*="Number"]',
+        'input[id*="number"]',
+        'input[name*="Num"]',
+        'input[id*="Num"]',
+        'input[placeholder*="Number"]'
       ];
 
-      let addressInput = null;
-      for (const selector of addressInputSelectors) {
+      let numberInput = null;
+      for (const selector of numberInputSelectors) {
         try {
-          await this.page.waitForSelector(selector, { timeout: 3000 });
-          addressInput = selector;
-          this.log(`✅ Found address input: ${selector}`);
+          await this.page.waitForSelector(selector, { timeout: 2000 });
+          numberInput = selector;
+          this.log(`✅ Found number input: ${selector}`);
           break;
         } catch (e) {
-          this.log(`⚠️ Selector ${selector} not found`);
+          // Try next
         }
       }
 
-      if (!addressInput) {
-        throw new Error('Could not find address input on Dallas CAD page');
+      if (numberInput) {
+        await this.page.type(numberInput, addressNumber, { delay: 100 });
+        this.log(`✅ Entered address number: ${addressNumber}`);
+      } else {
+        this.log('⚠️ Could not find address number input');
       }
 
-      // Clean address (remove city name if present)
-      const cleanAddress = address.replace(/,?\s*Dallas\s*,?\s*TX\s*/gi, '').trim();
-      this.log(`🧹 Cleaned address: ${cleanAddress}`);
+      // Try to find street name input
+      const streetInputSelectors = [
+        'input[name*="Street"]',
+        'input[name*="street"]',
+        'input[id*="Street"]',
+        'input[id*="street"]',
+        'input[name*="Name"]',
+        'input[placeholder*="Street"]',
+        'input[placeholder*="street"]'
+      ];
 
-      await this.page.type(addressInput, cleanAddress, { delay: 100 });
+      let streetInput = null;
+      for (const selector of streetInputSelectors) {
+        try {
+          await this.page.waitForSelector(selector, { timeout: 2000 });
+          streetInput = selector;
+          this.log(`✅ Found street input: ${selector}`);
+          break;
+        } catch (e) {
+          // Try next
+        }
+      }
+
+      if (streetInput) {
+        await this.page.type(streetInput, streetName, { delay: 100 });
+        this.log(`✅ Entered street name: ${streetName}`);
+      } else {
+        this.log('⚠️ Could not find street name input');
+      }
+
+      // Try to find suite/unit input (optional)
+      if (suite) {
+        const suiteInputSelectors = [
+          'input[name*="Suite"]',
+          'input[name*="suite"]',
+          'input[id*="Suite"]',
+          'input[id*="suite"]',
+          'input[name*="Unit"]',
+          'input[id*="Unit"]',
+          'input[placeholder*="Suite"]',
+          'input[placeholder*="Unit"]'
+        ];
+
+        let suiteInput = null;
+        for (const selector of suiteInputSelectors) {
+          try {
+            await this.page.waitForSelector(selector, { timeout: 2000 });
+            suiteInput = selector;
+            this.log(`✅ Found suite input: ${selector}`);
+            break;
+          } catch (e) {
+            // Try next
+          }
+        }
+
+        if (suiteInput) {
+          await this.page.type(suiteInput, suite, { delay: 100 });
+          this.log(`✅ Entered suite: ${suite}`);
+        } else {
+          this.log('⚠️ Suite/Unit input not found (might be optional)');
+        }
+      }
+
+      // Verify at least one input was filled
+      if (!numberInput && !streetInput) {
+        throw new Error('Could not find address number or street name inputs on Dallas CAD page');
+      }
+
       await this.randomWait(1000, 2000);
 
       // Submit search
