@@ -544,30 +544,78 @@ class TarrantCountyTexasScraper extends DeedScraper {
           // We need to click the deed row AGAIN to navigate to the document preview page
           this.log('🔄 After login, clicking deed row again to navigate to document preview...');
 
-          // Wait for search results page to load
+          // Debug current page state
+          const pageState = await publicSearchPage.evaluate(() => {
+            return {
+              url: window.location.href,
+              bodyText: document.body.innerText.substring(0, 500),
+              hasResults: document.body.innerText.includes('SEARCH RESULTS') ||
+                         document.body.innerText.includes('results') ||
+                         document.querySelectorAll('tbody tr').length > 0
+            };
+          });
+          this.log(`📍 Current URL: ${pageState.url}`);
+          this.log(`📄 Page has results: ${pageState.hasResults}`);
+
+          // Wait for search results page to load - more flexible detection
           await publicSearchPage.waitForFunction(() => {
-            const text = document.body.innerText;
-            return text.includes('SEARCH RESULTS') || text.includes('results');
-          }, { timeout: 15000 }).catch(() => {
-            this.log('⚠️ Search results page did not load after login');
+            // Check for various indicators of search results page
+            const hasTable = document.querySelectorAll('tbody tr').length > 0;
+            const hasResultsText = document.body.innerText.includes('SEARCH RESULTS') ||
+                                  document.body.innerText.includes('results');
+            const notOnLoginPage = !document.body.innerText.toLowerCase().includes('sign in') ||
+                                  document.body.innerText.toLowerCase().includes('sign out');
+
+            return (hasTable || hasResultsText) && notOnLoginPage;
+          }, { timeout: 20000 }).catch(() => {
+            this.log('⚠️ Search results page did not load after login, continuing anyway...');
           });
 
           await this.randomWait(2000, 3000);
 
           // Click on the instrument number column specifically
           const secondClickDone = await publicSearchPage.evaluate((instNum) => {
-            const rows = document.querySelectorAll('tbody tr');
+            // Log all rows for debugging
+            const allRows = document.querySelectorAll('tbody tr');
+            console.log(`Found ${allRows.length} rows in tbody`);
 
-            for (const row of rows) {
-              if (row.textContent.includes(instNum)) {
-                // Click the instrument number column specifically
+            for (const row of allRows) {
+              const rowText = row.textContent;
+              console.log(`Row text: ${rowText.substring(0, 100)}`);
+
+              if (rowText.includes(instNum)) {
+                console.log(`Found row with instrument number: ${instNum}`);
+
+                // Try multiple click strategies
+
+                // Strategy 1: Click the instrument number column (.col-7)
                 const instrumentCol = row.querySelector('.col-7');
                 if (instrumentCol) {
+                  console.log('Clicking .col-7');
                   instrumentCol.click();
                   return { clicked: true, method: 'col-7' };
                 }
 
-                // Fallback to clicking the row
+                // Strategy 2: Look for clickable link in the row
+                const link = row.querySelector('a');
+                if (link) {
+                  console.log('Clicking link in row');
+                  link.click();
+                  return { clicked: true, method: 'link' };
+                }
+
+                // Strategy 3: Click any cell that might be clickable
+                const cells = row.querySelectorAll('td');
+                for (const cell of cells) {
+                  if (cell.onclick || cell.style.cursor === 'pointer') {
+                    console.log('Clicking clickable cell');
+                    cell.click();
+                    return { clicked: true, method: 'cell' };
+                  }
+                }
+
+                // Strategy 4: Fallback to clicking the row itself
+                console.log('Clicking row');
                 row.click();
                 return { clicked: true, method: 'row' };
               }
@@ -581,14 +629,36 @@ class TarrantCountyTexasScraper extends DeedScraper {
 
             // Wait for navigation to document preview page
             await publicSearchPage.waitForFunction(() => {
-              return window.location.href.includes('/doc/') &&
-                     document.body.innerText.toLowerCase().includes('download');
-            }, { timeout: 15000 }).catch(() => {
-              this.log('⚠️ Document preview page did not load');
+              const onDocPage = window.location.href.includes('/doc/');
+              const hasDownload = document.body.innerText.toLowerCase().includes('download');
+
+              console.log(`onDocPage: ${onDocPage}, hasDownload: ${hasDownload}`);
+
+              return onDocPage || hasDownload;
+            }, { timeout: 20000 }).catch(() => {
+              this.log('⚠️ Document preview page did not load, continuing anyway...');
             });
 
             await this.randomWait(2000, 3000);
-            this.log('✅ Document preview page loaded');
+
+            // Verify we're on the right page
+            const finalState = await publicSearchPage.evaluate(() => {
+              return {
+                url: window.location.href,
+                hasDownloadButton: !!Array.from(document.querySelectorAll('button, a')).find(el =>
+                  el.textContent.toLowerCase().includes('download')
+                )
+              };
+            });
+
+            this.log(`📍 Final URL: ${finalState.url}`);
+            this.log(`📥 Has download button: ${finalState.hasDownloadButton}`);
+
+            if (finalState.hasDownloadButton) {
+              this.log('✅ Document preview page loaded');
+            } else {
+              this.log('⚠️ Document preview page loaded but download button not found yet');
+            }
           } else {
             this.log('⚠️ Could not click deed row after login');
           }
@@ -602,14 +672,34 @@ class TarrantCountyTexasScraper extends DeedScraper {
       // Step 4: Look for and click download button
       this.log('📥 Looking for download/view button...');
 
+      // First, verify what page we're on
+      const currentPageInfo = await publicSearchPage.evaluate(() => {
+        return {
+          url: window.location.href,
+          hasDownloadInText: document.body.innerText.toLowerCase().includes('download'),
+          allButtonTexts: Array.from(document.querySelectorAll('button, a')).map(el => el.textContent?.trim()).filter(Boolean)
+        };
+      });
+
+      this.log(`📍 Current page URL: ${currentPageInfo.url}`);
+      this.log(`📄 Has 'download' in text: ${currentPageInfo.hasDownloadInText}`);
+      this.log(`🔘 Found buttons: ${currentPageInfo.allButtonTexts.slice(0, 5).join(', ')}...`);
+
       const downloadClicked = await publicSearchPage.evaluate(() => {
         const buttons = Array.from(document.querySelectorAll('button, a, input[type="button"], input[type="submit"]'));
+
+        // Log all buttons for debugging
+        console.log(`Total buttons found: ${buttons.length}`);
+        buttons.forEach((btn, i) => {
+          const text = (btn.textContent || btn.value || '').trim();
+          if (text) console.log(`Button ${i}: "${text}"`);
+        });
 
         for (const button of buttons) {
           const text = (button.textContent || button.value || '').toLowerCase();
 
           if (text.includes('download') || text.includes('view') || text.includes('pdf') || text.includes('unofficial')) {
-            console.log('Found button:', text);
+            console.log('Clicking button:', text);
             button.click();
             return { clicked: true, text };
           }
