@@ -364,40 +364,100 @@ class DallasCountyTexasScraper extends DeedScraper {
       // Extract legal description (line 4 contains instrument number or book/page)
       this.log('📄 Extracting legal description...');
 
+      // First, debug: log the current page URL and title
+      const pageInfo = await this.page.evaluate(() => ({
+        url: window.location.href,
+        title: document.title,
+        bodySnippet: document.body.innerText.substring(0, 500)
+      }));
+      this.log(`📍 Page URL: ${pageInfo.url}`);
+      this.log(`📄 Page title: ${pageInfo.title}`);
+      this.log(`📝 Page snippet: ${pageInfo.bodySnippet}`);
+
       const legalDescData = await this.page.evaluate(() => {
-        // Look for legal description section
-        const legalDescSelectors = [
-          'td:contains("Legal Description")',
-          'td:contains("Legal Desc")',
-          '*:contains("Legal Description")'
-        ];
-
         let legalDescText = null;
+        let debugInfo = [];
 
-        // Try to find by label "Legal Description"
+        // Strategy 1: Try to find by label "Legal Description" or similar
         const allElements = Array.from(document.querySelectorAll('*'));
         for (const el of allElements) {
-          const text = el.textContent || '';
-          if (text.includes('Legal Description') || text.includes('Legal Desc')) {
-            // Get the next sibling or parent's next sibling for the value
+          const text = (el.textContent || '').trim();
+
+          // Look for "Legal Description" label
+          if (text.includes('Legal Description') || text.includes('Legal Desc') || text.includes('LEGAL')) {
+            debugInfo.push(`Found label: "${text.substring(0, 100)}"`);
+
+            // Try to get value from next sibling
             let valueEl = el.nextElementSibling || el.parentElement?.nextElementSibling;
             if (valueEl) {
-              legalDescText = valueEl.textContent?.trim();
+              const valueText = valueEl.textContent?.trim();
+              debugInfo.push(`Next sibling text: "${valueText?.substring(0, 100)}"`);
+              if (valueText && valueText.length > 10) {
+                legalDescText = valueText;
+                debugInfo.push('Using next sibling as legal description');
+                break;
+              }
+            }
+
+            // Try to get from parent's structure
+            const parent = el.parentElement;
+            if (parent) {
+              const siblingText = parent.textContent?.trim();
+              if (siblingText && siblingText !== text) {
+                debugInfo.push(`Parent text: "${siblingText?.substring(0, 100)}"`);
+              }
+            }
+          }
+        }
+
+        // Strategy 2: Look for INT pattern or Vol/Page pattern anywhere
+        if (!legalDescText) {
+          debugInfo.push('Searching for INT or Vol/Page patterns...');
+          const cells = Array.from(document.querySelectorAll('td, div, span, p'));
+          for (const cell of cells) {
+            const text = cell.textContent || '';
+            // Look for INT pattern or Vol/Page pattern
+            if (text.match(/INT\d+/) || text.match(/Vol\s*\d+.*Page\s*\d+/i) ||
+                text.match(/\d{12,}/) || text.match(/Book\s*\d+/i)) {
+              legalDescText = text.trim();
+              debugInfo.push(`Found pattern in: "${legalDescText.substring(0, 100)}"`);
               break;
             }
           }
         }
 
-        // If not found, try to get all table cells and look for patterns
+        // Strategy 3: Look for multi-line legal description (common in Dallas CAD)
         if (!legalDescText) {
-          const cells = Array.from(document.querySelectorAll('td, div'));
-          for (const cell of cells) {
-            const text = cell.textContent || '';
-            // Look for INT pattern or Vol/Page pattern
-            if (text.match(/INT\d+/) || text.match(/Vol\s*\d+.*Page\s*\d+/i)) {
-              legalDescText = text.trim();
-              break;
+          debugInfo.push('Looking for multi-line legal description...');
+          const tables = Array.from(document.querySelectorAll('table'));
+          for (const table of tables) {
+            const rows = Array.from(table.querySelectorAll('tr'));
+            for (let i = 0; i < rows.length; i++) {
+              const row = rows[i];
+              const headerCell = row.querySelector('th, td');
+              if (headerCell && (headerCell.textContent || '').includes('Legal')) {
+                // Legal description might be in next few rows
+                let descLines = [];
+                for (let j = i + 1; j < Math.min(i + 10, rows.length); j++) {
+                  const nextRow = rows[j];
+                  const cells = nextRow.querySelectorAll('td');
+                  if (cells.length > 0) {
+                    const cellText = Array.from(cells).map(c => c.textContent?.trim()).join(' ');
+                    if (cellText) {
+                      descLines.push(cellText);
+                      // Check if we found INT or book/page
+                      if (cellText.match(/INT\d+/) || cellText.match(/Vol\s*\d+.*Page\s*\d+/i)) {
+                        legalDescText = descLines.join('\n');
+                        debugInfo.push(`Found in table rows: "${legalDescText.substring(0, 100)}"`);
+                        break;
+                      }
+                    }
+                  }
+                }
+                if (legalDescText) break;
+              }
             }
+            if (legalDescText) break;
           }
         }
 
@@ -426,11 +486,21 @@ class DallasCountyTexasScraper extends DeedScraper {
           instrumentNumber,
           bookNumber,
           pageNumber,
-          pageUrl: window.location.href
+          pageUrl: window.location.href,
+          debugInfo
         };
       });
 
+      // Log debug information
+      if (legalDescData.debugInfo && legalDescData.debugInfo.length > 0) {
+        this.log(`🔍 Debug info:\n  ${legalDescData.debugInfo.join('\n  ')}`);
+      }
+
       if (!legalDescData.instrumentNumber && !legalDescData.bookNumber) {
+        this.log(`⚠️ Legal description found: ${legalDescData.legalDescription ? 'YES' : 'NO'}`);
+        if (legalDescData.legalDescription) {
+          this.log(`📄 Legal description text: ${legalDescData.legalDescription.substring(0, 200)}`);
+        }
         throw new Error('Could not extract instrument number or book/page from legal description');
       }
 
