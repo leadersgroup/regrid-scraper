@@ -120,7 +120,13 @@ class DallasCountyTexasScraper extends DeedScraper {
 
       // Parse address into components
       // Example: "7012 Duffield Ct, Dallas, TX 75248" -> number: 7012, street: Duffield (without Ct)
-      const cleanAddress = address.replace(/,?\s*Dallas\s*,?\s*TX\s*\d*\s*/gi, '').trim();
+      // Remove city, state, ZIP, and country
+      let cleanAddress = address
+        .replace(/,?\s*Dallas\s*,?\s*TX\s*\d{5}?\s*/gi, '') // Remove "Dallas, TX 75248"
+        .replace(/,?\s*Dallas\s*,?\s*TX\s*/gi, '')          // Remove "Dallas, TX"
+        .replace(/,?\s*USA\s*/gi, '')                        // Remove "USA"
+        .replace(/,\s*$/g, '')                               // Remove trailing comma
+        .trim();
       this.log(`🧹 Cleaned address: ${cleanAddress}`);
 
       // List of common street type suffixes to remove
@@ -173,6 +179,10 @@ class DallasCountyTexasScraper extends DeedScraper {
 
       // Try to find address number input
       const numberInputSelectors = [
+        '#txtAddrNum',           // Exact ID from Dallas CAD
+        'input[name="txtAddrNum"]',
+        'input[name*="AddrNum"]',
+        'input[id*="AddrNum"]',
         'input[name*="Number"]',
         'input[name*="number"]',
         'input[id*="Number"]',
@@ -203,6 +213,10 @@ class DallasCountyTexasScraper extends DeedScraper {
 
       // Try to find street name input
       const streetInputSelectors = [
+        '#txtStName',            // Exact ID from Dallas CAD
+        'input[name="txtStName"]',
+        'input[name*="StName"]',
+        'input[id*="StName"]',
         'input[name*="Street"]',
         'input[name*="street"]',
         'input[id*="Street"]',
@@ -234,6 +248,10 @@ class DallasCountyTexasScraper extends DeedScraper {
       // Try to find suite/unit input (optional)
       if (suite) {
         const suiteInputSelectors = [
+          '#txtUnitID',            // Exact ID from Dallas CAD
+          'input[name="txtUnitID"]',
+          'input[name*="UnitID"]',
+          'input[id*="UnitID"]',
           'input[name*="Suite"]',
           'input[name*="suite"]',
           'input[id*="Suite"]',
