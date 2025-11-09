@@ -606,14 +606,75 @@ class DallasCountyTexasScraper extends DeedScraper {
    */
   async downloadDeed(searchData) {
     this.log(`📥 Downloading deed from Dallas County Public Search...`);
-
+    
+    // Track important network requests
+    const requests = new Map();
+    const requestFailed = new Map();
+    
     try {
+      // Setup network request tracking
+      await this.page.setRequestInterception(true);
+      
+      this.page.on('request', request => {
+        const url = request.url();
+        requests.set(url, {
+          method: request.method(),
+          headers: request.headers(),
+          timestamp: Date.now()
+        });
+        request.continue();
+      });
+      
+      this.page.on('requestfailed', request => {
+        const url = request.url();
+        requestFailed.set(url, {
+          errorText: request.failure().errorText,
+          timestamp: Date.now()
+        });
+      });
+      
+      // Log important cookies
+      const cookies = await this.page.cookies();
+      this.log(`🍪 Current cookies: ${JSON.stringify(cookies.map(c => ({
+        name: c.name,
+        domain: c.domain
+      })))}`);
+      
+      // Create a debug log for this session
+      const debugLog = {
+        timestamp: new Date().toISOString(),
+        searchParams: searchData,
+        events: []
+      };
       // Navigate to public search page
       this.log('📍 Loading Dallas County Public Search...');
       await this.page.goto('https://dallas.tx.publicsearch.us/', {
         waitUntil: 'networkidle2',
         timeout: 60000
       });
+
+      // Check if we need to accept terms or handle initial redirect
+      const acceptButtonSelectors = [
+        'button:has-text("Accept")',
+        'button:has-text("I Accept")',
+        'button:has-text("Continue")',
+        'input[value*="Accept"]',
+        '[class*="accept-button"]'
+      ];
+
+      for (const selector of acceptButtonSelectors) {
+        try {
+          const button = await this.page.$(selector);
+          if (button) {
+            this.log(`✅ Found accept button: ${selector}`);
+            await button.click();
+            await this.randomWait(1000, 2000);
+            break;
+          }
+        } catch (e) {
+          // Continue to next selector
+        }
+      }
 
       await this.randomWait(2000, 3000);
 
@@ -705,11 +766,16 @@ class DallasCountyTexasScraper extends DeedScraper {
         });
         this.log(`📝 All form inputs on page: ${JSON.stringify(allInputs, null, 2)}`);
 
-        // Find the search input that's to the RIGHT of "Property Records" field
-        // This means we need to find the input that comes AFTER the Property Records input in the DOM
+        // Find the search input field using multiple strategies
         const propertyRecordsInput = await this.page.evaluate(() => {
-          // Get all text inputs on the page
-          const allInputs = Array.from(document.querySelectorAll('input[type="text"], input[type="search"], input:not([type="hidden"]):not([type="date"]):not([type="submit"]):not([type="button"])'));
+          // Get all text inputs on the page, excluding hidden and special inputs
+          const allInputs = Array.from(document.querySelectorAll('input')).filter(input => {
+            const type = (input.type || '').toLowerCase();
+            const isVisible = input.offsetParent !== null;
+            const notSpecial = !['hidden', 'submit', 'button', 'checkbox', 'radio'].includes(type);
+            const hasReasonableSize = input.offsetWidth > 50; // Minimum width for a search field
+            return isVisible && notSpecial && hasReasonableSize;
+          });
 
           // Look for an input that has "Property Records" as label/preceding text
           // Then find the NEXT input after it
@@ -867,28 +933,57 @@ class DallasCountyTexasScraper extends DeedScraper {
         });
         this.log(`🔍 Available buttons: ${JSON.stringify(availableButtons, null, 2)}`);
 
-        // Try to find and click submit button first
+        // Enhanced submit button detection and clicking
         const submitButtonSelectors = [
           'button[type="submit"]',
           'input[type="submit"]',
           'button:has-text("Search")',
           'button:has-text("Submit")',
-          'button[onclick*="search"]'
+          'button[onclick*="search"]',
+          'button.search-button',
+          '[class*="search-btn"]',
+          '[class*="submit-btn"]',
+          'form button',
+          'button:not([type="button"])'
         ];
 
         let submitButtonClicked = false;
         for (const selector of submitButtonSelectors) {
           try {
-            const button = await this.page.$(selector);
+            // Wait briefly for each selector
+            const button = await this.page.waitForSelector(selector, { timeout: 1000 });
             if (button) {
               this.log(`✅ Found submit button: ${selector}`);
-              await button.click();
+              // Try multiple click methods
+              try {
+                await button.click(); // Standard click
+              } catch (clickError) {
+                try {
+                  await this.page.evaluate((sel) => {
+                    const btn = document.querySelector(sel);
+                    if (btn) {
+                      // Try programmatic click
+                      const clickEvent = new MouseEvent('click', {
+                        bubbles: true,
+                        cancelable: true,
+                        view: window
+                      });
+                      btn.dispatchEvent(clickEvent);
+                      // Also try click() method
+                      btn.click();
+                    }
+                  }, selector);
+                } catch (jsError) {
+                  this.log(`⚠️ JavaScript click failed: ${jsError.message}`);
+                  continue;
+                }
+              }
               submitButtonClicked = true;
               this.log(`✅ Clicked submit button`);
               break;
             }
           } catch (e) {
-            this.log(`⚠️ Error clicking ${selector}: ${e.message}`);
+            this.log(`⚠️ Button ${selector} not found or not clickable`);
           }
         }
 
@@ -977,13 +1072,51 @@ class DallasCountyTexasScraper extends DeedScraper {
       this.log('⏳ Waiting for deed search results...');
       this.log(`📍 Current URL before wait: ${this.page.url()}`);
 
-      // Wait for navigation with better error handling
-      try {
-        await this.page.waitForNavigation({ waitUntil: 'networkidle2', timeout: 30000 });
-        this.log(`✅ Navigation completed to: ${this.page.url()}`);
-      } catch (navError) {
-        this.log(`⚠️ Navigation timeout: ${navError.message}`);
-        this.log(`📍 Current URL after timeout: ${this.page.url()}`);
+      // Enhanced navigation and error handling
+      let navigationSuccess = false;
+      let retryCount = 0;
+      const maxRetries = 3;
+
+      while (!navigationSuccess && retryCount < maxRetries) {
+        try {
+          // Wait for any of these events that might indicate success
+          await Promise.race([
+            this.page.waitForNavigation({ waitUntil: 'networkidle2', timeout: 30000 }),
+            this.page.waitForSelector('table.results, .search-results, [class*="result"]', { timeout: 30000 }),
+            this.page.waitForFunction(() => {
+              const text = document.body.innerText;
+              return text.includes('results found') || text.includes('Results:') || text.includes('No results');
+            }, { timeout: 30000 })
+          ]);
+          
+          navigationSuccess = true;
+          this.log(`✅ Navigation completed to: ${this.page.url()}`);
+          
+          // Verify we're on a results page
+          const pageState = await this.page.evaluate(() => ({
+            url: window.location.href,
+            hasResults: !!document.querySelector('table.results, .search-results, [class*="result"]'),
+            bodyText: document.body.innerText.slice(0, 200)
+          }));
+          
+          if (!pageState.hasResults && !pageState.bodyText.match(/results?|found|search/i)) {
+            throw new Error('Navigation succeeded but no results content found');
+          }
+          
+        } catch (navError) {
+          retryCount++;
+          this.log(`⚠️ Navigation attempt ${retryCount} failed: ${navError.message}`);
+          this.log(`📍 Current URL: ${this.page.url()}`);
+          
+          if (retryCount < maxRetries) {
+            this.log(`🔄 Retrying navigation...`);
+            await this.randomWait(2000, 4000);
+            // Try refreshing the page
+            await this.page.reload({ waitUntil: 'networkidle2' });
+          } else {
+            this.log(`❌ All navigation attempts failed`);
+          }
+        }
       }
 
       await this.randomWait(3000, 5000);
@@ -1051,7 +1184,57 @@ class DallasCountyTexasScraper extends DeedScraper {
       }
 
       if (!resultsAppeared) {
-        this.log('⚠️ No results container found, checking page content...');
+        this.log('⚠️ No results container found, attempting recovery...');
+        
+        // Check if we're in an error state
+        const pageState = await this.page.evaluate(() => {
+          const errorIndicators = [
+            'error',
+            'invalid',
+            'no results',
+            'not found',
+            'try again',
+            'session expired',
+            'please login',
+            'maintenance'
+          ];
+          
+          const bodyText = document.body.innerText.toLowerCase();
+          const foundErrors = errorIndicators.filter(e => bodyText.includes(e));
+          
+          return {
+            url: window.location.href,
+            title: document.title,
+            hasErrors: foundErrors.length > 0,
+            errorTypes: foundErrors,
+            hasLoginForm: !!document.querySelector('form input[type="password"]'),
+            hasSearchForm: !!document.querySelector('input[type="text"], input[type="search"]'),
+            hasResults: !!document.querySelector('table, [class*="result"]'),
+            bodyPreview: document.body.innerText.slice(0, 500)
+          };
+        });
+        
+        this.log(`📊 Page state analysis:`);
+        this.log(`URL: ${pageState.url}`);
+        this.log(`Title: ${pageState.title}`);
+        this.log(`Has errors: ${pageState.hasErrors}`);
+        if (pageState.hasErrors) {
+          this.log(`Error types: ${pageState.errorTypes.join(', ')}`);
+        }
+        this.log(`Has login form: ${pageState.hasLoginForm}`);
+        this.log(`Has search form: ${pageState.hasSearchForm}`);
+        this.log(`Has results: ${pageState.hasResults}`);
+        
+        // Take recovery action based on state
+        if (pageState.hasLoginForm) {
+          throw new Error('Session expired or login required');
+        } else if (pageState.hasSearchForm) {
+          this.log('🔄 Found search form, retrying search...');
+          // The search form is still present, try search again
+          return await this.downloadDeed(searchData);
+        } else if (pageState.hasErrors) {
+          throw new Error(`Page error detected: ${pageState.errorTypes.join(', ')}`);
+        }
       }
 
       // Click on deed result to view document
@@ -1379,10 +1562,58 @@ class DallasCountyTexasScraper extends DeedScraper {
 
     } catch (error) {
       this.log(`❌ Error downloading deed: ${error.message}`);
+      
+      // Collect detailed debug information
+      const debugInfo = {
+        error: {
+          message: error.message,
+          stack: error.stack
+        },
+        page: {
+          url: await this.page.url(),
+          title: await this.page.title(),
+        },
+        network: {
+          requests: Array.from(requests.entries()),
+          failures: Array.from(requestFailed.entries())
+        },
+        timestamp: new Date().toISOString()
+      };
+      
+      // Save debug info to file
+      const fs = require('fs');
+      const debugPath = `/tmp/dallas-debug-${Date.now()}.json`;
+      fs.writeFileSync(debugPath, JSON.stringify(debugInfo, null, 2));
+      
+      // Take error screenshot
+      const errorScreenshot = `/tmp/dallas-error-${Date.now()}.png`;
+      await this.page.screenshot({ 
+        path: errorScreenshot,
+        fullPage: true 
+      });
+      
+      this.log(`📸 Error screenshot saved to: ${errorScreenshot}`);
+      this.log(`📝 Debug info saved to: ${debugPath}`);
+      
       return {
         success: false,
-        error: error.message
+        error: error.message,
+        debugInfo: {
+          screenshotPath: errorScreenshot,
+          debugLogPath: debugPath,
+          url: debugInfo.page.url,
+          timestamp: debugInfo.timestamp
+        }
       };
+    } finally {
+      // Cleanup
+      try {
+        await this.page.setRequestInterception(false);
+        this.page.removeAllListeners('request');
+        this.page.removeAllListeners('requestfailed');
+      } catch (e) {
+        this.log(`⚠️ Cleanup error: ${e.message}`);
+      }
     }
   }
 
