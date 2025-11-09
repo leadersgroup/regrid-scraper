@@ -845,14 +845,60 @@ class DallasCountyTexasScraper extends DeedScraper {
       ];
 
       let deedLink = null;
+      let deedLinkHref = null;
+
       for (const selector of deedLinkSelectors) {
         try {
           await this.page.waitForSelector(selector, { timeout: 5000 });
-          deedLink = selector;
-          this.log(`✅ Found deed link: ${selector}`);
-          break;
+
+          // Get the actual href before committing to this link
+          deedLinkHref = await this.page.evaluate((sel) => {
+            const link = document.querySelector(sel);
+            return link ? link.href : null;
+          }, selector);
+
+          if (deedLinkHref) {
+            deedLink = selector;
+            this.log(`✅ Found deed link: ${selector}`);
+            this.log(`🔗 Link href: ${deedLinkHref}`);
+            break;
+          }
         } catch (e) {
           this.log(`⚠️ Link ${selector} not found`);
+        }
+      }
+
+      // Check if the link we found is actually a PDF or a detail page
+      if (deedLink && deedLinkHref && !deedLinkHref.includes('.pdf')) {
+        this.log('⚠️ Link found is not a direct PDF, it may be a detail page link');
+        this.log('🔗 Navigating to detail page first...');
+
+        // Navigate to the detail page
+        await this.page.goto(deedLinkHref, { waitUntil: 'networkidle2', timeout: 30000 });
+        await this.randomWait(2000, 3000);
+
+        // Now search for PDF link on this page
+        const detailPagePDF = await this.page.evaluate(() => {
+          const pdfLinks = Array.from(document.querySelectorAll('a'))
+            .filter(a => a.href.includes('.pdf') || a.textContent?.toLowerCase().includes('view document') || a.textContent?.toLowerCase().includes('download'));
+
+          if (pdfLinks.length > 0) {
+            return {
+              found: true,
+              href: pdfLinks[0].href,
+              text: pdfLinks[0].textContent?.trim()
+            };
+          }
+          return { found: false };
+        });
+
+        if (detailPagePDF.found) {
+          this.log(`✅ Found PDF on detail page: ${detailPagePDF.text}`);
+          deedLinkHref = detailPagePDF.href;
+          deedLink = `a[href="${detailPagePDF.href}"]`;
+        } else {
+          this.log('⚠️ No PDF found on detail page, trying alternative approach...');
+          deedLink = null; // Reset to trigger the fallback logic below
         }
       }
 
@@ -860,27 +906,78 @@ class DallasCountyTexasScraper extends DeedScraper {
         // Alternative: Look for result table rows that might need to be clicked first
         this.log('⚠️ No direct PDF link found, trying to find result rows...');
 
-        const resultRowClick = await this.page.evaluate(() => {
-          // Look for table rows in results
-          const rows = Array.from(document.querySelectorAll('table tbody tr, tr'));
+        // First, get count of rows for logging
+        const rowCount = await this.page.evaluate(() => {
+          return document.querySelectorAll('table tbody tr').length;
+        });
+        this.log(`📊 Examining ${rowCount} table rows for clickable results...`);
 
-          // Find a row that might contain our document
-          for (const row of rows) {
+        const resultRowClick = await this.page.evaluate(() => {
+          // Look for table rows in results (skip header rows)
+          const rows = Array.from(document.querySelectorAll('table tbody tr'));
+
+          const debugRows = [];
+
+          // Find the first data row (not header) that contains a clickable link
+          for (let i = 0; i < rows.length && i < 10; i++) { // Check first 10 rows max
+            const row = rows[i];
             const text = row.textContent || '';
-            // Look for rows that contain relevant information (document type, dates, etc.)
-            if (text.length > 20 && text.length < 1000) {
-              const link = row.querySelector('a');
-              if (link && link.href && !link.href.includes('javascript:')) {
+
+            debugRows.push({
+              index: i,
+              textLength: text.trim().length,
+              textPreview: text.trim().substring(0, 100),
+              hasLinks: row.querySelectorAll('a').length,
+              hasButtons: row.querySelectorAll('button').length,
+              hasOnclick: row.hasAttribute('onclick') || row.querySelector('[onclick]') !== null
+            });
+
+            // Skip empty or very short rows (likely headers)
+            if (text.trim().length < 20) continue;
+
+            // Look for a clickable element in this row
+            const links = Array.from(row.querySelectorAll('a, button[onclick], tr[onclick], td[onclick]'));
+
+            for (const clickable of links) {
+              const href = clickable.href || clickable.getAttribute('onclick');
+              if (href && !href.includes('javascript:void') && !href.includes('#')) {
                 return {
                   found: true,
-                  href: link.href,
-                  text: link.textContent?.trim()
+                  href: clickable.href || href,
+                  text: text.substring(0, 200),
+                  type: clickable.tagName,
+                  debugRows
                 };
               }
             }
+
+            // Also check if the row itself is clickable
+            const rowOnclick = row.getAttribute('onclick');
+            if (rowOnclick && !rowOnclick.includes('void')) {
+              return {
+                found: true,
+                href: rowOnclick,
+                text: text.substring(0, 200),
+                type: 'TR',
+                isOnclick: true,
+                debugRows
+              };
+            }
           }
-          return { found: false };
+
+          return { found: false, debugRows };
         });
+
+        // Log debug information about first few rows
+        if (resultRowClick.debugRows && resultRowClick.debugRows.length > 0) {
+          this.log(`🔍 First 10 rows analysis:`);
+          resultRowClick.debugRows.forEach(row => {
+            this.log(`  Row ${row.index}: len=${row.textLength}, links=${row.hasLinks}, buttons=${row.hasButtons}, onclick=${row.hasOnclick}`);
+            if (row.textPreview) {
+              this.log(`    Preview: ${row.textPreview}`);
+            }
+          });
+        }
 
         if (resultRowClick.found) {
           this.log(`✅ Found result row with link: ${resultRowClick.text}`);
