@@ -714,6 +714,19 @@ class DallasCountyTexasScraper extends DeedScraper {
         // Submit search - look for submit button or press Enter
         this.log('🔍 Submitting search...');
 
+        // Debug: Check what buttons are available
+        const availableButtons = await this.page.evaluate(() => {
+          const buttons = Array.from(document.querySelectorAll('button, input[type="submit"], input[type="button"]'));
+          return buttons.map(b => ({
+            type: b.type,
+            text: b.textContent?.trim() || b.value,
+            id: b.id,
+            className: b.className,
+            onclick: b.getAttribute('onclick')
+          }));
+        });
+        this.log(`🔍 Available buttons: ${JSON.stringify(availableButtons, null, 2)}`);
+
         // Try to find and click submit button first
         const submitButtonSelectors = [
           'button[type="submit"]',
@@ -731,16 +744,18 @@ class DallasCountyTexasScraper extends DeedScraper {
               this.log(`✅ Found submit button: ${selector}`);
               await button.click();
               submitButtonClicked = true;
+              this.log(`✅ Clicked submit button`);
               break;
             }
           } catch (e) {
-            // Continue trying
+            this.log(`⚠️ Error clicking ${selector}: ${e.message}`);
           }
         }
 
         if (!submitButtonClicked) {
           this.log('⚠️ No submit button found, pressing Enter');
           await this.page.keyboard.press('Enter');
+          this.log('✅ Pressed Enter key');
         }
 
       } else if (searchData.bookNumber && searchData.pageNumber) {
@@ -820,10 +835,18 @@ class DallasCountyTexasScraper extends DeedScraper {
 
       // Wait for results
       this.log('⏳ Waiting for deed search results...');
+      this.log(`📍 Current URL before wait: ${this.page.url()}`);
+
+      // Wait for navigation with better error handling
+      try {
+        await this.page.waitForNavigation({ waitUntil: 'networkidle2', timeout: 30000 });
+        this.log(`✅ Navigation completed to: ${this.page.url()}`);
+      } catch (navError) {
+        this.log(`⚠️ Navigation timeout: ${navError.message}`);
+        this.log(`📍 Current URL after timeout: ${this.page.url()}`);
+      }
+
       await this.randomWait(3000, 5000);
-      await this.page.waitForNavigation({ waitUntil: 'networkidle2', timeout: 30000 }).catch(() => {
-        this.log('⚠️ Navigation timeout, checking if results loaded...');
-      });
 
       // Log current page info for debugging
       const pageInfo = await this.page.evaluate(() => ({
@@ -956,22 +979,34 @@ class DallasCountyTexasScraper extends DeedScraper {
 
       for (const selector of deedLinkSelectors) {
         try {
+          this.log(`🔍 Trying selector: ${selector}`);
           await this.page.waitForSelector(selector, { timeout: 5000 });
+          this.log(`✅ Selector found: ${selector}`);
 
-          // Get the actual href before committing to this link
-          deedLinkHref = await this.page.evaluate((sel) => {
+          // Get the actual href and text before committing to this link
+          const linkInfo = await this.page.evaluate((sel) => {
             const link = document.querySelector(sel);
-            return link ? link.href : null;
+            if (!link) return null;
+            return {
+              href: link.href,
+              text: link.textContent?.trim(),
+              tagName: link.tagName
+            };
           }, selector);
 
-          if (deedLinkHref) {
+          if (linkInfo && linkInfo.href) {
             deedLink = selector;
+            deedLinkHref = linkInfo.href;
             this.log(`✅ Found deed link: ${selector}`);
-            this.log(`🔗 Link href: ${deedLinkHref}`);
+            this.log(`🔗 Link href: ${linkInfo.href}`);
+            this.log(`📝 Link text: "${linkInfo.text}"`);
+            this.log(`🏷️ Tag: ${linkInfo.tagName}`);
             break;
+          } else {
+            this.log(`⚠️ Link found but no href: ${selector}`);
           }
         } catch (e) {
-          this.log(`⚠️ Link ${selector} not found`);
+          this.log(`⚠️ Link ${selector} not found: ${e.message}`);
         }
       }
 
@@ -1154,14 +1189,20 @@ class DallasCountyTexasScraper extends DeedScraper {
       });
 
       // Click on deed link
+      this.log(`🖱️ Clicking on deed link: ${deedLink}`);
       await this.page.click(deedLink);
       this.log('✅ Clicked on deed link');
 
       // Wait for PDF to load/download
+      this.log('⏳ Waiting for PDF to load (5-8 seconds)...');
       await this.randomWait(5000, 8000);
 
       if (!pdfBuffer) {
         this.log('⚠️ PDF not intercepted, trying alternative download method...');
+
+        // Log current page URL to see where we are
+        const currentUrl = this.page.url();
+        this.log(`📍 Current page URL: ${currentUrl}`);
 
         // Try to get PDF URL from current page
         const pdfUrl = await this.page.evaluate(() => {
