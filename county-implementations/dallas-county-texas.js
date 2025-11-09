@@ -670,65 +670,132 @@ class DallasCountyTexasScraper extends DeedScraper {
         await this.page.screenshot({ path: searchPageScreenshot, fullPage: true });
         this.log(`📸 Search page screenshot: ${searchPageScreenshot}`);
 
-        // Log all input fields on the page
+        // Log all input fields on the page with their context
         const allInputs = await this.page.evaluate(() => {
-          return Array.from(document.querySelectorAll('input, select, textarea')).map(input => ({
-            type: input.type,
-            name: input.name,
-            id: input.id,
-            placeholder: input.placeholder,
-            value: input.value,
-            tagName: input.tagName
-          }));
+          return Array.from(document.querySelectorAll('input, select, textarea')).map((input, index) => {
+            // Get parent element text to understand context
+            let parentText = '';
+            let parent = input.parentElement;
+            while (parent && !parentText && parent !== document.body) {
+              const text = Array.from(parent.childNodes)
+                .filter(n => n.nodeType === Node.TEXT_NODE)
+                .map(n => n.textContent.trim())
+                .join(' ');
+              if (text) parentText = text;
+              parent = parent.parentElement;
+            }
+
+            // Get preceding label or text
+            const label = input.labels?.[0]?.textContent?.trim() ||
+                         input.previousElementSibling?.textContent?.trim() ||
+                         parentText;
+
+            return {
+              index,
+              type: input.type,
+              name: input.name,
+              id: input.id,
+              placeholder: input.placeholder,
+              value: input.value,
+              tagName: input.tagName,
+              label: label,
+              class: input.className
+            };
+          });
         });
         this.log(`📝 All form inputs on page: ${JSON.stringify(allInputs, null, 2)}`);
 
-        // Find search input - be more specific about instrument/document number fields
-        const searchInputSelectors = [
-          'input[name*="instrumentNumber"]',
-          'input[id*="instrumentNumber"]',
-          'input[name*="instrument"]',
-          'input[id*="instrument"]',
-          'input[name*="docNumber"]',
-          'input[id*="docNumber"]',
-          'input[name*="documentNumber"]',
-          'input[id*="documentNumber"]',
-          'input[placeholder*="instrument"]',
-          'input[placeholder*="document"]',
-          'input[name*="query"]',
-          'input[id*="query"]',
-          'input[type="search"]',
-          'input[type="text"]'  // Fallback - least specific
-        ];
+        // Find the search input that's to the RIGHT of "Property Records" field
+        // This means we need to find the input that comes AFTER the Property Records input in the DOM
+        const propertyRecordsInput = await this.page.evaluate(() => {
+          // Get all text inputs on the page
+          const allInputs = Array.from(document.querySelectorAll('input[type="text"], input[type="search"], input:not([type="hidden"]):not([type="date"]):not([type="submit"]):not([type="button"])'));
+
+          // Look for an input that has "Property Records" as label/preceding text
+          // Then find the NEXT input after it
+          for (let i = 0; i < allInputs.length - 1; i++) {
+            const input = allInputs[i];
+            const nextInput = allInputs[i + 1];
+
+            // Check if this input or its container has "Property Records" text
+            let container = input.parentElement;
+            let hasPropertyRecordsLabel = false;
+
+            while (container && container !== document.body) {
+              const text = container.textContent?.toLowerCase() || '';
+              const immediateText = Array.from(container.childNodes)
+                .filter(n => n.nodeType === Node.TEXT_NODE)
+                .map(n => n.textContent.trim().toLowerCase())
+                .join(' ');
+
+              if (immediateText.includes('property records') ||
+                  container.querySelector('label, span, div')?.textContent?.toLowerCase().includes('property records')) {
+                hasPropertyRecordsLabel = true;
+                break;
+              }
+              container = container.parentElement;
+            }
+
+            if (hasPropertyRecordsLabel) {
+              // The NEXT input is the one to the right of Property Records
+              return {
+                found: true,
+                selector: nextInput.id ? `#${nextInput.id}` : nextInput.name ? `input[name="${nextInput.name}"]` : `input[type="${nextInput.type}"]:nth-of-type(${i + 2})`,
+                id: nextInput.id,
+                name: nextInput.name,
+                placeholder: nextInput.placeholder,
+                className: nextInput.className,
+                context: 'Input to the right of Property Records field'
+              };
+            }
+          }
+
+          // Alternative approach: find all inputs and skip the first one (which is likely the date field)
+          // The second text input is likely the Property Records search field
+          const textInputs = allInputs.filter(input =>
+            input.type === 'text' || input.type === 'search' || !input.type
+          );
+
+          if (textInputs.length >= 2) {
+            // Skip first input (likely date), use second one
+            const targetInput = textInputs[1];
+            return {
+              found: true,
+              selector: targetInput.id ? `#${targetInput.id}` : targetInput.name ? `input[name="${targetInput.name}"]` : null,
+              id: targetInput.id,
+              name: targetInput.name,
+              placeholder: targetInput.placeholder,
+              className: targetInput.className,
+              context: 'Second text input on page (skipping first which is likely date field)'
+            };
+          }
+
+          return { found: false };
+        });
 
         let searchInput = null;
         let searchInputInfo = null;
 
-        for (const selector of searchInputSelectors) {
-          try {
-            await this.page.waitForSelector(selector, { timeout: 3000 });
+        if (propertyRecordsInput.found) {
+          this.log(`✅ Found Property Records search input: ${propertyRecordsInput.selector}`);
+          this.log(`   Input details: ${JSON.stringify(propertyRecordsInput)}`);
+          searchInput = propertyRecordsInput.selector;
+          searchInputInfo = propertyRecordsInput;
+        } else {
+          this.log('⚠️ Could not find input near "Property Records" text, trying other methods...');
 
-            // Get info about this input
-            searchInputInfo = await this.page.evaluate((sel) => {
-              const input = document.querySelector(sel);
-              if (!input) return null;
-              return {
-                selector: sel,
-                name: input.name,
-                id: input.id,
-                placeholder: input.placeholder,
-                type: input.type
-              };
-            }, selector);
+          // Fallback: use the input fields list and skip date inputs
+          const nonDateInput = allInputs.find(input =>
+            input.type === 'text' &&
+            !input.name?.toLowerCase().includes('date') &&
+            !input.id?.toLowerCase().includes('date') &&
+            !input.label?.toLowerCase().includes('date')
+          );
 
-            if (searchInputInfo) {
-              searchInput = selector;
-              this.log(`✅ Found search input: ${selector}`);
-              this.log(`   Input details: ${JSON.stringify(searchInputInfo)}`);
-              break;
-            }
-          } catch (e) {
-            this.log(`⚠️ Selector ${selector} not found`);
+          if (nonDateInput) {
+            searchInput = nonDateInput.id ? `#${nonDateInput.id}` : `input[name="${nonDateInput.name}"]`;
+            this.log(`✅ Found non-date text input (index ${nonDateInput.index}): ${searchInput}`);
+            this.log(`   Input details: ${JSON.stringify(nonDateInput)}`);
           }
         }
 
