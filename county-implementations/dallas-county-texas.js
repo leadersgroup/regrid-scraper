@@ -841,6 +841,21 @@ class DallasCountyTexasScraper extends DeedScraper {
         this.log(`   This suggests the search may not have filtered by instrument number`);
       }
 
+      // Check if we got exactly 1 result (as expected for instrument number search)
+      const resultCount = await this.page.evaluate(() => {
+        const resultText = document.body.innerText;
+        const match = resultText.match(/(\d+)-(\d+)\s+of\s+(\d+)\s+results?/i);
+        return match ? parseInt(match[3]) : null;
+      });
+
+      if (resultCount !== null) {
+        this.log(`📊 Search returned ${resultCount} result(s)`);
+        if (resultCount !== 1) {
+          this.log(`⚠️ WARNING: Expected 1 result for instrument number ${searchData.instrumentNumber}, got ${resultCount}`);
+          this.log(`   The search may not have been submitted correctly`);
+        }
+      }
+
       // Wait for results to load (may require additional JavaScript execution)
       this.log('⏳ Waiting for results table to appear...');
       await this.randomWait(2000, 4000);
@@ -924,14 +939,21 @@ class DallasCountyTexasScraper extends DeedScraper {
         this.log(`📄 Main content HTML (first 500 chars): ${resultFound.mainHTML.substring(0, 500)}`);
       }
 
+      // For Dallas County, look for the document icon/button in the result row
+      // Based on the search results page, there's typically an icon in the first column
       const deedLinkSelectors = [
-        'a[href*=".pdf"]',
+        'a[href*=".pdf"]',                    // Direct PDF link
+        'table tbody tr td:first-child a',   // Link in first column (document icon)
+        'table tbody tr td:first-child button', // Button in first column
+        'table tbody tr button',              // Any button in result row
+        'table tbody tr a[title*="view"]',    // Link with "view" in title
+        'table tbody tr a[title*="View"]',
         'a[href*="document"]',
         'a[href*="view"]',
         'a[href*="View"]',
         'a[href*="Document"]',
         'a[href*="Download"]',
-        'table tbody tr a',
+        'table tbody tr a',                   // Any link in table row
         'table a',
         '.result-row a',
         '.search-results a',
