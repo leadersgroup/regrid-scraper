@@ -608,45 +608,14 @@ class DallasCountyTexasScraper extends DeedScraper {
     this.log(`📥 Downloading deed from Dallas County Public Search...`);
 
     try {
-      // Navigate to public search page - go directly to Advanced Search
-      this.log('📍 Loading Dallas County Public Search (Advanced Search)...');
+      // Navigate to public search page
+      this.log('📍 Loading Dallas County Public Search...');
       await this.page.goto('https://dallas.tx.publicsearch.us/', {
         waitUntil: 'networkidle2',
         timeout: 60000
       });
 
       await this.randomWait(2000, 3000);
-
-      // Click on "Advanced Search" tab to access instrument number search
-      this.log('🔍 Clicking Advanced Search tab...');
-      const advancedSearchSelectors = [
-        'a:has-text("Advanced Search")',
-        'a[href*="advanced"]',
-        'button:has-text("Advanced Search")',
-        '[role="tab"]:has-text("Advanced")'
-      ];
-
-      let advancedTabClicked = false;
-      for (const selector of advancedSearchSelectors) {
-        try {
-          const element = await this.page.$(selector);
-          if (element) {
-            await element.click();
-            this.log(`✅ Clicked Advanced Search: ${selector}`);
-            advancedTabClicked = true;
-            await this.randomWait(1000, 2000);
-            break;
-          }
-        } catch (e) {
-          this.log(`⚠️ Advanced Search selector ${selector} not found`);
-        }
-      }
-
-      if (!advancedTabClicked) {
-        this.log('⚠️ Could not find Advanced Search tab, will try Quick Search');
-      }
-
-      await this.randomWait(1000, 2000);
 
       // Determine search method: instrument number or advanced search (book/page)
       if (searchData.instrumentNumber) {
