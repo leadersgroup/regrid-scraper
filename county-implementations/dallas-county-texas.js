@@ -759,14 +759,26 @@ class DallasCountyTexasScraper extends DeedScraper {
           if (textInputs.length >= 2) {
             // Skip first input (likely date), use second one
             const targetInput = textInputs[1];
+
+            // Build a better selector
+            let selector = null;
+            if (targetInput.id) {
+              selector = `#${targetInput.id}`;
+            } else if (targetInput.name) {
+              selector = `input[name="${targetInput.name}"]`;
+            } else if (targetInput.className) {
+              selector = `input.${targetInput.className.split(' ').join('.')}`;
+            }
+
             return {
               found: true,
-              selector: targetInput.id ? `#${targetInput.id}` : targetInput.name ? `input[name="${targetInput.name}"]` : null,
+              selector: selector,
               id: targetInput.id,
               name: targetInput.name,
               placeholder: targetInput.placeholder,
               className: targetInput.className,
-              context: 'Second text input on page (skipping first which is likely date field)'
+              context: 'Second text input on page (skipping first which is likely date field)',
+              inputIndex: 1  // Return the index so we can use it as fallback
             };
           }
 
@@ -799,26 +811,43 @@ class DallasCountyTexasScraper extends DeedScraper {
           }
         }
 
-        if (!searchInput) {
+        // If searchInput is null but we have an inputIndex, use index-based selection
+        if (!searchInput && searchInputInfo && searchInputInfo.inputIndex !== undefined) {
+          this.log(`⚠️ Using direct index selection (index: ${searchInputInfo.inputIndex})`);
+
+          // Clear and enter value using index
+          await this.page.evaluate((index, value) => {
+            const allInputs = Array.from(document.querySelectorAll('input[type="text"], input[type="search"], input:not([type="hidden"]):not([type="date"]):not([type="submit"]):not([type="button"])'));
+            const textInputs = allInputs.filter(input => input.type === 'text' || input.type === 'search' || !input.type);
+            const targetInput = textInputs[index];
+            if (targetInput) {
+              targetInput.value = '';
+              targetInput.value = value;
+              targetInput.focus();
+            }
+          }, searchInputInfo.inputIndex, searchData.instrumentNumber);
+
+          this.log(`✅ Entered instrument number using index: ${searchData.instrumentNumber}`);
+        } else if (searchInput) {
+          // Clear any existing value first
+          await this.page.evaluate((sel) => {
+            const input = document.querySelector(sel);
+            if (input) input.value = '';
+          }, searchInput);
+
+          // Enter instrument number (without INT prefix)
+          await this.page.type(searchInput, searchData.instrumentNumber, { delay: 100 });
+          this.log(`✅ Entered instrument number: ${searchData.instrumentNumber}`);
+
+          // Verify the value was entered
+          const enteredValue = await this.page.evaluate((sel) => {
+            const input = document.querySelector(sel);
+            return input ? input.value : null;
+          }, searchInput);
+          this.log(`✅ Verified input value: ${enteredValue}`);
+        } else {
           throw new Error('Could not find search input on public search page');
         }
-
-        // Clear any existing value first
-        await this.page.evaluate((sel) => {
-          const input = document.querySelector(sel);
-          if (input) input.value = '';
-        }, searchInput);
-
-        // Enter instrument number (without INT prefix)
-        await this.page.type(searchInput, searchData.instrumentNumber, { delay: 100 });
-        this.log(`✅ Entered instrument number: ${searchData.instrumentNumber}`);
-
-        // Verify the value was entered
-        const enteredValue = await this.page.evaluate((sel) => {
-          const input = document.querySelector(sel);
-          return input ? input.value : null;
-        }, searchInput);
-        this.log(`✅ Verified input value: ${enteredValue}`);
 
         await this.randomWait(1000, 2000);
 
