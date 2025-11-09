@@ -939,26 +939,15 @@ class DallasCountyTexasScraper extends DeedScraper {
         this.log(`📄 Main content HTML (first 500 chars): ${resultFound.mainHTML.substring(0, 500)}`);
       }
 
-      // For Dallas County, look for the document icon/button in the result row
-      // Based on the search results page, there's typically an icon in the first column
+      // For Dallas County, click on the DOC NUMBER in the results table
+      // The document number is clickable and leads to the document detail/view page
+      this.log(`🔍 Looking for clickable document number: ${searchData.instrumentNumber}`);
+
       const deedLinkSelectors = [
-        'a[href*=".pdf"]',                    // Direct PDF link
-        'table tbody tr td:first-child a',   // Link in first column (document icon)
-        'table tbody tr td:first-child button', // Button in first column
-        'table tbody tr button',              // Any button in result row
-        'table tbody tr a[title*="view"]',    // Link with "view" in title
-        'table tbody tr a[title*="View"]',
-        'a[href*="document"]',
-        'a[href*="view"]',
-        'a[href*="View"]',
-        'a[href*="Document"]',
-        'a[href*="Download"]',
-        'table tbody tr a',                   // Any link in table row
+        `a:has-text("${searchData.instrumentNumber}")`,  // Link containing the exact instrument number
+        'a[href*=".pdf"]',                               // Direct PDF link
+        'table tbody tr a',                              // Any link in table row
         'table a',
-        '.result-row a',
-        '.search-results a',
-        'tr a',
-        '[class*="result"] a',
         'tbody a'
       ];
 
