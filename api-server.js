@@ -37,6 +37,7 @@ const BrowardCountyFloridaScraper = require('./county-implementations/broward-co
 const ShelbyCountyTennesseeScraper = require('./county-implementations/shelby-county-tennessee');
 const HarrisCountyTexasScraper = require('./county-implementations/harris-county-texas');
 const TarrantCountyTexasScraper = require('./county-implementations/tarrant-county-texas');
+const DallasCountyTexasScraper = require('./county-implementations/dallas-county-texas');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -227,6 +228,19 @@ app.get('/api/counties', (req, res) => {
           'Full PDF download'
         ],
         cost: 'Free (no CAPTCHA)'
+      },
+      {
+        name: 'Dallas County',
+        state: 'TX',
+        stateCode: 'Texas',
+        features: [
+          'Dallas CAD property search',
+          'Legal description extraction',
+          'Instrument number detection',
+          'Book/Page support',
+          'Full PDF download'
+        ],
+        cost: 'Free (no CAPTCHA)'
       }
     ]
   });
@@ -250,7 +264,10 @@ function normalizeCountyName(county) {
     'orange': 'Orange',
     'hillsborough': 'Hillsborough',
     'broward': 'Broward',
-    'shelby': 'Shelby'
+    'shelby': 'Shelby',
+    'harris': 'Harris',
+    'tarrant': 'Tarrant',
+    'dallas': 'Dallas'
   };
 
   return countyMap[normalized] || county;
@@ -300,6 +317,8 @@ async function processDeedDownload(address, county, state, options = {}) {
     scraper = new HarrisCountyTexasScraper(scraperOptions);
   } else if (detectedCounty === 'Tarrant' && detectedState === 'TX') {
     scraper = new TarrantCountyTexasScraper(scraperOptions);
+  } else if (detectedCounty === 'Dallas' && detectedState === 'TX') {
+    scraper = new DallasCountyTexasScraper(scraperOptions);
   } else {
     throw new Error(`County "${detectedCounty}, ${detectedState}" is not yet supported`);
   }

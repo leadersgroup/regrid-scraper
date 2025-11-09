@@ -157,6 +157,8 @@ app.post('/api/deed', async (req, res) => {
     const detectedCounty = county || 'Orange';
     const detectedState = state || 'FL';
 
+    console.log(`🔍 Routing to: ${detectedCounty} County, ${detectedState}`);
+
     // Initialize county-specific scraper
     if (detectedCounty === 'Orange' && detectedState === 'FL') {
       const OrangeCountyFloridaScraper = require('./county-implementations/orange-county-florida');
@@ -201,13 +203,22 @@ app.post('/api/deed', async (req, res) => {
         verbose: true
       });
     } else {
-      // Fallback to base DeedScraper for unsupported counties
-      console.log(`⚠️  Using base DeedScraper for ${detectedCounty}, ${detectedState}`);
-      const DeedScraper = require('./deed-scraper');
-      scraper = new DeedScraper({
-        headless: true,
-        timeout: 60000,
-        verbose: true
+      // County not supported - return error
+      console.log(`❌ County not supported: ${detectedCounty}, ${detectedState}`);
+      return res.status(400).json({
+        error: 'County not supported',
+        message: `${detectedCounty} County, ${detectedState} is not currently supported`,
+        supportedCounties: [
+          'Orange County, FL',
+          'Hillsborough County, FL',
+          'Duval County, FL',
+          'Harris County, TX',
+          'Tarrant County, TX',
+          'Dallas County, TX'
+        ],
+        receivedCounty: detectedCounty,
+        receivedState: detectedState,
+        timestamp: new Date().toISOString()
       });
     }
 
@@ -261,6 +272,8 @@ app.post('/api/getPriorDeed', async (req, res) => {
     const detectedCounty = county || 'Orange';
     const detectedState = state || 'FL';
 
+    console.log(`🔍 Routing to: ${detectedCounty} County, ${detectedState}`);
+
     // Initialize county-specific scraper
     if (detectedCounty === 'Orange' && detectedState === 'FL') {
       const OrangeCountyFloridaScraper = require('./county-implementations/orange-county-florida');
@@ -305,13 +318,22 @@ app.post('/api/getPriorDeed', async (req, res) => {
         verbose: true
       });
     } else {
-      // Fallback to base DeedScraper for unsupported counties
-      console.log(`⚠️  Using base DeedScraper for ${detectedCounty}, ${detectedState}`);
-      const DeedScraper = require('./deed-scraper');
-      scraper = new DeedScraper({
-        headless: true,
-        timeout: 60000,
-        verbose: true
+      // County not supported - return error
+      console.log(`❌ County not supported: ${detectedCounty}, ${detectedState}`);
+      return res.status(400).json({
+        error: 'County not supported',
+        message: `${detectedCounty} County, ${detectedState} is not currently supported`,
+        supportedCounties: [
+          'Orange County, FL',
+          'Hillsborough County, FL',
+          'Duval County, FL',
+          'Harris County, TX',
+          'Tarrant County, TX',
+          'Dallas County, TX'
+        ],
+        receivedCounty: detectedCounty,
+        receivedState: detectedState,
+        timestamp: new Date().toISOString()
       });
     }
 
