@@ -54,7 +54,7 @@ class BexarCountyTexasScraper extends DeedScraper {
     this.browser = await puppeteer.launch({
       headless: this.headless,
       ...(executablePath && { executablePath }),
-      protocolTimeout: 300000,
+      protocolTimeout: 600000, // Increased to 10 minutes for slower operations
       args: [
         '--no-sandbox',
         '--disable-setuid-sandbox',
@@ -141,6 +141,13 @@ class BexarCountyTexasScraper extends DeedScraper {
     this.log(`🔍 Searching BCAD for: ${address}`);
 
     try {
+      // Set up dialog/alert handler before navigating
+      this.page.on('dialog', async dialog => {
+        this.log(`⚠️ Dialog detected: ${dialog.type()} - "${dialog.message()}"`);
+        await dialog.accept();
+        this.log('✅ Dialog dismissed');
+      });
+
       // Navigate to BCAD property search
       this.log('📍 Loading BCAD property search...');
       await this.page.goto('https://esearch.bcad.org/', {
@@ -149,6 +156,136 @@ class BexarCountyTexasScraper extends DeedScraper {
       });
 
       await this.randomWait(3000, 5000);
+
+      // Check for reCAPTCHA and solve if present
+      this.log('🔍 Checking for reCAPTCHA...');
+      const hasCaptcha = await this.page.evaluate(() => {
+        // Check for reCAPTCHA iframe or challenge
+        const recaptchaIframe = document.querySelector('iframe[src*="recaptcha"], iframe[src*="hcaptcha"]');
+        const accessDenied = document.body.innerText.includes('Access denied') ||
+                            document.body.innerText.includes('reCAPTCHA validation failed');
+        return !!(recaptchaIframe || accessDenied);
+      });
+
+      if (hasCaptcha) {
+        this.log('⚠️ reCAPTCHA detected, attempting to solve...');
+
+        // Get site key
+        const siteKey = await this.page.evaluate(() => {
+          // Try to find site key in various places
+          const iframe = document.querySelector('iframe[src*="recaptcha"]');
+          if (iframe) {
+            const src = iframe.getAttribute('src');
+            const match = src.match(/[?&]k=([^&]+)/);
+            if (match) return match[1];
+          }
+
+          // Look in scripts
+          const scripts = Array.from(document.querySelectorAll('script'));
+          for (const script of scripts) {
+            const text = script.textContent || '';
+            const match = text.match(/sitekey['"]?\s*[:=]\s*['"]([^'"]+)['"]/i);
+            if (match) return match[1];
+          }
+
+          return null;
+        });
+
+        if (siteKey) {
+          this.log(`🔑 Found site key: ${siteKey.substring(0, 20)}...`);
+
+          // Use parent class's CAPTCHA solver
+          try {
+            const captchaToken = await this.solveCaptchaManually(siteKey, this.page.url());
+
+            // Inject the CAPTCHA solution
+            await this.page.evaluate((token) => {
+              const responseElement = document.getElementById('g-recaptcha-response');
+              if (responseElement) {
+                responseElement.innerHTML = token;
+              }
+
+              // Also set in hidden textarea if exists
+              const textareas = document.querySelectorAll('textarea[name="g-recaptcha-response"]');
+              textareas.forEach(ta => ta.value = token);
+
+              // Trigger callback if available
+              if (typeof ___grecaptcha_cfg !== 'undefined') {
+                const clientIds = Object.keys(___grecaptcha_cfg.clients || {});
+                if (clientIds.length > 0) {
+                  const recaptchaId = clientIds[0];
+                  const callback = ___grecaptcha_cfg.clients[recaptchaId]?.callback;
+                  if (callback) {
+                    callback(token);
+                  }
+                }
+              }
+            }, captchaToken);
+
+            this.log('✅ CAPTCHA solution injected');
+            await this.randomWait(2000, 3000);
+
+            // Reload the page or submit to verify CAPTCHA
+            this.log('🔄 Reloading page to apply CAPTCHA solution...');
+            await this.page.reload({ waitUntil: 'networkidle2' });
+            await this.randomWait(3000, 5000);
+          } catch (captchaError) {
+            this.log(`❌ CAPTCHA solving failed: ${captchaError.message}`);
+            throw new Error('CAPTCHA solving failed. Please check TWOCAPTCHA_TOKEN environment variable.');
+          }
+        } else {
+          this.log('⚠️ Could not find reCAPTCHA site key');
+        }
+      } else {
+        this.log('✅ No CAPTCHA detected');
+      }
+
+      await this.randomWait(2000, 3000);
+
+      // Check for and close any popups/modals
+      const popupClosed = await this.page.evaluate(() => {
+        // Look for common popup close buttons
+        const closeButtons = Array.from(document.querySelectorAll('button, a, [role="button"]'));
+        for (const btn of closeButtons) {
+          const text = (btn.textContent || '').toLowerCase();
+          const ariaLabel = (btn.getAttribute('aria-label') || '').toLowerCase();
+
+          if (text.includes('close') || text.includes('×') || text === 'x' ||
+              ariaLabel.includes('close') || btn.className.includes('close')) {
+            btn.click();
+            return { closed: true, method: 'close-button' };
+          }
+        }
+
+        // Look for modal overlays to click away
+        const modals = document.querySelectorAll('[class*="modal"], [class*="popup"], [class*="overlay"]');
+        for (const modal of modals) {
+          if (modal.style.display !== 'none') {
+            // Try to find close button within modal
+            const modalClose = modal.querySelector('[class*="close"], button');
+            if (modalClose) {
+              modalClose.click();
+              return { closed: true, method: 'modal-close' };
+            }
+          }
+        }
+
+        return { closed: false };
+      });
+
+      if (popupClosed.closed) {
+        this.log(`✅ Closed popup (${popupClosed.method})`);
+        await this.randomWait(1000, 2000);
+      }
+
+      // Add user interaction to avoid "Please interact with the page" alert
+      this.log('🖱️ Adding user interaction...');
+      await this.page.mouse.move(100, 100);
+      await this.randomWait(500, 1000);
+      await this.page.mouse.move(200, 200);
+      await this.randomWait(500, 1000);
+      await this.page.click('body');
+      await this.randomWait(1000, 2000);
 
       // Step 1: Switch to "By Address" search type
       this.log('📝 Switching to "By Address" search...');

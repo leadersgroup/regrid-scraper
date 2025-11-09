@@ -252,9 +252,10 @@ app.get('/api/counties', (req, res) => {
           'Property Deed History extraction',
           'Doc number detection',
           'Public search integration',
+          'Automatic CAPTCHA solving',
           'Full PDF download'
         ],
-        cost: 'Free (no CAPTCHA)'
+        cost: '$0.001 per deed (with 2Captcha API)'
       }
     ]
   });
@@ -377,8 +378,8 @@ app.post('/api/getPriorDeed', async (req, res) => {
     const normalizedCounty = normalizeCountyName(county) || 'Orange';
     const normalizedState = (state || 'FL').toUpperCase();
 
-    // Check if 2Captcha API key is configured (only required for Orange County)
-    const countiesRequiringCaptcha = ['Orange'];
+    // Check if 2Captcha API key is configured (required for some counties)
+    const countiesRequiringCaptcha = ['Orange', 'Bexar'];
     if (countiesRequiringCaptcha.includes(normalizedCounty) && !process.env.TWOCAPTCHA_TOKEN) {
       return res.status(503).json({
         success: false,
