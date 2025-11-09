@@ -520,25 +520,50 @@ class TarrantCountyTexasScraper extends DeedScraper {
 
         await this.randomWait(1000, 2000);
 
-        // Click login button
+        // Click login button and wait for navigation
         const loginClicked = await publicSearchPage.evaluate(() => {
           const buttons = Array.from(document.querySelectorAll('button, input[type="submit"], input[type="button"], a'));
+
+          // Log all buttons for debugging
+          console.log('Looking for login button...');
+          buttons.forEach(btn => {
+            const text = (btn.textContent || btn.value || '').trim();
+            console.log(`Button: "${text}" (${btn.tagName})`);
+          });
 
           for (const button of buttons) {
             const text = (button.textContent || button.value || '').trim().toLowerCase();
 
             if (text.includes('login') || text.includes('sign in') || text === 'submit') {
+              console.log(`Clicking: "${text}"`);
               button.click();
-              return true;
+              return { clicked: true, buttonText: text };
             }
           }
 
-          return false;
+          // If no button found, try to submit the form directly
+          const form = document.querySelector('form');
+          if (form) {
+            console.log('No login button found, submitting form directly');
+            form.submit();
+            return { clicked: true, buttonText: 'form-submit' };
+          }
+
+          return { clicked: false };
         });
 
-        if (loginClicked) {
-          this.log('✅ Clicked login button');
-          await this.randomWait(5000, 7000);
+        if (loginClicked.clicked) {
+          this.log(`✅ Clicked login button: ${loginClicked.buttonText}`);
+
+          // Wait for navigation away from signin page
+          this.log('⏳ Waiting for login redirect...');
+          await publicSearchPage.waitForFunction(() => {
+            return !window.location.href.includes('/signin');
+          }, { timeout: 15000 }).catch(() => {
+            this.log('⚠️ Login redirect timeout, checking current URL...');
+          });
+
+          await this.randomWait(3000, 5000);
 
           // After login, we're back on the search results page
           // We need to click the deed row AGAIN to navigate to the document preview page
