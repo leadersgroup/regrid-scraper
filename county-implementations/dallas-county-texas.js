@@ -857,7 +857,62 @@ class DallasCountyTexasScraper extends DeedScraper {
       }
 
       if (!deedLink) {
-        throw new Error('Could not find deed document link in search results');
+        // Alternative: Look for result table rows that might need to be clicked first
+        this.log('⚠️ No direct PDF link found, trying to find result rows...');
+
+        const resultRowClick = await this.page.evaluate(() => {
+          // Look for table rows in results
+          const rows = Array.from(document.querySelectorAll('table tbody tr, tr'));
+
+          // Find a row that might contain our document
+          for (const row of rows) {
+            const text = row.textContent || '';
+            // Look for rows that contain relevant information (document type, dates, etc.)
+            if (text.length > 20 && text.length < 1000) {
+              const link = row.querySelector('a');
+              if (link && link.href && !link.href.includes('javascript:')) {
+                return {
+                  found: true,
+                  href: link.href,
+                  text: link.textContent?.trim()
+                };
+              }
+            }
+          }
+          return { found: false };
+        });
+
+        if (resultRowClick.found) {
+          this.log(`✅ Found result row with link: ${resultRowClick.text}`);
+          this.log(`🔗 Clicking: ${resultRowClick.href}`);
+
+          // Navigate to the detail page
+          await this.page.goto(resultRowClick.href, { waitUntil: 'networkidle2', timeout: 30000 });
+          await this.randomWait(2000, 3000);
+
+          // Now try to find the PDF link on the detail page
+          const detailPageInfo = await this.page.evaluate(() => ({
+            url: window.location.href,
+            title: document.title,
+            links: Array.from(document.querySelectorAll('a')).map(a => ({
+              href: a.href,
+              text: a.textContent?.trim()
+            })).filter(l => l.href.includes('.pdf') || l.text?.toLowerCase().includes('view') || l.text?.toLowerCase().includes('download'))
+          }));
+
+          this.log(`📍 Detail page: ${detailPageInfo.url}`);
+          this.log(`📄 PDF links found: ${JSON.stringify(detailPageInfo.links, null, 2)}`);
+
+          if (detailPageInfo.links.length > 0) {
+            // Found PDF link on detail page
+            deedLink = `a[href="${detailPageInfo.links[0].href}"]`;
+            this.log(`✅ Found PDF link on detail page: ${deedLink}`);
+          } else {
+            throw new Error('Could not find PDF link on detail page');
+          }
+        } else {
+          throw new Error('Could not find deed document link or result rows in search results');
+        }
       }
 
       // Set up CDP Fetch domain to intercept PDF
