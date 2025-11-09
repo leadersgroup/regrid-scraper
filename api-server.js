@@ -38,6 +38,7 @@ const ShelbyCountyTennesseeScraper = require('./county-implementations/shelby-co
 const HarrisCountyTexasScraper = require('./county-implementations/harris-county-texas');
 const TarrantCountyTexasScraper = require('./county-implementations/tarrant-county-texas');
 const DallasCountyTexasScraper = require('./county-implementations/dallas-county-texas');
+const BexarCountyTexasScraper = require('./county-implementations/bexar-county-texas');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -241,6 +242,19 @@ app.get('/api/counties', (req, res) => {
           'Full PDF download'
         ],
         cost: 'Free (no CAPTCHA)'
+      },
+      {
+        name: 'Bexar County',
+        state: 'TX',
+        stateCode: 'Texas',
+        features: [
+          'BCAD property search by address',
+          'Property Deed History extraction',
+          'Doc number detection',
+          'Public search integration',
+          'Full PDF download'
+        ],
+        cost: 'Free (no CAPTCHA)'
       }
     ]
   });
@@ -267,7 +281,8 @@ function normalizeCountyName(county) {
     'shelby': 'Shelby',
     'harris': 'Harris',
     'tarrant': 'Tarrant',
-    'dallas': 'Dallas'
+    'dallas': 'Dallas',
+    'bexar': 'Bexar'
   };
 
   return countyMap[normalized] || county;
@@ -319,6 +334,8 @@ async function processDeedDownload(address, county, state, options = {}) {
     scraper = new TarrantCountyTexasScraper(scraperOptions);
   } else if (detectedCounty === 'Dallas' && detectedState === 'TX') {
     scraper = new DallasCountyTexasScraper(scraperOptions);
+  } else if (detectedCounty === 'Bexar' && detectedState === 'TX') {
+    scraper = new BexarCountyTexasScraper(scraperOptions);
   } else {
     throw new Error(`County "${detectedCounty}, ${detectedState}" is not yet supported`);
   }
