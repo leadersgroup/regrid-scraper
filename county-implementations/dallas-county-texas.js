@@ -617,6 +617,50 @@ class DallasCountyTexasScraper extends DeedScraper {
 
       await this.randomWait(2000, 3000);
 
+      // Dismiss "Where to start" popup if it appears
+      this.log('🔍 Checking for "Where to start" popup...');
+      try {
+        // Common selectors for popup close buttons
+        const popupCloseSelectors = [
+          'button:has-text("Close")',
+          'button:has-text("Got it")',
+          'button:has-text("OK")',
+          'button:has-text("Dismiss")',
+          'button.close',
+          'button[aria-label="Close"]',
+          '[class*="close"]',
+          '[class*="dismiss"]',
+          '.modal button',
+          '.popup button'
+        ];
+
+        let popupClosed = false;
+        for (const selector of popupCloseSelectors) {
+          try {
+            const closeButton = await this.page.$(selector);
+            if (closeButton) {
+              this.log(`✅ Found popup close button: ${selector}`);
+              await closeButton.click();
+              popupClosed = true;
+              this.log(`✅ Closed popup`);
+              await this.randomWait(500, 1000);
+              break;
+            }
+          } catch (e) {
+            // Continue to next selector
+          }
+        }
+
+        if (!popupClosed) {
+          // Try pressing Escape key to close any modals
+          await this.page.keyboard.press('Escape');
+          this.log(`⚠️ No popup close button found, pressed Escape key`);
+          await this.randomWait(500, 1000);
+        }
+      } catch (error) {
+        this.log(`⚠️ Error handling popup: ${error.message}`);
+      }
+
       // Determine search method: instrument number or advanced search (book/page)
       if (searchData.instrumentNumber) {
         this.log(`🔍 Searching by instrument number: ${searchData.instrumentNumber}`);
