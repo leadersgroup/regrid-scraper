@@ -442,86 +442,96 @@ class DallasCountyTexasScraper extends DeedScraper {
         let legalDescText = null;
         let debugInfo = [];
 
-        // Strategy 1: Try to find by label "Legal Description" or similar
-        const allElements = Array.from(document.querySelectorAll('*'));
-        for (const el of allElements) {
-          const text = (el.textContent || '').trim();
+        // Filter out script tags, style tags, and navigation elements
+        const excludeSelectors = 'script, style, noscript, #header, #nav, .navigation, [class*="nav"]';
 
-          // Look for "Legal Description" label
-          if (text.includes('Legal Description') || text.includes('Legal Desc') || text.includes('LEGAL')) {
-            debugInfo.push(`Found label: "${text.substring(0, 100)}"`);
+        // Strategy 1: Direct search for INT or book/page patterns in table cells only
+        debugInfo.push('Strategy 1: Searching table cells for deed patterns...');
+        const tableCells = Array.from(document.querySelectorAll('table td')).filter(td => {
+          return !td.closest(excludeSelectors);
+        });
 
-            // Try to get value from next sibling
-            let valueEl = el.nextElementSibling || el.parentElement?.nextElementSibling;
-            if (valueEl) {
-              const valueText = valueEl.textContent?.trim();
-              debugInfo.push(`Next sibling text: "${valueText?.substring(0, 100)}"`);
-              if (valueText && valueText.length > 10) {
-                legalDescText = valueText;
-                debugInfo.push('Using next sibling as legal description');
-                break;
-              }
-            }
+        for (const cell of tableCells) {
+          const text = (cell.textContent || '').trim();
+          // Skip very short or very long texts (likely not legal desc)
+          if (text.length < 10 || text.length > 1000) continue;
 
-            // Try to get from parent's structure
-            const parent = el.parentElement;
-            if (parent) {
-              const siblingText = parent.textContent?.trim();
-              if (siblingText && siblingText !== text) {
-                debugInfo.push(`Parent text: "${siblingText?.substring(0, 100)}"`);
-              }
-            }
+          // Look for INT pattern or Vol/Page pattern
+          if (text.match(/INT\d{12,}/i) || text.match(/Vol\s*\d+.*?Page\s*\d+/i) ||
+              text.match(/Book\s*\d+.*?Page\s*\d+/i)) {
+            legalDescText = text;
+            debugInfo.push(`Found deed reference in table cell: "${text.substring(0, 150)}"`);
+            break;
           }
         }
 
-        // Strategy 2: Look for INT pattern or Vol/Page pattern anywhere
+        // Strategy 2: Look for specific label + value pattern in table rows
         if (!legalDescText) {
-          debugInfo.push('Searching for INT or Vol/Page patterns...');
-          const cells = Array.from(document.querySelectorAll('td, div, span, p'));
-          for (const cell of cells) {
-            const text = cell.textContent || '';
-            // Look for INT pattern or Vol/Page pattern
-            if (text.match(/INT\d+/) || text.match(/Vol\s*\d+.*Page\s*\d+/i) ||
-                text.match(/\d{12,}/) || text.match(/Book\s*\d+/i)) {
-              legalDescText = text.trim();
-              debugInfo.push(`Found pattern in: "${legalDescText.substring(0, 100)}"`);
-              break;
-            }
-          }
-        }
+          debugInfo.push('Strategy 2: Looking for Legal Description label in tables...');
+          const tables = Array.from(document.querySelectorAll('table')).filter(t => {
+            return !t.closest(excludeSelectors);
+          });
 
-        // Strategy 3: Look for multi-line legal description (common in Dallas CAD)
-        if (!legalDescText) {
-          debugInfo.push('Looking for multi-line legal description...');
-          const tables = Array.from(document.querySelectorAll('table'));
           for (const table of tables) {
             const rows = Array.from(table.querySelectorAll('tr'));
+
             for (let i = 0; i < rows.length; i++) {
-              const row = rows[i];
-              const headerCell = row.querySelector('th, td');
-              if (headerCell && (headerCell.textContent || '').includes('Legal')) {
-                // Legal description might be in next few rows
-                let descLines = [];
-                for (let j = i + 1; j < Math.min(i + 10, rows.length); j++) {
-                  const nextRow = rows[j];
-                  const cells = nextRow.querySelectorAll('td');
-                  if (cells.length > 0) {
-                    const cellText = Array.from(cells).map(c => c.textContent?.trim()).join(' ');
-                    if (cellText) {
-                      descLines.push(cellText);
-                      // Check if we found INT or book/page
-                      if (cellText.match(/INT\d+/) || cellText.match(/Vol\s*\d+.*Page\s*\d+/i)) {
-                        legalDescText = descLines.join('\n');
-                        debugInfo.push(`Found in table rows: "${legalDescText.substring(0, 100)}"`);
+              const cells = Array.from(rows[i].querySelectorAll('td, th'));
+
+              // Look for a cell containing "Legal"
+              for (let j = 0; j < cells.length; j++) {
+                const cellText = (cells[j].textContent || '').trim();
+
+                if (cellText.match(/Legal\s*(Description|Desc)/i) && cellText.length < 50) {
+                  debugInfo.push(`Found label in cell: "${cellText}"`);
+
+                  // Try next cell in same row
+                  if (j + 1 < cells.length) {
+                    const valueText = (cells[j + 1].textContent || '').trim();
+                    if (valueText && valueText.length > 10) {
+                      legalDescText = valueText;
+                      debugInfo.push(`Found value in next cell: "${valueText.substring(0, 150)}"`);
+                      break;
+                    }
+                  }
+
+                  // Try cells in next row
+                  if (i + 1 < rows.length) {
+                    const nextRowCells = Array.from(rows[i + 1].querySelectorAll('td'));
+                    if (nextRowCells.length > 0) {
+                      const nextRowText = nextRowCells.map(c => c.textContent?.trim()).join(' ');
+                      if (nextRowText && nextRowText.length > 10) {
+                        legalDescText = nextRowText;
+                        debugInfo.push(`Found value in next row: "${nextRowText.substring(0, 150)}"`);
                         break;
                       }
                     }
                   }
                 }
-                if (legalDescText) break;
               }
+
+              if (legalDescText) break;
             }
+
             if (legalDescText) break;
+          }
+        }
+
+        // Strategy 3: Search all visible text content for deed patterns (last resort)
+        if (!legalDescText) {
+          debugInfo.push('Strategy 3: Searching all page content...');
+          const bodyText = document.body.innerText;
+          const lines = bodyText.split('\n');
+
+          for (const line of lines) {
+            const trimmed = line.trim();
+            if (trimmed.length < 20 || trimmed.length > 500) continue;
+
+            if (trimmed.match(/INT\d{12,}/i) || trimmed.match(/Vol\s*\d+.*?Page\s*\d+/i)) {
+              legalDescText = trimmed;
+              debugInfo.push(`Found in page text: "${trimmed.substring(0, 150)}"`);
+              break;
+            }
           }
         }
 

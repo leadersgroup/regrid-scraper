@@ -457,6 +457,52 @@ class BexarCountyTexasScraper extends DeedScraper {
 
       await this.randomWait(1000, 2000);
 
+      // Add realistic user interactions before search button click
+      this.log('🖱️ Simulating realistic user behavior...');
+
+      // Move mouse naturally across the page
+      await this.page.mouse.move(150, 150);
+      await this.randomWait(300, 600);
+      await this.page.mouse.move(250, 200);
+      await this.randomWait(300, 600);
+
+      // Click on the street number input to simulate focus
+      await this.page.evaluate(() => {
+        const inputs = Array.from(document.querySelectorAll('input[type="text"], input[type="number"], input:not([type])'));
+        for (const input of inputs) {
+          const label = input.labels?.[0]?.textContent?.toLowerCase() || '';
+          const placeholder = input.placeholder?.toLowerCase() || '';
+          if (label.includes('number') || placeholder.includes('number')) {
+            input.focus();
+            input.click();
+            return;
+          }
+        }
+      });
+
+      await this.randomWait(500, 800);
+
+      // Click on the street name input
+      await this.page.evaluate(() => {
+        const inputs = Array.from(document.querySelectorAll('input[type="text"], input:not([type])'));
+        for (const input of inputs) {
+          const label = input.labels?.[0]?.textContent?.toLowerCase() || '';
+          const placeholder = input.placeholder?.toLowerCase() || '';
+          if ((label.includes('street') || placeholder.includes('street')) &&
+              !label.includes('number') && !placeholder.includes('number')) {
+            input.focus();
+            input.click();
+            return;
+          }
+        }
+      });
+
+      await this.randomWait(500, 800);
+
+      // Move mouse to where search button likely is
+      await this.page.mouse.move(300, 350);
+      await this.randomWait(400, 700);
+
       // Step 4: Submit search
       this.log('🔍 Submitting search...');
 
