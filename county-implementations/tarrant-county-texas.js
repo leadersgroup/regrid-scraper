@@ -547,22 +547,38 @@ class TarrantCountyTexasScraper extends DeedScraper {
 
         await this.randomWait(1000, 2000);
 
-        // Click login button and wait for navigation
+        // Click login/submit button (NOT the "Sign In" link, but the actual form submit button)
+        this.log('🔘 Looking for login submit button...');
         const loginClicked = await publicSearchPage.evaluate(() => {
-          const buttons = Array.from(document.querySelectorAll('button, input[type="submit"], input[type="button"], a'));
+          // Prioritize actual buttons and submit inputs over links
+          const buttons = Array.from(document.querySelectorAll('button, input[type="submit"]'));
+          const otherButtons = Array.from(document.querySelectorAll('input[type="button"]'));
 
           // Log all buttons for debugging
-          console.log('Looking for login button...');
+          console.log('Looking for login submit button...');
+          console.log(`Found ${buttons.length} button/submit elements`);
           buttons.forEach(btn => {
             const text = (btn.textContent || btn.value || '').trim();
-            console.log(`Button: "${text}" (${btn.tagName})`);
+            console.log(`Button: "${text}" (${btn.tagName}, type=${btn.type})`);
           });
 
+          // First, try to find actual button or submit input (not links)
           for (const button of buttons) {
             const text = (button.textContent || button.value || '').trim().toLowerCase();
 
-            if (text.includes('login') || text.includes('sign in') || text === 'submit') {
-              console.log(`Clicking: "${text}"`);
+            if (text.includes('login') || text.includes('submit') || text === 'sign in') {
+              console.log(`Clicking button: "${text}"`);
+              button.click();
+              return { clicked: true, buttonText: text };
+            }
+          }
+
+          // Try input[type="button"]
+          for (const button of otherButtons) {
+            const text = (button.textContent || button.value || '').trim().toLowerCase();
+
+            if (text.includes('login') || text.includes('submit') || text === 'sign in') {
+              console.log(`Clicking input button: "${text}"`);
               button.click();
               return { clicked: true, buttonText: text };
             }
