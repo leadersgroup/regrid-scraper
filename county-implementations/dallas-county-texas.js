@@ -735,15 +735,48 @@ class DallasCountyTexasScraper extends DeedScraper {
         this.log('⚠️ Navigation timeout, checking if results loaded...');
       });
 
+      // Log current page info for debugging
+      const pageInfo = await this.page.evaluate(() => ({
+        url: window.location.href,
+        title: document.title,
+        bodyText: document.body.innerText.substring(0, 500)
+      }));
+      this.log(`📍 Current page: ${pageInfo.url}`);
+      this.log(`📄 Page title: ${pageInfo.title}`);
+      this.log(`📝 Page preview: ${pageInfo.bodyText.substring(0, 200)}`);
+
       // Click on deed result to view document
       this.log('📄 Looking for deed document...');
 
+      // First, try to find and click on the result row/link
+      const resultFound = await this.page.evaluate(() => {
+        // Look for result rows that might contain the document
+        const links = Array.from(document.querySelectorAll('a'));
+        const tables = Array.from(document.querySelectorAll('table'));
+
+        return {
+          totalLinks: links.length,
+          linkHrefs: links.map(a => a.href).slice(0, 10),
+          linkTexts: links.map(a => a.textContent.trim()).slice(0, 10),
+          tableCount: tables.length
+        };
+      });
+
+      this.log(`🔍 Found ${resultFound.totalLinks} links on page`);
+      this.log(`🔗 Sample hrefs: ${resultFound.linkHrefs.join(', ')}`);
+      this.log(`📝 Sample texts: ${resultFound.linkTexts.join(', ')}`);
+
       const deedLinkSelectors = [
         'a[href*=".pdf"]',
-        'a:contains("View")',
-        'a:contains("Document")',
+        'a[href*="document"]',
+        'a[href*="view"]',
+        'a:has-text("View")',
+        'a:has-text("Document")',
+        'a:has-text("Download")',
         'table a',
-        '.result-row a'
+        '.result-row a',
+        '.search-results a',
+        'tr a'
       ];
 
       let deedLink = null;

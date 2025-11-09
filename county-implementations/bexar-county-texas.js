@@ -407,52 +407,59 @@ class BexarCountyTexasScraper extends DeedScraper {
 
       await this.randomWait(1000, 2000);
 
-      // Step 3: Get reCAPTCHA token before submitting (for invisible reCAPTCHA v3)
-      this.log('🔍 Getting reCAPTCHA token for form submission...');
+      // Step 3: Execute reCAPTCHA before submitting (the site uses the same key for form submission)
+      this.log('🔍 Executing reCAPTCHA for form submission...');
 
-      const siteKey = await this.page.evaluate(() => {
-        // Look for reCAPTCHA v3 site key
-        const scripts = Array.from(document.querySelectorAll('script'));
-        for (const script of scripts) {
-          const text = script.textContent || '';
-          const match = text.match(/sitekey['"]?\s*[:=]\s*['"]([^'"]+)['"]/i);
-          if (match) return match[1];
+      try {
+        // Use the same site key from the initial load
+        const siteKey = await this.page.evaluate(() => {
+          // Check if grecaptcha is loaded
+          if (typeof grecaptcha !== 'undefined' && grecaptcha.execute) {
+            // Try to get the site key from the page
+            const scripts = Array.from(document.querySelectorAll('script'));
+            for (const script of scripts) {
+              const src = script.src || '';
+              const match = src.match(/render=([^&]+)/);
+              if (match) return match[1];
+            }
+          }
+          return null;
+        });
+
+        if (siteKey) {
+          this.log(`🔑 Found reCAPTCHA site key for form: ${siteKey.substring(0, 20)}...`);
+
+          // Execute grecaptcha to get a new token
+          const formCaptchaToken = await this.page.evaluate(async (key) => {
+            if (typeof grecaptcha !== 'undefined' && grecaptcha.execute) {
+              try {
+                const token = await grecaptcha.execute(key, { action: 'submit' });
+                return token;
+              } catch (e) {
+                return null;
+              }
+            }
+            return null;
+          }, siteKey);
+
+          if (formCaptchaToken) {
+            this.log('✅ Got reCAPTCHA token from grecaptcha.execute');
+
+            // Inject into form
+            await this.page.evaluate((token) => {
+              const input = document.querySelector('input[name="recaptchaToken"]');
+              if (input) {
+                input.value = token;
+              }
+            }, formCaptchaToken);
+          } else {
+            this.log('⚠️ Could not execute grecaptcha, form may be blocked');
+          }
+        } else {
+          this.log('⚠️ reCAPTCHA not loaded on page');
         }
-
-        // Also check for grecaptcha.execute calls
-        for (const script of scripts) {
-          const text = script.textContent || '';
-          const match = text.match(/grecaptcha\.execute\(['"]([^'"]+)['"]/);
-          if (match) return match[1];
-        }
-
-        return null;
-      });
-
-      if (siteKey) {
-        this.log(`🔑 Found reCAPTCHA v3 site key: ${siteKey.substring(0, 20)}...`);
-
-        try {
-          // Get reCAPTCHA v3 token using 2Captcha
-          const captchaToken = await this.solveCaptchaManually(siteKey, this.page.url());
-
-          // Inject the token into the page
-          await this.page.evaluate((token) => {
-            // Store token in a global variable that the form can use
-            window.__recaptchaToken = token;
-
-            // Also try to inject into any hidden inputs
-            const inputs = document.querySelectorAll('input[name="recaptchaToken"], input[name="g-recaptcha-response"]');
-            inputs.forEach(input => input.value = token);
-          }, captchaToken);
-
-          this.log('✅ reCAPTCHA v3 token injected');
-        } catch (captchaError) {
-          this.log(`⚠️ Could not solve reCAPTCHA: ${captchaError.message}`);
-          this.log('⚠️ Continuing without reCAPTCHA token - may fail');
-        }
-      } else {
-        this.log('⚠️ Could not find reCAPTCHA v3 site key');
+      } catch (error) {
+        this.log(`⚠️ reCAPTCHA execution error: ${error.message}`);
       }
 
       await this.randomWait(1000, 2000);
@@ -546,6 +553,29 @@ class BexarCountyTexasScraper extends DeedScraper {
       }, { timeout: 30000 }).catch(() => {
         this.log('⚠️ Results detection timeout, continuing anyway...');
       });
+
+      // Debug: Log page info
+      const pageInfo = await this.page.evaluate(() => {
+        return {
+          url: window.location.href,
+          title: document.title,
+          bodySnippet: document.body.innerText.substring(0, 500),
+          tableCount: document.querySelectorAll('table').length,
+          rowCount: document.querySelectorAll('tbody tr').length,
+          linkCount: document.querySelectorAll('a').length,
+          firstFewLinks: Array.from(document.querySelectorAll('a')).slice(0, 10).map(a => ({
+            text: a.textContent?.trim().substring(0, 50),
+            href: a.href
+          }))
+        };
+      });
+
+      if (this.verbose) {
+        this.log('📄 Page after search:');
+        this.log(`   URL: ${pageInfo.url}`);
+        this.log(`   Tables: ${pageInfo.tableCount}, Rows: ${pageInfo.rowCount}, Links: ${pageInfo.linkCount}`);
+        this.log(`   Body text: ${pageInfo.bodySnippet.substring(0, 200)}...`);
+      }
 
       // Step 4: Click on 1st entry of search result
       this.log('🖱️ Clicking on first search result...');
