@@ -745,6 +745,41 @@ class DallasCountyTexasScraper extends DeedScraper {
       this.log(`📄 Page title: ${pageInfo.title}`);
       this.log(`📝 Page preview: ${pageInfo.bodyText.substring(0, 200)}`);
 
+      // Wait for results to load (may require additional JavaScript execution)
+      this.log('⏳ Waiting for results table to appear...');
+      await this.randomWait(2000, 4000);
+
+      // Take screenshot for debugging
+      const screenshotPath = `/tmp/dallas-deed-search-${Date.now()}.png`;
+      await this.page.screenshot({ path: screenshotPath, fullPage: true });
+      this.log(`📸 Screenshot saved: ${screenshotPath}`);
+
+      // Try to wait for specific result elements
+      const resultSelectors = [
+        'table.results',
+        '.search-results',
+        '.result-row',
+        'table tbody tr',
+        '[class*="result"]',
+        '[id*="result"]'
+      ];
+
+      let resultsAppeared = false;
+      for (const selector of resultSelectors) {
+        try {
+          await this.page.waitForSelector(selector, { timeout: 5000 });
+          this.log(`✅ Found results container: ${selector}`);
+          resultsAppeared = true;
+          break;
+        } catch (e) {
+          // Continue trying
+        }
+      }
+
+      if (!resultsAppeared) {
+        this.log('⚠️ No results container found, checking page content...');
+      }
+
       // Click on deed result to view document
       this.log('📄 Looking for deed document...');
 
@@ -753,30 +788,60 @@ class DallasCountyTexasScraper extends DeedScraper {
         // Look for result rows that might contain the document
         const links = Array.from(document.querySelectorAll('a'));
         const tables = Array.from(document.querySelectorAll('table'));
+        const rows = Array.from(document.querySelectorAll('tr'));
+
+        // Get full HTML of main content area for debugging
+        const mainContent = document.querySelector('main, #main, #content, .content, [role="main"]');
+        const mainHTML = mainContent ? mainContent.innerHTML.substring(0, 2000) : '';
 
         return {
           totalLinks: links.length,
           linkHrefs: links.map(a => a.href).slice(0, 10),
           linkTexts: links.map(a => a.textContent.trim()).slice(0, 10),
-          tableCount: tables.length
+          tableCount: tables.length,
+          rowCount: rows.length,
+          // Look for any elements with "result" in class or id
+          resultElements: Array.from(document.querySelectorAll('[class*="result"], [id*="result"]')).length,
+          // Check for specific text that might indicate results or errors
+          pageHasResults: document.body.innerText.includes('result') ||
+                         document.body.innerText.includes('Result') ||
+                         document.body.innerText.includes('document') ||
+                         document.body.innerText.includes('Document'),
+          pageHasError: document.body.innerText.includes('No results') ||
+                       document.body.innerText.includes('no results') ||
+                       document.body.innerText.includes('not found'),
+          mainHTML: mainHTML,
+          // Get all div classes and ids
+          divClasses: Array.from(document.querySelectorAll('div[class]')).slice(0, 20).map(d => d.className),
+          divIds: Array.from(document.querySelectorAll('div[id]')).slice(0, 20).map(d => d.id)
         };
       });
 
       this.log(`🔍 Found ${resultFound.totalLinks} links on page`);
+      this.log(`📊 Tables: ${resultFound.tableCount}, Rows: ${resultFound.rowCount}, Result elements: ${resultFound.resultElements}`);
+      this.log(`📝 Page has results: ${resultFound.pageHasResults}, Has error: ${resultFound.pageHasError}`);
       this.log(`🔗 Sample hrefs: ${resultFound.linkHrefs.join(', ')}`);
       this.log(`📝 Sample texts: ${resultFound.linkTexts.join(', ')}`);
+      this.log(`🏷️ Div classes: ${resultFound.divClasses.slice(0, 10).join(', ')}`);
+      this.log(`🆔 Div IDs: ${resultFound.divIds.slice(0, 10).join(', ')}`);
+      if (resultFound.mainHTML) {
+        this.log(`📄 Main content HTML (first 500 chars): ${resultFound.mainHTML.substring(0, 500)}`);
+      }
 
       const deedLinkSelectors = [
         'a[href*=".pdf"]',
         'a[href*="document"]',
         'a[href*="view"]',
-        'a:has-text("View")',
-        'a:has-text("Document")',
-        'a:has-text("Download")',
+        'a[href*="View"]',
+        'a[href*="Document"]',
+        'a[href*="Download"]',
+        'table tbody tr a',
         'table a',
         '.result-row a',
         '.search-results a',
-        'tr a'
+        'tr a',
+        '[class*="result"] a',
+        'tbody a'
       ];
 
       let deedLink = null;
