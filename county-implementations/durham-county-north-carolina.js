@@ -761,10 +761,11 @@ class DurhamCountyNorthCarolinaScraper extends DeedScraper {
 
       // Wait for new window/tab to open after clicking View
       this.log('⏳ Waiting for new window to open after clicking View...');
-      await this.randomWait(5000, 7000); // Give it more time to open
+      this.log(`Initial window count: ${(await this.browser.pages()).length}`);
+      await this.randomWait(8000, 10000); // Increase wait time to 8-10 seconds
 
       const allPages = await this.browser.pages();
-      this.log(`📄 Found ${allPages.length} total windows`);
+      this.log(`📄 Found ${allPages.length} total windows after wait`);
 
       // Log all pages for debugging
       for (const page of allPages) {
