@@ -18,62 +18,52 @@
  * - Search: 202400152203 (without INT) or advanced search with book/page
  */
 
-const DeedScraper = require('../deed-scraper');
+const DeedScraper = require('../base/deed-scraper');
 const puppeteer = require('puppeteer-extra');
 const StealthPlugin = require('puppeteer-extra-plugin-stealth');
 
 // Use stealth plugin to avoid bot detection
 puppeteer.use(StealthPlugin());
 
-const DeedScraper = require('../base/deed-scraper');
-
 class DallasCountyTexasScraper extends DeedScraper {
   constructor(options = {}) {
     super({ ...options, county: 'dallas', state: 'tx' });
   }
 
-  /**
-   * Download deed PDF using instrument number 
-   */
-  async downloadDeed(searchData) {
-    try {
+  downloadDeed(searchData) {
+    return Promise.resolve().then(() => {
       this.log(`🔍 Finding deed with instrument number: ${searchData.instrumentNumber}`);
       
       // Handle any initial overlays
-      await this.handleInitialOverlays();
-      
-      // Wait for results to load
-      await this.waitForLoading();
-      
-      // Find our deed document
-      const findResult = await this.findDeedDocument(searchData.instrumentNumber);
-      
-      if (!findResult.found) {
-        return { success: false, error: findResult.reason };
-      }
-      
-      // Navigate download workflow
-      await this.navigateDownloadWorkflow(findResult);
-      
-      // Wait for download
-      await this.page.waitForEvent('download', { timeout: 30000 });
-      
-      this.log('✅ Download initiated successfully');
-      return { success: true };
-      
-    } catch (error) {
-      this.log(`❌ Download error: ${error.message}`);
-      return { 
-        success: false, 
-        error: `Failed to download deed: ${error.message}` 
-      };
-    }
+      return this.handleInitialOverlays()
+        .then(() => this.waitForLoading())
+        .then(() => this.findDeedDocument(searchData.instrumentNumber))
+        .then(findResult => {
+          if (!findResult.found) {
+            return { success: false, error: findResult.reason };
+          }
+          
+          // Navigate download workflow
+          return this.navigateDownloadWorkflow(findResult)
+            .then(() => {
+              return this.page.waitForEvent('download', { timeout: 30000 })
+                .then(() => {
+                  this.log('✅ Download initiated successfully');
+                  return { success: true };
+                });
+            });
+        })
+        .catch(error => {
+          this.log(`❌ Download error: ${error.message}`);
+          return { 
+            success: false, 
+            error: `Failed to download deed: ${error.message}` 
+          };
+        });
+    });
   }
 
-  /**
-   * Handle initial overlays and popups that might appear
-   */
-  async handleInitialOverlays() {
+  handleInitialOverlays() {
     // Check if we need to accept terms or handle initial redirect
     const acceptButtonSelectors = [
       'button:has-text("Accept")',
@@ -83,72 +73,69 @@ class DallasCountyTexasScraper extends DeedScraper {
       '[class*="accept-button"]'
     ];
 
-    for (const selector of acceptButtonSelectors) {
-      try {
-        const button = await this.page.$(selector);
-        if (button) {
-          this.log(`✅ Found accept button: ${selector}`);
-          await button.click();
-          await this.randomWait(1000, 2000);
-          break;
-        }
-      } catch (e) {
-        // Continue to next selector
-      }
-    }
+    return Promise.resolve()
+      .then(() => {
+        return Promise.all(acceptButtonSelectors.map(selector => {
+          return this.page.$(selector)
+            .then(button => {
+              if (button) {
+                this.log(`✅ Found accept button: ${selector}`);
+                return button.click()
+                  .then(() => this.randomWait(1000, 2000));
+              }
+            })
+            .catch(() => {});
+        }));
+      })
+      .then(() => this.randomWait(2000, 3000))
+      .then(() => {
+        // Dismiss "Where to start" popup if it appears
+        this.log('🔍 Checking for "Where to start" popup...');
 
-    await this.randomWait(2000, 3000);
+        // Common selectors for popup close buttons
+        const popupCloseSelectors = [
+          'button:has-text("Close")',
+          'button:has-text("Got it")',
+          'button:has-text("OK")',
+          'button:has-text("Dismiss")',
+          'button.close',
+          'button[aria-label="Close"]',
+          '[class*="close"]',
+          '[class*="dismiss"]',
+          '.modal button',
+          '.popup button'
+        ];
 
-    // Dismiss "Where to start" popup if it appears
-    this.log('🔍 Checking for "Where to start" popup...');
-    try {
-      // Common selectors for popup close buttons
-      const popupCloseSelectors = [
-        'button:has-text("Close")',
-        'button:has-text("Got it")',
-        'button:has-text("OK")',
-        'button:has-text("Dismiss")',
-        'button.close',
-        'button[aria-label="Close"]',
-        '[class*="close"]',
-        '[class*="dismiss"]',
-        '.modal button',
-        '.popup button'
-      ];
-
-      let popupClosed = false;
-      for (const selector of popupCloseSelectors) {
-        try {
-          const closeButton = await this.page.$(selector);
-          if (closeButton) {
-            this.log(`✅ Found popup close button: ${selector}`);
-            await closeButton.click();
-            popupClosed = true;
-            this.log(`✅ Closed popup`);
-            await this.randomWait(500, 1000);
-            break;
-          }
-        } catch (e) {
-          // Continue to next selector
-        }
-      }
-
-      if (!popupClosed) {
+        return Promise.all(popupCloseSelectors.map(selector => {
+          return this.page.$(selector)
+            .then(closeButton => {
+              if (closeButton) {
+                this.log(`✅ Found popup close button: ${selector}`);
+                return closeButton.click()
+                  .then(() => {
+                    this.log(`✅ Closed popup`);
+                    return this.randomWait(500, 1000);
+                  });
+              }
+            })
+            .catch(() => {});
+        }));
+      })
+      .then(() => {
         // Try pressing Escape key to close any modals
-        await this.page.keyboard.press('Escape');
-        this.log(`⚠️ No popup close button found, pressed Escape key`);
-        await this.randomWait(500, 1000);
-      }
-    } catch (error) {
-      this.log(`⚠️ Error handling popup: ${error.message}`);
-    }
+        return this.page.keyboard.press('Escape')
+          .then(() => {
+            this.log(`⚠️ No popup close button found, pressed Escape key`);
+            return this.randomWait(500, 1000);
+          });
+      })
+      .catch(error => {
+        this.log(`⚠️ Error handling popup: ${error.message}`);
+      });
   }
 
-  /**
-   * Find deed document in search results
-   */
-  async findDeedDocument(instrumentNumber) {
-    const result = await this.page.evaluate((instNum) => {
+  findDeedDocument(instrumentNumber) {
+    const evaluatePromise = this.page.evaluate((instNum) => {
       // Helper function to generate a selector for an element
       function getUniqueSelector(element) {
         if (element.id) return `#${element.id}`;
@@ -271,14 +258,9 @@ class DallasCountyTexasScraper extends DeedScraper {
         }
       };
     }, instrumentNumber);
-
-    return result;
   }
 
-  /**
-   * Wait for loading indicators to resolve
-   */
-  async waitForLoading() {
+  waitForLoading() {
     // Common loading indicator classes and selectors
     const loadingSelectors = [
       '[class*="loading"]', 
@@ -289,128 +271,109 @@ class DallasCountyTexasScraper extends DeedScraper {
       '.loading'
     ];
 
-    try {
-      // Wait for loading indicators to disappear
-      for (const selector of loadingSelectors) {
-        try {
-          await this.page.waitForFunction(
-            (sel) => !document.querySelector(sel) || 
-              document.querySelector(sel).style.display === 'none' ||
-              document.querySelector(sel).classList.contains('hidden'),
-            { timeout: 10000 },
-            selector
-          );
-        } catch (e) {
-          // Ignore timeout errors for individual selectors
-          if (e.name !== 'TimeoutError') throw e;
-        }
-      }
-
+    return Promise.all(loadingSelectors.map(selector => {
+      return this.page.waitForFunction(
+        (sel) => !document.querySelector(sel) || 
+          document.querySelector(sel).style.display === 'none' ||
+          document.querySelector(sel).classList.contains('hidden'),
+        { timeout: 10000 },
+        selector
+      ).catch(e => {
+        // Ignore timeout errors for individual selectors
+        if (e.name !== 'TimeoutError') throw e;
+      });
+    }))
+    .then(() => {
       // Additional wait for dynamic content
-      await this.page.waitForFunction(
+      return this.page.waitForFunction(
         () => !document.querySelector('[aria-busy="true"]'),
         { timeout: 5000 }
       ).catch(() => {}); // Ignore timeout
-
-    } catch (error) {
+    })
+    .catch(error => {
       this.log(`⚠️ Warning: Loading wait error - ${error.message}`);
-    }
+    });
   }
 
-  /**
-   * Navigate through the download workflow
-   */
-  async navigateDownloadWorkflow(findResult) {
+  navigateDownloadWorkflow(findResult) {
     if (findResult.hasActionMenu) {
       // Click menu button and look for download option
-      await this.page.click(findResult.actionSelector);
-      await this.randomWait(500, 1000);
+      return this.page.click(findResult.actionSelector)
+        .then(() => this.randomWait(500, 1000))
+        .then(() => {
+          const downloadOptions = [
+            'button:has-text("Download")',
+            'button:has-text("Save")',
+            'button:has-text("Export")',
+            '[role="menuitem"]:has-text("Download")',
+            '[class*="download"]'
+          ];
 
-      const downloadOptions = [
-        'button:has-text("Download")',
-        'button:has-text("Save")',
-        'button:has-text("Export")',
-        '[role="menuitem"]:has-text("Download")',
-        '[class*="download"]'
-      ];
-
-      let downloadClicked = false;
-      for (const option of downloadOptions) {
-        try {
-          const downloadBtn = await this.page.$(option);
-          if (downloadBtn) {
-            await downloadBtn.click();
-            downloadClicked = true;
-            break;
-          }
-        } catch (e) {
-          // Try next option
-        }
-      }
-
-      if (!downloadClicked) {
-        throw new Error('Could not find download option in menu');
-      }
+          return Promise.any(downloadOptions.map(option => {
+            return this.page.$(option)
+              .then(downloadBtn => {
+                if (downloadBtn) {
+                  return downloadBtn.click();
+                }
+                throw new Error('Button not found');
+              });
+          }))
+          .catch(() => {
+            throw new Error('Could not find download option in menu');
+          });
+        });
     } else if (findResult.hasCheckbox) {
       // Select checkbox and look for batch download button
-      await this.page.click(findResult.checkboxSelector);
-      await this.randomWait(500, 1000);
+      return this.page.click(findResult.checkboxSelector)
+        .then(() => this.randomWait(500, 1000))
+        .then(() => {
+          const downloadButtons = [
+            'button:has-text("Download Selected")',
+            'button:has-text("Download Checked")',
+            'button[title*="Download"]'
+          ];
 
-      const downloadButtons = [
-        'button:has-text("Download Selected")',
-        'button:has-text("Download Checked")',
-        'button[title*="Download"]'
-      ];
-
-      let downloadClicked = false;
-      for (const btn of downloadButtons) {
-        try {
-          const downloadBtn = await this.page.$(btn);
-          if (downloadBtn) {
-            await downloadBtn.click();
-            downloadClicked = true;
-            break;
-          }
-        } catch (e) {
-          // Try next button
-        }
-      }
-
-      if (!downloadClicked) {
-        throw new Error('Could not find batch download button');
-      }
+          return Promise.any(downloadButtons.map(btn => {
+            return this.page.$(btn)
+              .then(downloadBtn => {
+                if (downloadBtn) {
+                  return downloadBtn.click();
+                }
+                throw new Error('Button not found');
+              });
+          }))
+          .catch(() => {
+            throw new Error('Could not find batch download button');
+          });
+        });
     } else if (findResult.isClickableRow) {
       // Click the row and wait for details
-      await this.page.click(findResult.rowSelector);
-      await this.randomWait(1000, 2000);
-      await this.waitForLoading();
+      return this.page.click(findResult.rowSelector)
+        .then(() => this.randomWait(1000, 2000))
+        .then(() => this.waitForLoading())
+        .then(() => {
+          // Look for download button in details view
+          const downloadButtons = [
+            'button:has-text("Download Document")',
+            'button:has-text("Download PDF")',
+            'a:has-text("Download")',
+            '[title*="Download"]',
+            '[aria-label*="download"]'
+          ];
 
-      // Look for download button in details view
-      const downloadButtons = [
-        'button:has-text("Download Document")',
-        'button:has-text("Download PDF")',
-        'a:has-text("Download")',
-        '[title*="Download"]',
-        '[aria-label*="download"]'
-      ];
-
-      let downloadClicked = false;
-      for (const btn of downloadButtons) {
-        try {
-          const downloadBtn = await this.page.$(btn);
-          if (downloadBtn) {
-            await downloadBtn.click();
-            downloadClicked = true;
-            break;
-          }
-        } catch (e) {
-          // Try next button
-        }
-      }
-
-      if (!downloadClicked) {
-        throw new Error('Could not find download button in details view');
-      }
+          return Promise.any(downloadButtons.map(btn => {
+            return this.page.$(btn)
+              .then(downloadBtn => {
+                if (downloadBtn) {
+                  return downloadBtn.click();
+                }
+                throw new Error('Button not found');
+              });
+          }))
+          .catch(() => {
+            throw new Error('Could not find download button in details view');
+          });
+        });
     } else if (findResult.fallbackMode) {
       throw new Error(
         'Document found but no clear download interaction available. ' +
@@ -419,173 +382,114 @@ class DallasCountyTexasScraper extends DeedScraper {
     }
   }
 
-  /**
-   * Main scraping method 
-   */
-  async scrape(address) {
-    try {
-      // Your existing scrape implementation
-      return { success: true };
-    } catch (error) {
-      this.log(`❌ Scrape error: ${error.message}`);
-      return { 
-        success: false, 
-        error: `Failed to scrape address: ${error.message}`
-      };
-    }
+  scrape(address) {
+    return Promise.resolve()
+      .then(() => {
+        this.log(`🏠 Starting Dallas County deed scrape for: ${address}`);
+
+        const result = {
+          address,
+          county: this.county,
+          state: this.state,
+          timestamp: new Date().toISOString(),
+          steps: {}
+        };
+
+        return result;
+      })
+      .then(result => {
+        if (!this.browser) {
+          return this.initialize().then(() => result);
+        }
+        return result;
+      })
+      .then(result => {
+        // Step 1: Skip Regrid (Dallas CAD supports direct address search)
+        result.steps.step1 = {
+          name: 'Regrid search',
+          success: true,
+          skipped: true,
+          message: 'Dallas County supports direct address search'
+        };
+
+        // Step 2: Search Dallas CAD for property
+        this.log('📍 Step 2: Searching Dallas CAD...');
+        return this.searchDallasCAD(address)
+          .then(cadResult => {
+            result.steps.step2 = {
+              name: 'Dallas CAD property search',
+              success: cadResult.success,
+              data: cadResult
+            };
+
+            if (!cadResult.success) {
+              result.success = false;
+              result.error = 'Failed to search Dallas CAD';
+              return result;
+            }
+
+            // Step 3: Download deed from public search
+            this.log('📥 Step 3: Downloading deed...');
+            return this.downloadDeed(cadResult)
+              .then(downloadResult => {
+                result.steps.step3 = {
+                  name: 'Deed download',
+                  success: downloadResult.success,
+                  data: downloadResult
+                };
+
+                if (!downloadResult.success) {
+                  result.success = false;
+                  result.error = 'Failed to download deed';
+                  return result;
+                }
+
+                result.success = true;
+                result.download = downloadResult;
+
+                this.log('✅ Dallas County deed scrape completed successfully');
+                return result;
+              });
+          });
+      })
+      .catch(error => {
+        this.log(`❌ Error in Dallas County scrape: ${error.message}`);
+        return {
+          success: false,
+          error: error.message
+        };
+      });
   }
 
-  /**
-   * Get prior deed record 
-   */
-  async getPriorDeed(address) {
-    try {
-      // Your existing getPriorDeed implementation
-      return { success: true };
-    } catch (error) {
-      this.log(`❌ Prior deed error: ${error.message}`);
-      return {
-        success: false,
-        error: `Failed to get prior deed: ${error.message}`
-      };
-    }
+  getPriorDeed(address) {
+    return this.scrape(address);
   }
 
-  /**
-   * Helper for random waits
-   */
-  async randomWait(min, max) {
+  randomWait(min, max) {
     const delay = Math.floor(Math.random() * (max - min + 1) + min);
-    await new Promise(resolve => setTimeout(resolve, delay));
+    return new Promise(resolve => setTimeout(resolve, delay));
   }
 }
 
-        // No matching row found, return error
         return { found: false, reason: 'Document not found in results' };
-      }, searchData.instrumentNumber);
+        return { found: false, reason: 'Document not found in results' };
+      }), instrumentNumber);
 
-      if (!documentInfo) {
-        throw new Error('Failed to evaluate page for document search');
-      }
-
-      return documentInfo;
-    } catch (error) {
-      this.log(`Error finding document: ${error.message}`);
-      return {
-        found: false,
-        reason: 'Document search failed',
-        error: error.message
-      };
-    }
-
-      this.log('📄 Document search result:', JSON.stringify(documentInfo, null, 2));
-
-      if (!documentInfo.found) {
-        throw new Error(`Could not find document in search results: ${documentInfo.reason}`);
-      }
-
-      // Handle the modern React-based UI interactions
-      if (documentInfo.hasActionMenu) {
-        this.log('🖱️ Found action menu button, clicking...');
-        await this.page.click(documentInfo.actionSelector);
-        await this.randomWait(1000, 2000);
-        
-        // Look for document/view action in the menu
-        const menuItemSelectors = [
-          'li:has-text("View")',
-          'li:has-text("Document")',
-          '[role="menuitem"]:has-text("View")',
-          '[role="menuitem"]:has-text("Document")',
-          'button:has-text("View")',
-          'button:has-text("Document")'
-        ];
-
-        for (const menuSelector of menuItemSelectors) {
-          try {
-            const menuItem = await this.page.$(menuSelector);
-            if (menuItem) {
-              await menuItem.click();
-              this.log(`✅ Clicked menu item: ${menuSelector}`);
-              break;
-            }
-          } catch (e) {
-            this.log(`⚠️ Menu item not found: ${menuSelector}`);
-          }
+    return evaluatePromise
+      .then(documentInfo => {
+        if (!documentInfo) {
+          throw new Error('Failed to evaluate page for document search');
         }
-      } else if (documentInfo.hasCheckbox) {
-        this.log('🖱️ Found checkbox, selecting row...');
-        await this.page.click(documentInfo.checkboxSelector);
-        await this.randomWait(1000, 2000);
-        
-        // Look for action buttons that appear after selection
-        const actionButtonSelectors = [
-          'button:has-text("View")',
-          'button:has-text("Document")',
-          '[role="button"]:has-text("View")',
-          '[role="button"]:has-text("Document")'
-        ];
-
-        for (const buttonSelector of actionButtonSelectors) {
-          try {
-            const button = await this.page.$(buttonSelector);
-            if (button) {
-              await button.click();
-              this.log(`✅ Clicked action button: ${buttonSelector}`);
-              break;
-            }
-          } catch (e) {
-            this.log(`⚠️ Action button not found: ${buttonSelector}`);
-          }
-        }
-      } else if (documentInfo.isClickableRow) {
-        this.log('🖱️ Found clickable row, clicking...');
-        await this.page.click(`tbody ${documentInfo.rowSelector}`);
-        await this.randomWait(1000, 2000);
-      } else if (documentInfo.hasClickableElement) {
-        this.log('🖱️ Found clickable element, clicking...');
-        await this.page.click(documentInfo.elementSelector);
-        await this.randomWait(1000, 2000);
-      } else if (documentInfo.fallbackMode) {
-        this.log('⚠️ No interactive elements found, trying alternative methods...');
-        
-        // Try clicking the cell containing the document number
-        const cells = await this.page.$$('td');
-        for (const cell of cells) {
-          const text = await cell.evaluate(el => el.textContent?.trim());
-          if (text === searchData.instrumentNumber) {
-            await cell.click();
-            this.log('✅ Clicked on document number cell');
-            await this.randomWait(1000, 2000);
-            break;
-          }
-        }
-      }
-
-      // Wait for potential overlay/dialog after clicking
-      await this.randomWait(2000, 3000);
-      
-      // Check for "View Document" or similar buttons that may appear
-      const viewButtonSelectors = [
-        'button:has-text("View Document")',
-        'button:has-text("Download")',
-        'button:has-text("View PDF")',
-        'a[href*=".pdf"]',
-        'a[href*="document"]',
-        '[role="button"]:has-text("View")'
-      ];
-
-      for (const buttonSelector of viewButtonSelectors) {
-        try {
-          const button = await this.page.waitForSelector(buttonSelector, { timeout: 2000 });
-          if (button) {
-            await button.click();
-            this.log(`✅ Clicked view button: ${buttonSelector}`);
-            break;
-          }
-        } catch (e) {
-          this.log(`⚠️ View button not found: ${buttonSelector}`);
-        }
-      }      // Check if the link we found is actually a PDF or a detail page
+        return documentInfo;
+      })
+      .catch(error => {
+        this.log(`Error finding document: ${error.message}`);
+        return {
+          found: false,
+          reason: 'Document search failed',
+          error: error.message
+        };
+      });
       if (deedLink && deedLinkHref && !deedLinkHref.includes('.pdf')) {
         this.log('⚠️ Link found is not a direct PDF, it may be a detail page link');
         this.log('🔗 Navigating to detail page first...');
