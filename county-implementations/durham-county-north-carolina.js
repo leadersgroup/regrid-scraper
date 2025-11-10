@@ -42,7 +42,7 @@ class DurhamCountyNorthCarolinaScraper extends DeedScraper {
     this.browser = await puppeteer.launch({
       headless: this.headless,
       ...(executablePath && { executablePath }),
-      protocolTimeout: 300000,
+      protocolTimeout: 600000, // Increase to 10 minutes
       args: [
         '--no-sandbox',
         '--disable-setuid-sandbox',
@@ -585,11 +585,44 @@ class DurhamCountyNorthCarolinaScraper extends DeedScraper {
       // Find and click either a Download button or View button/link
       this.log('📥 Looking for Download or View button...');
       const btnClicked = await this.page.evaluate(() => {
-        // Look for clickable elements (buttons, links, clickable divs/spans)
-        const elements = Array.from(document.querySelectorAll('a, button, input[type="button"], input[type="submit"], div[onclick], span[onclick], i[onclick]'));
+        // Look for ALL elements that might contain "View" or "Download"
+        const allElements = Array.from(document.querySelectorAll('*'));
 
-        // Priority 1: Look for Download button
-        for (const el of elements) {
+        // Priority 1: Look for "View" text (exact match or with arrow)
+        for (const el of allElements) {
+          const text = (el.textContent || '').trim();
+          // Match "View" or "View →" or similar
+          if ((text === 'View' || text === 'View →' || text.match(/^View\s*→?\s*$/)) &&
+              el.offsetParent !== null) {
+            // Check if it's clickable or has a clickable parent
+            const clickTarget = el.onclick || el.parentElement?.onclick ||
+                               el.tagName === 'A' || el.parentElement?.tagName === 'A'
+                               ? el : el.parentElement;
+            if (clickTarget) {
+              clickTarget.click();
+              return { success: true, text: text, type: 'view-text' };
+            }
+          }
+        }
+
+        // Priority 2: Look for clickable elements with "view" in text
+        const clickableElements = Array.from(document.querySelectorAll('a, button, input[type="button"], input[type="submit"], div[onclick], span[onclick], div[class*="click"], span[class*="click"]'));
+
+        for (const el of clickableElements) {
+          const text = (el.textContent || el.value || el.title || el.alt || '').trim().toLowerCase();
+          const className = (el.className || '').toLowerCase();
+          const id = (el.id || '').toLowerCase();
+
+          // Check for view-related text/attributes
+          if ((text.includes('view') || className.includes('view') || id.includes('view')) &&
+              el.offsetParent !== null) {
+            el.click();
+            return { success: true, text: el.textContent || el.value || el.title || 'View', type: 'view' };
+          }
+        }
+
+        // Priority 3: Look for Download button
+        for (const el of clickableElements) {
           const text = (el.textContent || el.value || el.title || el.alt || '').trim().toLowerCase();
           const className = (el.className || '').toLowerCase();
           const id = (el.id || '').toLowerCase();
@@ -602,18 +635,7 @@ class DurhamCountyNorthCarolinaScraper extends DeedScraper {
           }
         }
 
-        // Priority 2: Look for View button/link
-        for (const el of elements) {
-          const text = (el.textContent || el.value || el.title || '').trim().toLowerCase();
-
-          // Look specifically for "view" button (case-insensitive)
-          if ((text === 'view' || text.includes('view')) && el.offsetParent !== null) {
-            el.click();
-            return { success: true, text: el.textContent || el.value || el.title, type: 'view' };
-          }
-        }
-
-        // Priority 3: Look for icon buttons (download/view icons)
+        // Priority 4: Look for icon buttons (download/view icons)
         const iconElements = Array.from(document.querySelectorAll('i, img, svg'));
         for (const el of iconElements) {
           const className = (el.className || '').toLowerCase();
@@ -631,14 +653,31 @@ class DurhamCountyNorthCarolinaScraper extends DeedScraper {
           }
         }
 
-        return { success: false };
+        // Debug: Return what we found
+        const viewElements = allElements
+          .filter(el => {
+            const text = (el.textContent || '').trim().toLowerCase();
+            return text.includes('view') && el.offsetParent !== null;
+          })
+          .slice(0, 5)
+          .map(el => ({
+            tag: el.tagName,
+            text: el.textContent.trim().substring(0, 50),
+            clickable: !!(el.onclick || el.href || el.tagName === 'BUTTON')
+          }));
+
+        return { success: false, debug: { foundViewElements: viewElements } };
       });
 
       if (!btnClicked.success) {
         this.log('⚠️ Could not find Download or View button');
+        if (btnClicked.debug) {
+          this.log('Debug info: ' + JSON.stringify(btnClicked.debug, null, 2));
+        }
         return {
           success: false,
-          error: 'Could not find Download or View button'
+          error: 'Could not find Download or View button',
+          debug: btnClicked.debug
         };
       }
 
@@ -703,6 +742,8 @@ class DurhamCountyNorthCarolinaScraper extends DeedScraper {
 
       // Check if we're on a PDF page or need to find download link
       const currentUrl = this.page.url();
+      this.log(`Current page URL: ${currentUrl}`);
+
       if (currentUrl.endsWith('.pdf') || currentUrl.includes('.pdf')) {
         // Direct PDF URL
         this.log('✅ Found direct PDF URL');
@@ -715,28 +756,64 @@ class DurhamCountyNorthCarolinaScraper extends DeedScraper {
           pageNumber: searchData.pageNumber
         };
       } else {
-        // Look for PDF link/iframe
-        const pdfUrl = await this.page.evaluate(() => {
-          // Check for iframe with PDF
-          const iframe = document.querySelector('iframe[src*=".pdf"], iframe[src*="document"]');
-          if (iframe) return iframe.src;
+        // Look for PDF link/iframe/embed
+        const pdfInfo = await this.page.evaluate(() => {
+          // Check for iframes (any iframe)
+          const iframes = Array.from(document.querySelectorAll('iframe'));
+          for (const iframe of iframes) {
+            if (iframe.src) {
+              return { type: 'iframe', url: iframe.src };
+            }
+          }
 
-          // Check for PDF link
-          const link = document.querySelector('a[href*=".pdf"]');
-          if (link) return link.href;
+          // Check for embed tags (PDFs often use embed)
+          const embeds = Array.from(document.querySelectorAll('embed'));
+          for (const embed of embeds) {
+            if (embed.src) {
+              return { type: 'embed', url: embed.src };
+            }
+          }
 
-          return null;
+          // Check for object tags
+          const objects = Array.from(document.querySelectorAll('object'));
+          for (const obj of objects) {
+            if (obj.data) {
+              return { type: 'object', url: obj.data };
+            }
+          }
+
+          // Check for PDF links
+          const links = Array.from(document.querySelectorAll('a'));
+          for (const link of links) {
+            if (link.href && link.href.includes('.pdf')) {
+              return { type: 'link', url: link.href };
+            }
+          }
+
+          // Return debug info
+          return {
+            type: 'none',
+            debug: {
+              iframeCount: iframes.length,
+              embedCount: embeds.length,
+              objectCount: objects.length,
+              bodyPreview: document.body.innerText.substring(0, 500)
+            }
+          };
         });
 
-        if (!pdfUrl) {
+        this.log(`PDF detection result: ${JSON.stringify(pdfInfo, null, 2)}`);
+
+        if (!pdfInfo.url) {
           return {
             success: false,
-            error: 'Could not find PDF to download'
+            error: 'Could not find PDF to download',
+            debug: pdfInfo.debug
           };
         }
 
-        this.log(`✅ Found PDF URL: ${pdfUrl}`);
-        const pdfBase64 = await this.downloadPdfFromUrl(pdfUrl);
+        this.log(`✅ Found PDF in ${pdfInfo.type}: ${pdfInfo.url}`);
+        const pdfBase64 = await this.downloadPdfFromUrl(pdfInfo.url);
 
         return {
           success: true,
