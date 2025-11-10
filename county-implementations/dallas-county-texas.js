@@ -551,36 +551,164 @@ class DallasCountyTexasScraper extends DeedScraper {
   }
 
   /**
+   * Parse address into components
+   */
+  parseAddress(address) {
+    const streetPart = address.split(',')[0].trim();
+    const numberMatch = streetPart.match(/^(\d+)/);
+    const streetNumber = numberMatch ? numberMatch[1] : '';
+    let streetName = streetPart.replace(/^\d+\s*/, '').trim();
+
+    return { streetNumber, streetName };
+  }
+
+  /**
    * Search Dallas CAD for property information
    */
   async searchDallasCAD(address) {
     try {
       this.log(`🔍 Searching Dallas CAD for: ${address}`);
 
-      // Navigate to Dallas CAD search page
-      const cadUrl = 'https://www.dallascad.org/';
-      await this.page.goto(cadUrl, { waitUntil: 'networkidle2', timeout: 30000 });
-      await this.randomWait(2000, 3000);
+      // Navigate to Dallas CAD property search page
+      // Note: Main URL is https://www.dallascad.org/ but search is at a different URL
+      const cadUrl = 'https://www.dallascad.org/SearchAddr.aspx';
+      this.log(`🌐 Navigating to: ${cadUrl}`);
+      await this.page.goto(cadUrl, { waitUntil: 'networkidle2', timeout: 60000 });
+      await this.randomWait(3000, 5000);
 
-      // Search for property by address
-      // This is a placeholder - actual implementation depends on the CAD website structure
-      const searchSelector = 'input[name="search"], input[type="search"], #search';
-      await this.page.waitForSelector(searchSelector, { timeout: 10000 });
-      await this.page.type(searchSelector, address);
+      // Close any popups
+      await this.page.evaluate(() => {
+        const closeButtons = Array.from(document.querySelectorAll('button, a, [role="button"]'));
+        for (const btn of closeButtons) {
+          const text = (btn.textContent || '').toLowerCase();
+          if (text.includes('close') || text === '×' || text === 'x') {
+            btn.click();
+            return true;
+          }
+        }
+        return false;
+      });
+
+      await this.randomWait(1000, 2000);
+
+      // Parse address components
+      const { streetNumber, streetName } = this.parseAddress(address);
+      this.log(`📝 Parsed - Street Number: "${streetNumber}", Street Name: "${streetName}"`);
+
+      // Dallas CAD uses specific field IDs: txtAddrNum, listStDir, txtStName
+      // Fill street number
+      this.log('📝 Filling street number field...');
+      await this.page.type('#txtAddrNum', streetNumber);
       await this.randomWait(500, 1000);
 
-      // Submit search
-      await Promise.race([
-        this.page.keyboard.press('Enter'),
-        this.page.click('button[type="submit"], input[type="submit"]').catch(() => {})
-      ]);
+      // Parse street name to extract direction and name
+      const streetParts = streetName.match(/^([NSEW]{1,2})?\s*(.+?)$/i);
+      const streetDirection = streetParts && streetParts[1] ? streetParts[1].toUpperCase() : '';
+      const streetNameOnly = streetParts ? streetParts[2].trim() : streetName;
 
-      await this.randomWait(3000, 5000);
+      this.log(`📝 Street direction: "${streetDirection}", Name: "${streetNameOnly}"`);
+
+      // Set street direction if present
+      if (streetDirection) {
+        this.log(`📝 Setting street direction to: ${streetDirection}`);
+        await this.page.select('#listStDir', streetDirection);
+        await this.randomWait(500, 1000);
+      }
+
+      // Fill street name
+      this.log('📝 Filling street name field...');
+      await this.page.type('#txtStName', streetNameOnly);
+      await this.randomWait(500, 1000);
+
+      // Set city to Dallas (if dropdown has Dallas option)
+      try {
+        const cityOptions = await this.page.evaluate(() => {
+          const select = document.querySelector('#listCity');
+          if (!select) return [];
+          return Array.from(select.options).map(opt => ({
+            value: opt.value,
+            text: opt.textContent.trim()
+          }));
+        });
+
+        this.log(`📋 Available cities: ${cityOptions.map(c => c.text).join(', ')}`);
+
+        const dallasOption = cityOptions.find(opt =>
+          opt.text.toLowerCase().includes('dallas')
+        );
+
+        if (dallasOption) {
+          this.log(`📝 Setting city to: ${dallasOption.text}`);
+          await this.page.select('#listCity', dallasOption.value);
+          await this.randomWait(500, 1000);
+        }
+      } catch (error) {
+        this.log(`⚠️ Could not set city: ${error.message}`);
+      }
+
+      // Click the Search button
+      this.log('🔍 Clicking Search button...');
+      await this.page.click('#cmdSubmit');
+      this.log('✅ Search submitted');
+
+      await this.randomWait(4000, 6000);
       await this.waitForLoading();
 
-      // Extract legal description and instrument number
+      // Check if we got search results
+      this.log('📄 Checking search results...');
+      const searchResults = await this.page.evaluate(() => {
+        // Look for results table or links
+        const tables = Array.from(document.querySelectorAll('table'));
+        const links = Array.from(document.querySelectorAll('a'));
+
+        // Find links that might lead to property details
+        const propertyLinks = links.filter(link => {
+          const href = link.href || '';
+          const text = link.textContent || '';
+          return href.includes('AcctDetailRes.aspx') ||
+                 href.includes('ID=') ||
+                 text.match(/^\d+$/); // Links with just numbers (account IDs)
+        });
+
+        if (propertyLinks.length > 0) {
+          return {
+            found: true,
+            firstLink: propertyLinks[0].href,
+            linkText: propertyLinks[0].textContent.trim(),
+            totalLinks: propertyLinks.length
+          };
+        }
+
+        return {
+          found: false,
+          tableCount: tables.length,
+          linkCount: links.length,
+          bodyPreview: document.body.innerText.substring(0, 300)
+        };
+      });
+
+      if (!searchResults.found) {
+        this.log('⚠️ No property links found in search results');
+        this.log(`Debug info: ${JSON.stringify(searchResults)}`);
+
+        await this.page.screenshot({ path: `/tmp/dallas-cad-search-results-${Date.now()}.png`, fullPage: true });
+
+        return {
+          success: false,
+          error: 'No property found in search results',
+          debugInfo: searchResults
+        };
+      }
+
+      this.log(`✅ Found ${searchResults.totalLinks} property link(s), clicking first: ${searchResults.linkText}`);
+
+      // Click the first property link to go to details page
+      await this.page.goto(searchResults.firstLink, { waitUntil: 'networkidle2', timeout: 30000 });
+      await this.randomWait(2000, 3000);
+
+      // Extract legal description and instrument number from property detail page
+      this.log('📄 Extracting property information from detail page...');
       const propertyInfo = await this.page.evaluate(() => {
-        // Look for legal description or instrument number
         const bodyText = document.body.innerText;
 
         // Match instrument number pattern (e.g., INT202400152203)
@@ -589,24 +717,53 @@ class DallasCountyTexasScraper extends DeedScraper {
         // Match volume/book/page pattern
         const volMatch = bodyText.match(/Vol(?:ume)?\s*(\d+).*?Page\s*(\d+)/i);
 
+        // Also try to find in table cells
+        const cells = Array.from(document.querySelectorAll('td, div'));
+        let foundInst = null;
+        let foundVol = null;
+        let foundPage = null;
+
+        for (const cell of cells) {
+          const text = cell.textContent || '';
+          if (!foundInst && text.includes('INT')) {
+            const match = text.match(/INT(\d+)/);
+            if (match) foundInst = match[1];
+          }
+          if (!foundVol && text.match(/Vol/i)) {
+            const match = text.match(/Vol(?:ume)?\s*(\d+)/i);
+            if (match) foundVol = match[1];
+          }
+          if (!foundPage && foundVol && text.match(/Page/i)) {
+            const match = text.match(/Page\s*(\d+)/i);
+            if (match) foundPage = match[1];
+          }
+        }
+
         return {
-          instrumentNumber: instMatch ? instMatch[1] : null,
-          bookNumber: volMatch ? volMatch[1] : null,
-          pageNumber: volMatch ? volMatch[2] : null,
+          instrumentNumber: instMatch ? instMatch[1] : foundInst,
+          bookNumber: volMatch ? volMatch[1] : foundVol,
+          pageNumber: volMatch ? volMatch[2] : foundPage,
           rawText: bodyText.substring(0, 500)
         };
       });
 
       if (!propertyInfo.instrumentNumber && !propertyInfo.bookNumber) {
-        this.log('⚠️ Could not find instrument number or book/page in CAD results');
+        this.log('⚠️ Could not find instrument number or book/page in property details');
+        this.log(`Page content preview: ${propertyInfo.rawText}`);
+
+        await this.page.screenshot({ path: `/tmp/dallas-cad-details-${Date.now()}.png`, fullPage: true });
+
         return {
           success: false,
-          error: 'No instrument number or book/page found',
+          error: 'No instrument number or book/page found in property details',
           debugInfo: propertyInfo
         };
       }
 
+      this.log(`✅ Found - Instrument: ${propertyInfo.instrumentNumber || 'N/A'}, Book/Page: ${propertyInfo.bookNumber}/${propertyInfo.pageNumber || 'N/A'}`);
+
       // Navigate to deed search page
+      this.log('🌐 Navigating to deed search portal...');
       const deedSearchUrl = 'https://dallas.tx.publicsearch.us/';
       await this.page.goto(deedSearchUrl, { waitUntil: 'networkidle2', timeout: 30000 });
       await this.randomWait(2000, 3000);
@@ -618,19 +775,41 @@ class DallasCountyTexasScraper extends DeedScraper {
       if (propertyInfo.instrumentNumber) {
         this.log(`🔍 Searching deed records for instrument: ${propertyInfo.instrumentNumber}`);
 
-        const instSearchSelector = 'input[name="instrument"], input[placeholder*="Instrument"]';
-        await this.page.waitForSelector(instSearchSelector, { timeout: 10000 });
-        await this.page.type(instSearchSelector, propertyInfo.instrumentNumber);
-        await this.randomWait(500, 1000);
+        // Try to find instrument number search field
+        const instFieldFilled = await this.page.evaluate((instNum) => {
+          const inputs = Array.from(document.querySelectorAll('input[type="text"], input:not([type])'));
 
-        // Submit search
-        await Promise.race([
-          this.page.keyboard.press('Enter'),
-          this.page.click('button[type="submit"], input[type="submit"]').catch(() => {})
-        ]);
+          for (const input of inputs) {
+            const placeholder = (input.placeholder || '').toLowerCase();
+            const name = (input.name || '').toLowerCase();
+            const id = (input.id || '').toLowerCase();
+            const label = input.labels?.[0]?.textContent?.toLowerCase() || '';
 
-        await this.randomWait(3000, 5000);
-        await this.waitForLoading();
+            if (placeholder.includes('instrument') || placeholder.includes('document') ||
+                name.includes('instrument') || name.includes('document') ||
+                id.includes('instrument') || id.includes('document') ||
+                label.includes('instrument') || label.includes('document')) {
+              input.value = instNum;
+              input.dispatchEvent(new Event('input', { bubbles: true }));
+              input.dispatchEvent(new Event('change', { bubbles: true }));
+              return { success: true, field: placeholder || name || id };
+            }
+          }
+
+          return { success: false };
+        }, propertyInfo.instrumentNumber);
+
+        if (instFieldFilled.success) {
+          this.log(`✅ Filled instrument field: ${instFieldFilled.field}`);
+          await this.randomWait(1000, 2000);
+
+          // Submit search
+          await this.page.keyboard.press('Enter');
+          await this.randomWait(3000, 5000);
+          await this.waitForLoading();
+        } else {
+          this.log('⚠️ Could not find instrument number field');
+        }
       }
 
       return {
