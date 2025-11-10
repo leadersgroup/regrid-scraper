@@ -585,23 +585,45 @@ class DurhamCountyNorthCarolinaScraper extends DeedScraper {
       // Find and click either a Download button or View button/link
       this.log('📥 Looking for Download or View button...');
       const btnClicked = await this.page.evaluate(() => {
-        // Look for ALL elements that might contain "View" or "Download"
+        // Priority 1: Look for "View →" text in the document detail area (NOT in navigation/header)
+        // The View button in Related Documents section should be lower on the page
         const allElements = Array.from(document.querySelectorAll('*'));
 
-        // Priority 1: Look for "View" text (exact match or with arrow)
+        const viewCandidates = [];
         for (const el of allElements) {
           const text = (el.textContent || '').trim();
-          // Match "View" or "View →" or similar
-          if ((text === 'View' || text === 'View →' || text.match(/^View\s*→?\s*$/)) &&
-              el.offsetParent !== null) {
-            // Check if it's clickable or has a clickable parent
-            const clickTarget = el.onclick || el.parentElement?.onclick ||
-                               el.tagName === 'A' || el.parentElement?.tagName === 'A'
-                               ? el : el.parentElement;
-            if (clickTarget) {
-              clickTarget.click();
-              return { success: true, text: text, type: 'view-text' };
-            }
+          // Match "View" or "View →" (with arrow)
+          if (text.match(/^View\s*→?\s*$/) && el.offsetParent !== null) {
+            const rect = el.getBoundingClientRect();
+            // Store candidates with their position (prefer elements lower on page, likely in content area)
+            viewCandidates.push({
+              element: el,
+              text: text,
+              y: rect.y,
+              isLink: !!(el.onclick || el.parentElement?.onclick || el.tagName === 'A' || el.parentElement?.tagName === 'A')
+            });
+          }
+        }
+
+        // Sort by Y position (descending) - prefer elements lower on the page (in content, not header)
+        // and that are actually clickable
+        viewCandidates.sort((a, b) => {
+          // First prioritize clickable elements
+          if (a.isLink && !b.isLink) return -1;
+          if (!a.isLink && b.isLink) return 1;
+          // Then sort by Y position (lower on page is better)
+          return b.y - a.y;
+        });
+
+        // Try to click the best candidate
+        if (viewCandidates.length > 0) {
+          const best = viewCandidates[0];
+          const clickTarget = best.element.onclick || best.element.parentElement?.onclick ||
+                             best.element.tagName === 'A' || best.element.parentElement?.tagName === 'A'
+                             ? best.element : best.element.parentElement;
+          if (clickTarget) {
+            clickTarget.click();
+            return { success: true, text: best.text, type: 'view-text', position: best.y };
           }
         }
 
