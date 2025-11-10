@@ -18,7 +18,7 @@
  * - Search: 202400152203 (without INT) or advanced search with book/page
  */
 
-const DeedScraper = require('../base/deed-scraper');
+const DeedScraper = require('../deed-scraper');
 const puppeteer = require('puppeteer-extra');
 const StealthPlugin = require('puppeteer-extra-plugin-stealth');
 
@@ -27,8 +27,10 @@ puppeteer.use(StealthPlugin());
 
 class DallasCountyTexasScraper extends DeedScraper {
   constructor(options = {}) {
-    super({ ...options, county: 'dallas', state: 'tx' });
-  };
+    super(options);
+    this.county = 'Dallas';
+    this.state = 'TX';
+  }
 
   async downloadDeed(searchData) {
     try {
@@ -49,15 +51,9 @@ class DallasCountyTexasScraper extends DeedScraper {
       await this.navigateDownloadWorkflow(findResult);
 
       // Wait for download to start
-      // Note: Playwright uses 'download' event, Puppeteer might need different approach
-      try {
-        await this.page.waitForTimeout(5000); // Wait for download to initiate
-        this.log('✅ Download initiated successfully');
-        return { success: true };
-      } catch (downloadError) {
-        this.log(`⚠️ Download wait error: ${downloadError.message}`);
-        return { success: true }; // Assume success if workflow completed
-      }
+      await this.randomWait(5000, 7000);
+      this.log('✅ Download initiated successfully');
+      return { success: true };
     } catch (error) {
       this.log(`❌ Download error: ${error.message}`);
       return {
@@ -70,26 +66,32 @@ class DallasCountyTexasScraper extends DeedScraper {
   async handleInitialOverlays() {
     try {
       // Check if we need to accept terms or handle initial redirect
-      const acceptButtonSelectors = [
-        'button:has-text("Accept")',
-        'button:has-text("I Accept")',
-        'button:has-text("Continue")',
-        'input[value*="Accept"]',
-        '[class*="accept-button"]'
-      ];
+      const acceptButtonTexts = ['Accept', 'I Accept', 'Continue'];
 
-      // Try to find and click accept buttons
-      for (const selector of acceptButtonSelectors) {
+      // Try to find and click accept buttons by text
+      for (const text of acceptButtonTexts) {
         try {
-          const button = await this.page.$(selector);
+          const button = await this.findElementByText('button', text);
           if (button) {
-            this.log(`✅ Found accept button: ${selector}`);
+            this.log(`✅ Found accept button: ${text}`);
             await button.click();
             await this.randomWait(1000, 2000);
           }
         } catch (error) {
-          // Continue to next selector
+          // Continue to next text
         }
+      }
+
+      // Also try input elements with Accept value
+      try {
+        const input = await this.page.$('input[value*="Accept"]');
+        if (input) {
+          this.log(`✅ Found accept input`);
+          await input.click();
+          await this.randomWait(1000, 2000);
+        }
+      } catch (error) {
+        // Ignore
       }
 
       await this.randomWait(2000, 3000);
@@ -97,12 +99,8 @@ class DallasCountyTexasScraper extends DeedScraper {
       // Dismiss "Where to start" popup if it appears
       this.log('🔍 Checking for "Where to start" popup...');
 
-      // Common selectors for popup close buttons
-      const popupCloseSelectors = [
-        'button:has-text("Close")',
-        'button:has-text("Got it")',
-        'button:has-text("OK")',
-        'button:has-text("Dismiss")',
+      // Try common selectors first
+      const cssSelectors = [
         'button.close',
         'button[aria-label="Close"]',
         '[class*="close"]',
@@ -111,18 +109,33 @@ class DallasCountyTexasScraper extends DeedScraper {
         '.popup button'
       ];
 
-      // Try to find and click popup close buttons
-      for (const selector of popupCloseSelectors) {
+      for (const selector of cssSelectors) {
         try {
-          const closeButton = await this.page.$(selector);
-          if (closeButton) {
+          const button = await this.page.$(selector);
+          if (button) {
             this.log(`✅ Found popup close button: ${selector}`);
-            await closeButton.click();
+            await button.click();
             this.log(`✅ Closed popup`);
             await this.randomWait(500, 1000);
           }
         } catch (error) {
           // Continue to next selector
+        }
+      }
+
+      // Try to find buttons by text content
+      const closeTexts = ['Close', 'Got it', 'OK', 'Dismiss'];
+      for (const text of closeTexts) {
+        try {
+          const button = await this.findElementByText('button', text);
+          if (button) {
+            this.log(`✅ Found popup close button with text: ${text}`);
+            await button.click();
+            this.log(`✅ Closed popup`);
+            await this.randomWait(500, 1000);
+          }
+        } catch (error) {
+          // Continue to next text
         }
       }
 
@@ -137,6 +150,19 @@ class DallasCountyTexasScraper extends DeedScraper {
     } catch (error) {
       this.log(`⚠️ Error handling popup: ${error.message}`);
     }
+  }
+
+  /**
+   * Helper to find element by text content
+   */
+  async findElementByText(tagName, text) {
+    return await this.page.evaluateHandle((tag, searchText) => {
+      const elements = Array.from(document.querySelectorAll(tag));
+      return elements.find(el => {
+        const elText = el.textContent || '';
+        return elText.trim() === searchText || elText.includes(searchText);
+      });
+    }, tagName, text);
   }
 
   findDeedDocument(instrumentNumber) {
@@ -318,24 +344,31 @@ class DallasCountyTexasScraper extends DeedScraper {
       await this.page.click(findResult.actionSelector);
       await this.randomWait(500, 1000);
 
-      const downloadOptions = [
-        'button:has-text("Download")',
-        'button:has-text("Save")',
-        'button:has-text("Export")',
-        '[role="menuitem"]:has-text("Download")',
-        '[class*="download"]'
-      ];
-
-      // Try each download option
-      for (const option of downloadOptions) {
+      // Try CSS selectors first
+      const cssSelectors = ['[class*="download"]', '[role="menuitem"]'];
+      for (const selector of cssSelectors) {
         try {
-          const downloadBtn = await this.page.$(option);
+          const downloadBtn = await this.page.$(selector);
           if (downloadBtn) {
             await downloadBtn.click();
             return;
           }
         } catch (error) {
-          // Continue to next option
+          // Continue to next selector
+        }
+      }
+
+      // Try finding buttons by text
+      const downloadTexts = ['Download', 'Save', 'Export'];
+      for (const text of downloadTexts) {
+        try {
+          const downloadBtn = await this.findElementByText('button', text);
+          if (downloadBtn) {
+            await downloadBtn.click();
+            return;
+          }
+        } catch (error) {
+          // Continue to next text
         }
       }
 
@@ -346,22 +379,28 @@ class DallasCountyTexasScraper extends DeedScraper {
       await this.page.click(findResult.checkboxSelector);
       await this.randomWait(500, 1000);
 
-      const downloadButtons = [
-        'button:has-text("Download Selected")',
-        'button:has-text("Download Checked")',
-        'button[title*="Download"]'
-      ];
+      // Try CSS selector first
+      try {
+        const titleBtn = await this.page.$('button[title*="Download"]');
+        if (titleBtn) {
+          await titleBtn.click();
+          return;
+        }
+      } catch (error) {
+        // Continue
+      }
 
-      // Try each download button
-      for (const btn of downloadButtons) {
+      // Try finding buttons by text
+      const downloadTexts = ['Download Selected', 'Download Checked', 'Download'];
+      for (const text of downloadTexts) {
         try {
-          const downloadBtn = await this.page.$(btn);
+          const downloadBtn = await this.findElementByText('button', text);
           if (downloadBtn) {
             await downloadBtn.click();
             return;
           }
         } catch (error) {
-          // Continue to next button
+          // Continue to next text
         }
       }
 
@@ -373,25 +412,43 @@ class DallasCountyTexasScraper extends DeedScraper {
       await this.randomWait(1000, 2000);
       await this.waitForLoading();
 
-      // Look for download button in details view
-      const downloadButtons = [
-        'button:has-text("Download Document")',
-        'button:has-text("Download PDF")',
-        'a:has-text("Download")',
+      // Try CSS selectors first
+      const cssSelectors = [
         '[title*="Download"]',
-        '[aria-label*="download"]'
+        '[aria-label*="download"]',
+        '[aria-label*="Download"]'
       ];
 
-      // Try each download button
-      for (const btn of downloadButtons) {
+      for (const selector of cssSelectors) {
         try {
-          const downloadBtn = await this.page.$(btn);
+          const downloadBtn = await this.page.$(selector);
           if (downloadBtn) {
             await downloadBtn.click();
             return;
           }
         } catch (error) {
-          // Continue to next button
+          // Continue
+        }
+      }
+
+      // Try finding by text
+      const downloadTexts = ['Download Document', 'Download PDF', 'Download'];
+      for (const text of downloadTexts) {
+        try {
+          // Try button first
+          let downloadBtn = await this.findElementByText('button', text);
+          if (downloadBtn) {
+            await downloadBtn.click();
+            return;
+          }
+          // Try anchor tag
+          downloadBtn = await this.findElementByText('a', text);
+          if (downloadBtn) {
+            await downloadBtn.click();
+            return;
+          }
+        } catch (error) {
+          // Continue to next text
         }
       }
 
