@@ -199,18 +199,26 @@ class DallasCountyTexasScraper extends DeedScraper {
       // Find and click on the document link (NOT the button)
       this.log('📄 Looking for document row...');
       // Strip leading zeros from page number for matching (e.g., "0972" -> "972")
-      const pageNumForMatching = String(parseInt(searchData.pageNumber, 10));
-      const rowClicked = await this.page.evaluate((bookNum, pageNum) => {
+      const pageNumForMatching = searchData.pageNumber ? String(parseInt(searchData.pageNumber, 10)) : null;
+      const instrumentNum = searchData.instrumentNumber;
+
+      const rowClicked = await this.page.evaluate((bookNum, pageNum, instNum) => {
         // Find the row containing our document
         const rows = Array.from(document.querySelectorAll('tbody tr'));
-        const docRow = rows.find(row => {
-          const text = row.textContent;
-          // Match either by book/page or by any identifying info
-          if (bookNum && pageNum) {
+
+        // Try to find the row by book/page if available
+        let docRow = null;
+        if (bookNum && pageNum) {
+          docRow = rows.find(row => {
+            const text = row.textContent;
             return text.includes(bookNum) && text.includes(pageNum);
-          }
-          return rows.length > 0; // If only one result, take it
-        });
+          });
+        }
+
+        // If not found by book/page, take the first row (for instrument number searches)
+        if (!docRow && rows.length > 0) {
+          docRow = rows[0];
+        }
 
         if (!docRow) {
           return { found: false, reason: 'Row not found', rowCount: rows.length };
@@ -220,28 +228,42 @@ class DallasCountyTexasScraper extends DeedScraper {
         // Look for a clickable link that opens the document viewer
         const cells = Array.from(docRow.querySelectorAll('td'));
 
-        // Try to find a link with the volume/page numbers
-        for (const cell of cells) {
-          const link = cell.querySelector('a');
-          if (link) {
-            const linkText = link.textContent;
-            if (linkText.includes(bookNum) || linkText.includes(pageNum)) {
-              link.click();
-              return { found: true, clicked: 'volume-link' };
+        // If we have book/page, try to find a link with those numbers
+        if (bookNum && pageNum) {
+          // Try to find a link with the volume/page numbers
+          for (const cell of cells) {
+            const link = cell.querySelector('a');
+            if (link) {
+              const linkText = link.textContent;
+              if (linkText.includes(bookNum) || linkText.includes(pageNum)) {
+                link.click();
+                return { found: true, clicked: 'volume-link' };
+              }
+            }
+          }
+
+          // Try clicking on cells that contain volume/page text
+          for (const cell of cells) {
+            const text = cell.textContent;
+            if (text.includes(bookNum) && text.includes(pageNum)) {
+              cell.click();
+              return { found: true, clicked: 'volume-cell' };
             }
           }
         }
 
-        // Try clicking on cells that contain volume/page text
-        for (const cell of cells) {
-          const text = cell.textContent;
-          if (text.includes(bookNum) && text.includes(pageNum)) {
-            cell.click();
-            return { found: true, clicked: 'volume-cell' };
+        // For instrument number searches, look for the cell containing the instrument number
+        if (instNum) {
+          for (const cell of cells) {
+            const text = cell.textContent.trim();
+            if (text.includes(instNum)) {
+              cell.click();
+              return { found: true, clicked: 'instrument-cell' };
+            }
           }
         }
 
-        // Last resort: click any link in the row (usually the document ID)
+        // Default: click any link in the row (usually the document ID)
         const firstLink = docRow.querySelector('a');
         if (firstLink) {
           firstLink.click();
@@ -251,7 +273,7 @@ class DallasCountyTexasScraper extends DeedScraper {
         // Final fallback: click the row itself
         docRow.click();
         return { found: true, clicked: 'row' };
-      }, searchData.bookNumber, pageNumForMatching);
+      }, searchData.bookNumber, pageNumForMatching, instrumentNum);
 
       if (!rowClicked.found) {
         this.log('⚠️ Could not find document row');
