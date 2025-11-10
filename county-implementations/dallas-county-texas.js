@@ -34,7 +34,18 @@ class DallasCountyTexasScraper extends DeedScraper {
 
   async downloadDeed(searchData) {
     try {
-      this.log(`🔍 Finding deed with instrument number: ${searchData.instrumentNumber}`);
+      // Check if we have instrument number or book/page
+      const hasInstrumentNumber = searchData.instrumentNumber && searchData.instrumentNumber !== 'null';
+      const hasBookPage = searchData.bookNumber && searchData.pageNumber;
+
+      if (!hasInstrumentNumber && !hasBookPage) {
+        return {
+          success: false,
+          error: 'No instrument number or book/page information available'
+        };
+      }
+
+      this.log(`🔍 Finding deed with ${hasInstrumentNumber ? `instrument number: ${searchData.instrumentNumber}` : `book: ${searchData.bookNumber}, page: ${searchData.pageNumber}`}`);
 
       // Navigate to Dallas County Clerk Official Records search
       const clerkUrl = 'https://dallas.tx.publicsearch.us/';
@@ -54,27 +65,128 @@ class DallasCountyTexasScraper extends DeedScraper {
         this.log('⚠️ No popup to close');
       }
 
-      // Search for instrument number in the Quick Search field
-      this.log(`🔍 Searching for instrument number: ${searchData.instrumentNumber}`);
+      let searchIdentifier;
 
-      // Find the main search input field (the large text box to the right of "Property Records")
-      const searchInput = await this.page.$('input[placeholder*="grantor"]') ||
-                          await this.page.$('input[placeholder*="doc"]') ||
-                          await this.page.$('input[type="text"]');
+      if (hasInstrumentNumber) {
+        // Search by instrument number (quick search)
+        this.log(`🔍 Searching for instrument number: ${searchData.instrumentNumber}`);
 
-      if (!searchInput) {
-        return { success: false, error: 'Could not find search input field' };
+        // Find the main search input field
+        const searchInput = await this.page.$('input[placeholder*="grantor"]') ||
+                            await this.page.$('input[placeholder*="doc"]') ||
+                            await this.page.$('input[type="text"]');
+
+        if (!searchInput) {
+          return { success: false, error: 'Could not find search input field' };
+        }
+
+        // Type the instrument number
+        await searchInput.click({ clickCount: 3 });
+        await this.randomWait(300, 500);
+        await searchInput.type(searchData.instrumentNumber);
+        await this.randomWait(1000, 2000);
+
+        // Click search
+        this.log('🔍 Clicking search button...');
+        await this.page.keyboard.press('Enter');
+
+        searchIdentifier = searchData.instrumentNumber;
+      } else {
+        // Search by book/page (advanced search)
+        this.log(`🔍 Using advanced search for book: ${searchData.bookNumber}, page: ${searchData.pageNumber}`);
+
+        // Click on "Advanced Search" link or button
+        const advancedSearchClicked = await this.page.evaluate(() => {
+          const links = Array.from(document.querySelectorAll('a, button'));
+          const advLink = links.find(link => {
+            const text = link.textContent.toLowerCase();
+            return text.includes('advanced') && text.includes('search');
+          });
+          if (advLink) {
+            advLink.click();
+            return true;
+          }
+          return false;
+        });
+
+        if (!advancedSearchClicked) {
+          return { success: false, error: 'Could not find advanced search option' };
+        }
+
+        await this.randomWait(2000, 3000);
+
+        // Fill in book and page fields
+        this.log('📝 Filling book and page fields...');
+
+        // Find and fill book field
+        const bookFilled = await this.page.evaluate((book) => {
+          const inputs = Array.from(document.querySelectorAll('input'));
+          const bookInput = inputs.find(input => {
+            const label = input.labels?.[0]?.textContent?.toLowerCase() || '';
+            const placeholder = (input.placeholder || '').toLowerCase();
+            return label.includes('book') || label.includes('volume') ||
+                   placeholder.includes('book') || placeholder.includes('volume');
+          });
+          if (bookInput) {
+            bookInput.value = book;
+            bookInput.dispatchEvent(new Event('input', { bubbles: true }));
+            bookInput.dispatchEvent(new Event('change', { bubbles: true }));
+            return true;
+          }
+          return false;
+        }, searchData.bookNumber);
+
+        if (!bookFilled) {
+          return { success: false, error: 'Could not find book/volume field' };
+        }
+
+        await this.randomWait(500, 1000);
+
+        // Find and fill page field
+        const pageFilled = await this.page.evaluate((page) => {
+          const inputs = Array.from(document.querySelectorAll('input'));
+          const pageInput = inputs.find(input => {
+            const label = input.labels?.[0]?.textContent?.toLowerCase() || '';
+            const placeholder = (input.placeholder || '').toLowerCase();
+            return label.includes('page') || placeholder.includes('page');
+          });
+          if (pageInput) {
+            pageInput.value = page;
+            pageInput.dispatchEvent(new Event('input', { bubbles: true }));
+            pageInput.dispatchEvent(new Event('change', { bubbles: true }));
+            return true;
+          }
+          return false;
+        }, searchData.pageNumber);
+
+        if (!pageFilled) {
+          return { success: false, error: 'Could not find page field' };
+        }
+
+        await this.randomWait(1000, 2000);
+
+        // Click search button
+        this.log('🔍 Clicking search button...');
+        const searchClicked = await this.page.evaluate(() => {
+          const buttons = Array.from(document.querySelectorAll('button'));
+          const searchBtn = buttons.find(btn => {
+            const text = btn.textContent.toLowerCase();
+            return text.includes('search') && !text.includes('clear');
+          });
+          if (searchBtn) {
+            searchBtn.click();
+            return true;
+          }
+          return false;
+        });
+
+        if (!searchClicked) {
+          await this.page.keyboard.press('Enter');
+        }
+
+        searchIdentifier = `Book ${searchData.bookNumber}, Page ${searchData.pageNumber}`;
       }
 
-      // Type the instrument number
-      await searchInput.click({ clickCount: 3 }); // Select all existing text
-      await this.randomWait(300, 500);
-      await searchInput.type(searchData.instrumentNumber);
-      await this.randomWait(1000, 2000);
-
-      // Click the search button
-      this.log('🔍 Clicking search button...');
-      await this.page.keyboard.press('Enter');
       await this.randomWait(3000, 5000);
 
       // Wait for search results
@@ -84,11 +196,16 @@ class DallasCountyTexasScraper extends DeedScraper {
 
       // Find and click on the row containing the document
       this.log('📄 Looking for document row...');
-      const rowClicked = await this.page.evaluate((instrumentNum) => {
-        // Find the row containing our instrument number
+      const rowClicked = await this.page.evaluate((bookNum, pageNum) => {
+        // Find the row containing our document
         const rows = Array.from(document.querySelectorAll('tbody tr'));
         const docRow = rows.find(row => {
-          return row.textContent.includes(instrumentNum);
+          const text = row.textContent;
+          // Match either by book/page or by any identifying info
+          if (bookNum && pageNum) {
+            return text.includes(bookNum) && text.includes(pageNum);
+          }
+          return rows.length > 0; // If only one result, take it
         });
 
         if (!docRow) {
@@ -105,7 +222,7 @@ class DallasCountyTexasScraper extends DeedScraper {
         // If no button, try clicking the row itself
         docRow.click();
         return { found: true, clicked: 'row' };
-      }, searchData.instrumentNumber);
+      }, searchData.bookNumber, searchData.pageNumber);
 
       if (!rowClicked.found) {
         this.log('⚠️ Could not find document row');
@@ -934,8 +1051,11 @@ class DallasCountyTexasScraper extends DeedScraper {
         // Match instrument number pattern (e.g., INT202400152203)
         const instMatch = bodyText.match(/INT(\d+)/);
 
-        // Match volume/book/page pattern
-        const volMatch = bodyText.match(/Vol(?:ume)?\s*(\d+).*?Page\s*(\d+)/i);
+        // Match volume/book/page patterns:
+        // Pattern 1: "Vol 12345 Page 678" or "Volume 12345 Page 678"
+        const volMatch1 = bodyText.match(/Vol(?:ume)?\s*(\d+).*?Page\s*(\d+)/i);
+        // Pattern 2: "vol99081/0972" (volume/page format)
+        const volMatch2 = bodyText.match(/vol\s*(\d+)\s*\/\s*(\d+)/i);
 
         // Also try to find in table cells
         const cells = Array.from(document.querySelectorAll('td, div'));
@@ -945,24 +1065,44 @@ class DallasCountyTexasScraper extends DeedScraper {
 
         for (const cell of cells) {
           const text = cell.textContent || '';
+
+          // Check for INT pattern
           if (!foundInst && text.includes('INT')) {
             const match = text.match(/INT(\d+)/);
             if (match) foundInst = match[1];
           }
+
+          // Check for vol/page pattern (e.g., "vol99081/0972")
+          if (!foundVol && !foundPage) {
+            const slashMatch = text.match(/vol\s*(\d+)\s*\/\s*(\d+)/i);
+            if (slashMatch) {
+              foundVol = slashMatch[1];
+              foundPage = slashMatch[2];
+            }
+          }
+
+          // Check for "Vol 123" pattern
           if (!foundVol && text.match(/Vol/i)) {
             const match = text.match(/Vol(?:ume)?\s*(\d+)/i);
             if (match) foundVol = match[1];
           }
+
+          // Check for "Page 456" pattern (only if we already found a volume)
           if (!foundPage && foundVol && text.match(/Page/i)) {
             const match = text.match(/Page\s*(\d+)/i);
             if (match) foundPage = match[1];
           }
         }
 
+        // Use regex matches if cell search didn't find anything
+        const finalInst = instMatch ? instMatch[1] : foundInst;
+        const finalVol = volMatch2 ? volMatch2[1] : (volMatch1 ? volMatch1[1] : foundVol);
+        const finalPage = volMatch2 ? volMatch2[2] : (volMatch1 ? volMatch1[2] : foundPage);
+
         return {
-          instrumentNumber: instMatch ? instMatch[1] : foundInst,
-          bookNumber: volMatch ? volMatch[1] : foundVol,
-          pageNumber: volMatch ? volMatch[2] : foundPage,
+          instrumentNumber: finalInst,
+          bookNumber: finalVol,
+          pageNumber: finalPage,
           rawText: bodyText.substring(0, 500)
         };
       });
