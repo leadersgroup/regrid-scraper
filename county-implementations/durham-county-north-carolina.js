@@ -582,6 +582,14 @@ class DurhamCountyNorthCarolinaScraper extends DeedScraper {
       this.log('✅ Clicked document number');
       await this.randomWait(3000, 5000);
 
+      // Verify we're on the Register of Deeds site
+      const currentPageUrl = this.page.url();
+      this.log(`Current page after clicking document: ${currentPageUrl}`);
+
+      if (!currentPageUrl.includes('rodweb.dconc.gov')) {
+        this.log('⚠️ Not on Register of Deeds site, might be on wrong page');
+      }
+
       // Find and click either a Download button or View button/link
       this.log('📥 Looking for Download or View button...');
       const btnClicked = await this.page.evaluate(() => {
@@ -594,12 +602,22 @@ class DurhamCountyNorthCarolinaScraper extends DeedScraper {
           const text = (el.textContent || '').trim();
           // Match "View" or "View →" (with arrow)
           if (text.match(/^View\s*→?\s*$/) && el.offsetParent !== null) {
+            // Check if this is a link to another domain (property.spatialest.com)
+            // We want to EXCLUDE those and only click View buttons that stay on rodweb.dconc.gov
+            const href = el.href || el.parentElement?.href || '';
+
+            // Skip if it's a link to property.spatialest.com or other external sites
+            if (href && (href.includes('spatialest.com') || href.includes('property.'))) {
+              continue;
+            }
+
             const rect = el.getBoundingClientRect();
             // Store candidates with their position (prefer elements lower on page, likely in content area)
             viewCandidates.push({
               element: el,
               text: text,
               y: rect.y,
+              href: href,
               isLink: !!(el.onclick || el.parentElement?.onclick || el.tagName === 'A' || el.parentElement?.tagName === 'A')
             });
           }
