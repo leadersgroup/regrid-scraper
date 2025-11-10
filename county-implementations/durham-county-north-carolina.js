@@ -160,8 +160,8 @@ class DurhamCountyNorthCarolinaScraper extends DeedScraper {
       await this.randomWait(2000, 3000);
 
       // Extract ONLY the street address (number + street name)
-      // e.g., "6409 Winding Arch Dr Durham NC 27713" -> "6409 winding arch dr"
-      // Strategy: Take everything up to common street suffixes, then stop
+      // e.g., "6409 Winding Arch Dr Durham NC 27713" -> "6409 winding arch"
+      // Strategy: Take everything up to (but not including) common street suffixes
       let searchTerm = address.toLowerCase().trim();
 
       // Common street suffixes to look for
@@ -169,13 +169,13 @@ class DurhamCountyNorthCarolinaScraper extends DeedScraper {
                               'boulevard', 'blvd', 'lane', 'ln', 'court', 'ct', 'circle', 'cir',
                               'way', 'place', 'pl', 'trail', 'parkway', 'pkwy'];
 
-      // Find the first street suffix and cut after it
+      // Find the first street suffix and cut BEFORE it
       for (const suffix of streetSuffixes) {
         const regex = new RegExp(`\\b${suffix}\\b`, 'i');
         const match = searchTerm.match(regex);
         if (match) {
-          // Get everything up to and including the suffix
-          const index = searchTerm.indexOf(match[0]) + match[0].length;
+          // Get everything up to (but not including) the suffix
+          const index = searchTerm.indexOf(match[0]);
           searchTerm = searchTerm.substring(0, index);
           break;
         }
