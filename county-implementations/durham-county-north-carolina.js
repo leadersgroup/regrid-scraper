@@ -159,21 +159,32 @@ class DurhamCountyNorthCarolinaScraper extends DeedScraper {
       await this.page.goto(propertyUrl, { waitUntil: 'networkidle2', timeout: 60000 });
       await this.randomWait(2000, 3000);
 
-      // Extract address without city, state, and zip for search
+      // Extract ONLY the street address (number + street name)
       // e.g., "6409 Winding Arch Dr Durham NC 27713" -> "6409 winding arch dr"
-      // Remove common city names, state abbreviations, and zip codes
+      // Strategy: Take everything up to common street suffixes, then stop
       let searchTerm = address.toLowerCase().trim();
 
-      // Remove zip code (5 digits at the end)
-      searchTerm = searchTerm.replace(/\b\d{5}(-\d{4})?\b/g, '');
+      // Common street suffixes to look for
+      const streetSuffixes = ['street', 'st', 'drive', 'dr', 'road', 'rd', 'avenue', 'ave',
+                              'boulevard', 'blvd', 'lane', 'ln', 'court', 'ct', 'circle', 'cir',
+                              'way', 'place', 'pl', 'trail', 'parkway', 'pkwy'];
 
-      // Remove "durham", "nc", "north carolina"
+      // Find the first street suffix and cut after it
+      for (const suffix of streetSuffixes) {
+        const regex = new RegExp(`\\b${suffix}\\b`, 'i');
+        const match = searchTerm.match(regex);
+        if (match) {
+          // Get everything up to and including the suffix
+          const index = searchTerm.indexOf(match[0]) + match[0].length;
+          searchTerm = searchTerm.substring(0, index);
+          break;
+        }
+      }
+
+      // Clean up
       searchTerm = searchTerm
-        .replace(/\bdurham\b/gi, '')
-        .replace(/\bnc\b/gi, '')
-        .replace(/\bnorth carolina\b/gi, '')
-        .replace(/\s+/g, ' ') // Normalize whitespace
         .replace(/,/g, '') // Remove commas
+        .replace(/\s+/g, ' ') // Normalize whitespace
         .trim();
 
       this.log(`🔍 Searching for: ${searchTerm}`);
