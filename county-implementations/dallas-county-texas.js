@@ -646,9 +646,20 @@ class DallasCountyTexasScraper extends DeedScraper {
         searchParams: searchData,
         events: []
       };
-      // Navigate to public search page
-      this.log('📍 Loading Dallas County Public Search...');
-      await this.page.goto('https://dallas.tx.publicsearch.us/', {
+      // Navigate directly to search results
+      this.log('📍 Loading Dallas County Public Search with parameters...');
+      const searchParams = new URLSearchParams();
+      searchParams.set('department', 'RP'); // Real Property
+      searchParams.set('searchType', 'quickSearch');
+      searchParams.set('searchValue', searchData.instrumentNumber);
+      searchParams.set('keywordSearch', 'false');
+      searchParams.set('searchOcrText', 'false');
+      searchParams.set('recordedDateRange', '18000101,20251104'); // Wide date range
+      
+      const searchUrl = `https://dallas.tx.publicsearch.us/results?${searchParams.toString()}`;
+      this.log(`🔗 Navigating to: ${searchUrl}`);
+      
+      await this.page.goto(searchUrl, {
         waitUntil: 'networkidle2',
         timeout: 60000
       });
@@ -766,16 +777,36 @@ class DallasCountyTexasScraper extends DeedScraper {
         });
         this.log(`📝 All form inputs on page: ${JSON.stringify(allInputs, null, 2)}`);
 
-        // Find the search input field using multiple strategies
+        // Find the search input field - React implementation
         const propertyRecordsInput = await this.page.evaluate(() => {
-          // Get all text inputs on the page, excluding hidden and special inputs
-          const allInputs = Array.from(document.querySelectorAll('input')).filter(input => {
-            const type = (input.type || '').toLowerCase();
-            const isVisible = input.offsetParent !== null;
-            const notSpecial = !['hidden', 'submit', 'button', 'checkbox', 'radio'].includes(type);
-            const hasReasonableSize = input.offsetWidth > 50; // Minimum width for a search field
-            return isVisible && notSpecial && hasReasonableSize;
-          });
+          // Look for React-specific elements and modern search inputs
+          const selectors = [
+            // React select input for property records
+            'input[placeholder*="Search for grantor"], input[placeholder*="doc#"]',
+            // CSS class based selectors for React components
+            'input.css-1a2f1cz',
+            // Generic search input selectors
+            'input[type="search"]',
+            'input[placeholder*="search" i]',
+            // React component selectors
+            '[class*="search"] input',
+            '[class*="input"] input'
+          ];
+          
+          for (const selector of selectors) {
+            const input = document.querySelector(selector);
+            if (input && !input.disabled && input.offsetParent !== null) {
+              return {
+                found: true,
+                selector: selector,
+                id: input.id,
+                name: input.name,
+                placeholder: input.placeholder,
+                className: input.className,
+                context: 'React search input'
+              };
+            }
+          }
 
           // Look for an input that has "Property Records" as label/preceding text
           // Then find the NEXT input after it
@@ -901,9 +932,73 @@ class DallasCountyTexasScraper extends DeedScraper {
             if (input) input.value = '';
           }, searchInput);
 
-          // Enter instrument number (without INT prefix)
-          await this.page.type(searchInput, searchData.instrumentNumber, { delay: 100 });
-          this.log(`✅ Entered instrument number: ${searchData.instrumentNumber}`);
+          // Enhanced React-aware input handling with better synthetic events
+          try {
+            // Give React time to initialize
+            await new Promise(resolve => setTimeout(resolve, 1000));
+            
+            // First try using React's own event system with proper synthetic events
+            const valueEntered = await this.page.evaluate((sel, value) => {
+              const input = document.querySelector(sel);
+              if (!input) return false;
+              
+              try {
+                // Get React props key
+                const propsKey = Object.keys(input).find(key => key.startsWith('__reactProps$'));
+                
+                if (propsKey && input[propsKey]) {
+                  const props = input[propsKey];
+                  
+                  // Try using onChange handler if available
+                  if (props.onChange) {
+                    // Create proper synthetic event
+                    const event = {
+                      target: input,
+                      currentTarget: input,
+                      type: 'change',
+                      bubbles: true,
+                      cancelable: true,
+                      defaultPrevented: false,
+                      isDefaultPrevented: () => false,
+                      stopPropagation: () => {},
+                      preventDefault: () => {},
+                      value: value
+                    };
+                    
+                    // Set native value first
+                    input.value = value;
+                    
+                    // Dispatch native events
+                    input.dispatchEvent(new Event('focus', { bubbles: true }));
+                    input.dispatchEvent(new Event('input', { bubbles: true }));
+                    input.dispatchEvent(new Event('change', { bubbles: true }));
+                    
+                    // Call handler and update DOM
+                    props.onChange(event);
+                    return true;
+                  }
+                }
+              } catch (e) {
+                console.error('React property access failed:', e);
+              }
+              return false;
+            }, searchInput, searchData.instrumentNumber);
+            
+            if (!valueEntered) {
+              // Fallback to direct typing if React events failed
+              await this.page.click(searchInput, { clickCount: 3 }); // Select all
+              await this.page.keyboard.press('Backspace'); // Clear
+              await this.page.type(searchInput, searchData.instrumentNumber, { delay: 100 });
+            }
+            
+            // Give React time to process
+            await new Promise(resolve => setTimeout(resolve, 1000));
+            this.log(`✅ Entered instrument number: ${searchData.instrumentNumber}`);
+          
+        } catch (inputError) {
+          this.log(`⚠️ Error entering instrument number: ${inputError.message}`);
+          throw inputError;
+        }
 
           // Verify the value was entered
           const enteredValue = await this.page.evaluate((sel) => {
@@ -988,9 +1083,41 @@ class DallasCountyTexasScraper extends DeedScraper {
         }
 
         if (!submitButtonClicked) {
-          this.log('⚠️ No submit button found, pressing Enter');
+          this.log('⚠️ No submit button found, trying alternative submission methods');
+          
+          // Try pressing Enter first
           await this.page.keyboard.press('Enter');
-          this.log('✅ Pressed Enter key');
+          await this.randomWait(1000, 2000);
+          
+          // Check if search was submitted
+          const wasSubmitted = await this.page.evaluate(() => window._searchSubmitted);
+          
+          if (!wasSubmitted) {
+            // Try React-specific form submission
+            await this.page.evaluate((sel) => {
+              const input = document.querySelector(sel);
+              if (input) {
+                // Try to find React form wrapper
+                let form = input.closest('form') || input.closest('[role="search"]') || input.closest('[class*="search"]');
+                
+                if (form) {
+                  // Create and dispatch submit event
+                  const submitEvent = new Event('submit', { bubbles: true, cancelable: true });
+                  form.dispatchEvent(submitEvent);
+                }
+                
+                // Also try triggering React's synthetic events
+                const reactKey = Object.keys(input).find(key => key.startsWith('__reactProps$'));
+                if (reactKey && input[reactKey].onKeyPress) {
+                  input[reactKey].onKeyPress({ key: 'Enter', code: 'Enter', keyCode: 13 });
+                }
+              }
+            }, searchInput);
+            
+            this.log('✅ Tried React-specific form submission');
+          } else {
+            this.log('✅ Search was submitted via Enter key');
+          }
         }
 
       } else if (searchData.bookNumber && searchData.pageNumber) {
@@ -1289,51 +1416,166 @@ class DallasCountyTexasScraper extends DeedScraper {
       // The document number is clickable and leads to the document detail/view page
       this.log(`🔍 Looking for clickable document number: ${searchData.instrumentNumber}`);
 
-      const deedLinkSelectors = [
-        `a:has-text("${searchData.instrumentNumber}")`,  // Link containing the exact instrument number
-        'a[href*=".pdf"]',                               // Direct PDF link
-        'table tbody tr a',                              // Any link in table row
-        'table a',
-        'tbody a'
-      ];
+      // Wait for results to load
+      await new Promise(resolve => setTimeout(resolve, 5000));
+
+      // Try to find the document in the results
+      const documentInfo = await this.page.evaluate((instrumentNumber) => {
+        // Look for the document in the results grid
+        const grid = document.querySelector('#documentsGrid, #searchResults, table');
+        if (!grid) return { found: false, reason: 'No results grid found' };
+
+        // Look for all table rows
+        const rows = Array.from(grid.querySelectorAll('tr'));
+        if (!rows.length) return { found: false, reason: 'No rows in results' };
+
+        // Find row containing our instrument number
+        for (const row of rows) {
+          const text = row.textContent || '';
+          const cells = Array.from(row.querySelectorAll('td'));
+
+          if (text.includes(instrumentNumber)) {
+            // Found our document, look for action links
+            const links = Array.from(row.querySelectorAll('a'));
+            const viewLinks = links.filter(a => 
+              a.href.includes('document') || 
+              a.href.includes('view') ||
+              a.href.includes('details') ||
+              (a.textContent || '').toLowerCase().includes('view') ||
+              (a.textContent || '').toLowerCase().includes('document')
+            );
+
+            if (viewLinks.length) {
+              return {
+                found: true,
+                link: viewLinks[0].href,
+                text: viewLinks[0].textContent
+              };
+            }
+
+            // If no direct view links, return all links for analysis
+            if (links.length) {
+              return {
+                found: true,
+                links: links.map(a => ({
+                  href: a.href,
+                  text: a.textContent?.trim()
+                }))
+              };
+            }
+
+            // Return row info for debugging
+            return {
+              found: true,
+              rowText: text,
+              cells: cells.map(td => td.textContent?.trim())
+            };
+          }
+        }
+
+        return { found: false, reason: 'Document not found in results' };
+      }, searchData.instrumentNumber);
+
+      this.log('📄 Document search result:', JSON.stringify(documentInfo, null, 2));
+
+      if (!documentInfo.found) {
+        throw new Error(`Could not find document in search results: ${documentInfo.reason}`);
+      }
 
       let deedLink = null;
       let deedLinkHref = null;
 
+      // If we found a direct view link, use it
+      if (documentInfo.link) {
+        deedLink = documentInfo.link;
+        deedLinkHref = documentInfo.link;
+      }
+
+      // Define selectors for finding document links
+      const deedLinkSelectors = [
+        `a[data-docnumber="${searchData.instrumentNumber}"]`,
+        `a[title*="${searchData.instrumentNumber}"]`,
+        'a[href*="document"], a[href*="doc"]',
+        'a[href*="view"], a[href*="details"]',
+        'a[onclick*="document"], a[onclick*="view"]',
+        'tr[data-docid] a, tr[data-docnum] a',
+        '.document-link, .doc-link, .view-link',
+        '[role="link"]:has-text("Document"), [role="link"]:has-text("View")',
+        'a:has-text("Document"), a:has-text("View")',
+        'table tbody tr td a'
+      ];
+
+      // Try each selector until we find a valid document link
       for (const selector of deedLinkSelectors) {
         try {
           this.log(`🔍 Trying selector: ${selector}`);
-          await this.page.waitForSelector(selector, { timeout: 5000 });
-          this.log(`✅ Selector found: ${selector}`);
+          
+          // Wait for selector with a short timeout to avoid long delays
+          await this.page.waitForSelector(selector, { timeout: 2000 }).catch(() => null);
+          
+          // Get all matching elements for this selector
+          const elements = await this.page.$$(selector);
+          
+          if (elements.length > 0) {
+            this.log(`✅ Found ${elements.length} matches for selector: ${selector}`);
 
-          // Get the actual href and text before committing to this link
-          const linkInfo = await this.page.evaluate((sel) => {
-            const link = document.querySelector(sel);
-            if (!link) return null;
-            return {
-              href: link.href,
-              text: link.textContent?.trim(),
-              tagName: link.tagName
-            };
-          }, selector);
+            // Check each element for document-related attributes
+            for (const element of elements) {
+              const linkInfo = await this.page.evaluate((el) => {
+                if (!el) return null;
+                
+                const href = el.href || el.getAttribute('href') || '';
+                const text = el.innerText || el.textContent || '';
+                const onclick = el.getAttribute('onclick') || '';
+                const title = el.getAttribute('title') || '';
+                const dataDoc = el.getAttribute('data-docnumber') || '';
+                
+                // Score the link based on relevance
+                let score = 0;
+                const documentIndicators = ['document', 'deed', 'view', 'pdf'];
+                documentIndicators.forEach(indicator => {
+                  if (href.toLowerCase().includes(indicator)) score += 2;
+                  if (text.toLowerCase().includes(indicator)) score += 2;
+                  if (onclick.toLowerCase().includes(indicator)) score += 1;
+                  if (title.toLowerCase().includes(indicator)) score += 1;
+                });
+                
+                return {
+                  href,
+                  text,
+                  onclick,
+                  title,
+                  dataDoc,
+                  score
+                };
+              }, element);
 
-          if (linkInfo && linkInfo.href) {
-            deedLink = selector;
-            deedLinkHref = linkInfo.href;
-            this.log(`✅ Found deed link: ${selector}`);
-            this.log(`🔗 Link href: ${linkInfo.href}`);
-            this.log(`📝 Link text: "${linkInfo.text}"`);
-            this.log(`🏷️ Tag: ${linkInfo.tagName}`);
-            break;
-          } else {
-            this.log(`⚠️ Link found but no href: ${selector}`);
+              // If this link looks promising, try to use it
+              if (linkInfo && linkInfo.href) {
+                deedLink = selector;
+                deedLinkHref = linkInfo.href;
+                this.log(`✅ Found deed link with score ${linkInfo.score || 0}:`);
+                this.log(`🔗 Link href: ${linkInfo.href}`);
+                this.log(`📝 Link text: "${linkInfo.text}"`);
+                this.log(`🏷️ Data attributes: ${linkInfo.dataDoc}`);
+                
+                // If this is a high-confidence match (score > 3), use it immediately
+                if (linkInfo.score > 3) {
+                  break;
+                }
+              }
+            }
+            
+            // If we found a high-confidence match in this selector's elements, stop searching
+            if (deedLink && deedLinkHref && typeof deedLinkHref === 'string') {
+              break;
+            }
           }
         } catch (e) {
-          this.log(`⚠️ Link ${selector} not found: ${e.message}`);
+          this.log(`⚠️ Error checking selector ${selector}: ${e.message}`);
+          continue;
         }
-      }
-
-      // Check if the link we found is actually a PDF or a detail page
+      }      // Check if the link we found is actually a PDF or a detail page
       if (deedLink && deedLinkHref && !deedLinkHref.includes('.pdf')) {
         this.log('⚠️ Link found is not a direct PDF, it may be a detail page link');
         this.log('🔗 Navigating to detail page first...');
@@ -1371,13 +1613,43 @@ class DallasCountyTexasScraper extends DeedScraper {
         // Alternative: Look for result table rows that might need to be clicked first
         this.log('⚠️ No direct PDF link found, trying to find result rows...');
 
-        // First, get count of rows for logging
-        const rowCount = await this.page.evaluate(() => {
-          return document.querySelectorAll('table tbody tr').length;
-        });
-        this.log(`📊 Examining ${rowCount} table rows for clickable results...`);
+          // Enhanced debugging of page content
+          const pageContent = await this.page.evaluate(() => {
+            const content = {
+              url: window.location.href,
+              title: document.title,
+              rowCount: document.querySelectorAll('table tbody tr').length,
+              tableCount: document.querySelectorAll('table').length,
+              allLinks: Array.from(document.querySelectorAll('a')).map(a => ({
+                href: a.href,
+                text: a.textContent?.trim(),
+                classes: a.className,
+                dataset: Object.keys(a.dataset)
+              })),
+              tableHTML: document.querySelector('table')?.outerHTML,
+              bodyText: document.body.innerText.substring(0, 1000)
+            };
+            return content;
+          });
 
-        const resultRowClick = await this.page.evaluate(() => {
+          this.log(`📊 Current page analysis:
+URL: ${pageContent.url}
+Title: ${pageContent.title}
+Tables found: ${pageContent.tableCount}
+Table rows: ${pageContent.rowCount}
+Links found: ${pageContent.allLinks.length}
+Page text preview: ${pageContent.bodyText}
+
+Table HTML: ${pageContent.tableHTML}
+
+Links:
+${JSON.stringify(pageContent.allLinks, null, 2)}
+`);
+
+          await this.page.screenshot({ 
+            path: `/tmp/dallas-search-${Date.now()}.png`,
+            fullPage: true 
+          });        const resultRowClick = await this.page.evaluate(() => {
           // Look for table rows in results (skip header rows)
           const rows = Array.from(document.querySelectorAll('table tbody tr'));
 
