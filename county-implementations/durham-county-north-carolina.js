@@ -159,9 +159,23 @@ class DurhamCountyNorthCarolinaScraper extends DeedScraper {
       await this.page.goto(propertyUrl, { waitUntil: 'networkidle2', timeout: 60000 });
       await this.randomWait(2000, 3000);
 
-      // Extract address without state/zip for search
-      // e.g., "6409 Winding Arch Dr Durham NC 27713" -> "6409 winding arch"
-      const searchTerm = address.split(',')[0].toLowerCase().trim();
+      // Extract address without city, state, and zip for search
+      // e.g., "6409 Winding Arch Dr Durham NC 27713" -> "6409 winding arch dr"
+      // Remove common city names, state abbreviations, and zip codes
+      let searchTerm = address.toLowerCase().trim();
+
+      // Remove zip code (5 digits at the end)
+      searchTerm = searchTerm.replace(/\b\d{5}(-\d{4})?\b/g, '');
+
+      // Remove "durham", "nc", "north carolina"
+      searchTerm = searchTerm
+        .replace(/\bdurham\b/gi, '')
+        .replace(/\bnc\b/gi, '')
+        .replace(/\bnorth carolina\b/gi, '')
+        .replace(/\s+/g, ' ') // Normalize whitespace
+        .replace(/,/g, '') // Remove commas
+        .trim();
+
       this.log(`🔍 Searching for: ${searchTerm}`);
 
       // Wait for search input and type address
@@ -645,19 +659,25 @@ class DurhamCountyNorthCarolinaScraper extends DeedScraper {
           }
         }
 
-        // Priority 2: Look for clickable elements with "view" in text
+        // Priority 2: Look for clickable elements with "view" in text (but NOT external links)
         const clickableElements = Array.from(document.querySelectorAll('a, button, input[type="button"], input[type="submit"], div[onclick], span[onclick], div[class*="click"], span[class*="click"]'));
 
         for (const el of clickableElements) {
           const text = (el.textContent || el.value || el.title || el.alt || '').trim().toLowerCase();
           const className = (el.className || '').toLowerCase();
           const id = (el.id || '').toLowerCase();
+          const href = el.href || '';
+
+          // Skip external links to property sites
+          if (href && (href.includes('spatialest.com') || href.includes('property.'))) {
+            continue;
+          }
 
           // Check for view-related text/attributes
           if ((text.includes('view') || className.includes('view') || id.includes('view')) &&
               el.offsetParent !== null) {
             el.click();
-            return { success: true, text: el.textContent || el.value || el.title || 'View', type: 'view' };
+            return { success: true, text: el.textContent || el.value || el.title || 'View', type: 'view', href: href };
           }
         }
 
@@ -723,106 +743,135 @@ class DurhamCountyNorthCarolinaScraper extends DeedScraper {
 
       this.log(`✅ Clicked ${btnClicked.type} button: ${btnClicked.text}`);
 
-      // Wait for new window/tab with PDF to open using browser.waitForTarget()
-      this.log('⏳ Waiting for PDF window to open...');
+      // Check if the current page navigated after clicking View
+      await this.randomWait(2000, 3000);
+      const currentUrlAfterClick = this.page.url();
+      this.log(`Current URL after clicking View: ${currentUrlAfterClick}`);
 
-      let pdfPage = null;
-      try {
-        // Wait for a new target (window/tab) to be created
-        const newTarget = await this.browser.waitForTarget(
-          target => target.type() === 'page' && target.url() !== 'about:blank',
-          { timeout: 10000 }
-        );
+      // Wait for new window/tab to open after clicking View
+      this.log('⏳ Waiting for new window to open after clicking View...');
+      await this.randomWait(5000, 7000); // Give it more time to open
 
-        pdfPage = await newTarget.page();
-        this.log(`✅ New window opened: ${pdfPage.url()}`);
-      } catch (error) {
-        // Fallback: Try to find new page manually
-        this.log('⚠️ waitForTarget timeout, trying manual detection...');
-        await this.randomWait(3000, 5000);
+      const allPages = await this.browser.pages();
+      this.log(`📄 Found ${allPages.length} total windows`);
 
-        const allPages = await this.browser.pages();
-        this.log(`📄 Found ${allPages.length} total windows`);
+      // Log all pages for debugging
+      for (const page of allPages) {
+        this.log(`  - Window: ${page.url()}`);
+      }
 
-        for (const page of allPages) {
+      // Find the rodweb.dconc.gov page that's NOT the search page
+      let rodPage = null;
+      for (const page of allPages) {
+        const url = page.url();
+        // Look specifically for rodweb.dconc.gov pages that are NOT the search page
+        if (url.includes('rodweb.dconc.gov') && !url.includes('DOCSEARCH')) {
+          rodPage = page;
+          this.log(`  ✓ Found ROD document page: ${url}`);
+          break;
+        }
+      }
+
+      // If we found a rodweb page, use it; otherwise look for any new page
+      let pdfPage = rodPage;
+
+      if (!pdfPage) {
+        this.log('⚠️ No rodweb.dconc.gov document page found, checking for other new windows...');
+        // Get the newest page that's not the current page
+        for (let i = allPages.length - 1; i >= 0; i--) {
+          const page = allPages[i];
           const url = page.url();
-          this.log(`  - Checking window: ${url}`);
-          // Look for PDF URL or new window on rodweb domain that's not the search page
-          if (url.includes('.pdf') ||
-              (page !== this.page && url.includes('rodweb.dconc.gov') && !url.includes('DOCSEARCH'))) {
+          // Skip current page, about:blank, and property tax site
+          if (page !== this.page &&
+              url !== 'about:blank' &&
+              !url.includes('spatialest.com')) {
             pdfPage = page;
+            this.log(`  ✓ Using page: ${url}`);
             break;
           }
         }
-
-        // If still no PDF window found, try the last page
-        if (!pdfPage && allPages.length > 1) {
-          const lastPage = allPages[allPages.length - 1];
-          if (lastPage !== this.page && lastPage.url() !== 'about:blank') {
-            pdfPage = lastPage;
-            this.log(`⚠️ Using last window: ${pdfPage.url()}`);
-          }
-        }
       }
 
-      if (!pdfPage || pdfPage === this.page) {
+      if (!pdfPage) {
         return {
           success: false,
-          error: 'Could not find PDF window'
+          error: 'Could not find new window after clicking View'
         };
       }
 
-      // Switch to PDF page
+      // Switch to the document page
       this.page = pdfPage;
       await this.randomWait(2000, 3000);
-      this.log(`✅ Switched to PDF window: ${this.page.url()}`);
+      this.log(`✅ Switched to document window: ${this.page.url()}`);
 
-      // Download the PDF
-      this.log('📥 Attempting to download PDF...');
+      // Look for "Primary Document" on the right side and click to download PDF
+      this.log('📥 Looking for Primary Document link...');
 
-      // Check if we're on a PDF page or need to find download link
-      const currentUrl = this.page.url();
-      this.log(`Current page URL: ${currentUrl}`);
+      const primaryDocClicked = await this.page.evaluate(() => {
+        // Look for "Primary Document" text on the right side of the page
+        const allElements = Array.from(document.querySelectorAll('*'));
 
-      if (currentUrl.endsWith('.pdf') || currentUrl.includes('.pdf')) {
-        // Direct PDF URL
-        this.log('✅ Found direct PDF URL');
-        const pdfBase64 = await this.downloadPdfFromUrl(currentUrl);
+        for (const el of allElements) {
+          const text = (el.textContent || '').trim();
+          // Look for "Primary Document" text
+          if (text.toLowerCase().includes('primary document') && el.offsetParent !== null) {
+            const rect = el.getBoundingClientRect();
+            // Check if it's on the right side (x position > 50% of window width)
+            if (rect.x > window.innerWidth * 0.5) {
+              // Find clickable element (could be the element itself or a link inside/around it)
+              const clickTarget = el.tagName === 'A' ? el :
+                                 el.querySelector('a') ||
+                                 el.parentElement?.tagName === 'A' ? el.parentElement : null;
 
-        return {
-          success: true,
-          pdfBase64,
-          bookNumber: searchData.bookNumber,
-          pageNumber: searchData.pageNumber
-        };
-      } else {
-        // Look for PDF link/iframe/embed
+              if (clickTarget) {
+                clickTarget.click();
+                return { success: true, text: text.substring(0, 100) };
+              }
+            }
+          }
+        }
+
+        return { success: false };
+      });
+
+      if (!primaryDocClicked.success) {
+        this.log('⚠️ Could not find Primary Document link');
+
+        // Fallback: Try general PDF detection
+        this.log('📥 Attempting general PDF detection...');
+        const currentUrl = this.page.url();
+        this.log(`Current page URL: ${currentUrl}`);
+
+        if (currentUrl.endsWith('.pdf') || currentUrl.includes('.pdf')) {
+          // Direct PDF URL
+          this.log('✅ Found direct PDF URL');
+          const pdfBase64 = await this.downloadPdfFromUrl(currentUrl);
+
+          return {
+            success: true,
+            pdfBase64,
+            bookNumber: searchData.bookNumber,
+            pageNumber: searchData.pageNumber
+          };
+        }
+
+        // Look for PDF in iframes/embeds
         const pdfInfo = await this.page.evaluate(() => {
-          // Check for iframes (any iframe)
           const iframes = Array.from(document.querySelectorAll('iframe'));
           for (const iframe of iframes) {
-            if (iframe.src) {
-              return { type: 'iframe', url: iframe.src };
-            }
+            if (iframe.src) return { type: 'iframe', url: iframe.src };
           }
 
-          // Check for embed tags (PDFs often use embed)
           const embeds = Array.from(document.querySelectorAll('embed'));
           for (const embed of embeds) {
-            if (embed.src) {
-              return { type: 'embed', url: embed.src };
-            }
+            if (embed.src) return { type: 'embed', url: embed.src };
           }
 
-          // Check for object tags
           const objects = Array.from(document.querySelectorAll('object'));
           for (const obj of objects) {
-            if (obj.data) {
-              return { type: 'object', url: obj.data };
-            }
+            if (obj.data) return { type: 'object', url: obj.data };
           }
 
-          // Check for PDF links
           const links = Array.from(document.querySelectorAll('a'));
           for (const link of links) {
             if (link.href && link.href.includes('.pdf')) {
@@ -830,7 +879,6 @@ class DurhamCountyNorthCarolinaScraper extends DeedScraper {
             }
           }
 
-          // Return debug info
           return {
             type: 'none',
             debug: {
@@ -847,7 +895,7 @@ class DurhamCountyNorthCarolinaScraper extends DeedScraper {
         if (!pdfInfo.url) {
           return {
             success: false,
-            error: 'Could not find PDF to download',
+            error: 'Could not find Primary Document or PDF',
             debug: pdfInfo.debug
           };
         }
@@ -862,6 +910,79 @@ class DurhamCountyNorthCarolinaScraper extends DeedScraper {
           pageNumber: searchData.pageNumber
         };
       }
+
+      this.log(`✅ Clicked Primary Document: ${primaryDocClicked.text}`);
+
+      // Wait for PDF to load or new window to open
+      await this.randomWait(3000, 5000);
+
+      // Check if a new PDF window opened
+      const allPages2 = await this.browser.pages();
+      this.log(`📄 Found ${allPages2.length} total windows after clicking Primary Document`);
+
+      let pdfWindowPage = null;
+      for (const page of allPages2) {
+        const url = page.url();
+        this.log(`  - Checking window: ${url}`);
+        if (page !== this.page && (url.includes('.pdf') || url.includes('document') || url.includes('rodweb'))) {
+          pdfWindowPage = page;
+          break;
+        }
+      }
+
+      if (pdfWindowPage) {
+        this.page = pdfWindowPage;
+        await this.randomWait(2000, 3000);
+        this.log(`✅ Switched to PDF window: ${this.page.url()}`);
+      }
+
+      // Download the PDF
+      this.log('📥 Attempting to download PDF...');
+      const currentUrl = this.page.url();
+
+      if (currentUrl.endsWith('.pdf') || currentUrl.includes('.pdf')) {
+        this.log('✅ Found direct PDF URL');
+        const pdfBase64 = await this.downloadPdfFromUrl(currentUrl);
+
+        return {
+          success: true,
+          pdfBase64,
+          bookNumber: searchData.bookNumber,
+          pageNumber: searchData.pageNumber
+        };
+      }
+
+      // Look for PDF in iframe/embed
+      const pdfInfo = await this.page.evaluate(() => {
+        const iframes = Array.from(document.querySelectorAll('iframe'));
+        for (const iframe of iframes) {
+          if (iframe.src) return { type: 'iframe', url: iframe.src };
+        }
+
+        const embeds = Array.from(document.querySelectorAll('embed'));
+        for (const embed of embeds) {
+          if (embed.src) return { type: 'embed', url: embed.src };
+        }
+
+        return { type: 'none' };
+      });
+
+      if (pdfInfo.url) {
+        this.log(`✅ Found PDF in ${pdfInfo.type}: ${pdfInfo.url}`);
+        const pdfBase64 = await this.downloadPdfFromUrl(pdfInfo.url);
+
+        return {
+          success: true,
+          pdfBase64,
+          bookNumber: searchData.bookNumber,
+          pageNumber: searchData.pageNumber
+        };
+      }
+
+      return {
+        success: false,
+        error: 'Could not find PDF after clicking Primary Document'
+      };
 
     } catch (error) {
       this.log(`❌ Deed download error: ${error.message}`);
