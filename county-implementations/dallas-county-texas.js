@@ -860,31 +860,7 @@ class DallasCountyTexasScraper extends DeedScraper {
       await this.page.type('#txtStName', streetNameOnly);
       await this.randomWait(500, 1000);
 
-      // Set city to Dallas (if dropdown has Dallas option)
-      try {
-        const cityOptions = await this.page.evaluate(() => {
-          const select = document.querySelector('#listCity');
-          if (!select) return [];
-          return Array.from(select.options).map(opt => ({
-            value: opt.value,
-            text: opt.textContent.trim()
-          }));
-        });
-
-        this.log(`📋 Available cities: ${cityOptions.map(c => c.text).join(', ')}`);
-
-        const dallasOption = cityOptions.find(opt =>
-          opt.text.toLowerCase().includes('dallas')
-        );
-
-        if (dallasOption) {
-          this.log(`📝 Setting city to: ${dallasOption.text}`);
-          await this.page.select('#listCity', dallasOption.value);
-          await this.randomWait(500, 1000);
-        }
-      } catch (error) {
-        this.log(`⚠️ Could not set city: ${error.message}`);
-      }
+      // Leave city dropdown at default value (do not set it)
 
       // Click the Search button and wait for navigation
       this.log('🔍 Clicking Search button...');
