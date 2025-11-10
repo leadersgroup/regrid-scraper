@@ -646,6 +646,7 @@ class DallasCountyTexasScraper extends DeedScraper {
         searchParams: searchData,
         events: []
       };
+
       // Navigate directly to search results
       this.log('📍 Loading Dallas County Public Search with parameters...');
       const searchParams = new URLSearchParams();
@@ -733,748 +734,134 @@ class DallasCountyTexasScraper extends DeedScraper {
         this.log(`⚠️ Error handling popup: ${error.message}`);
       }
 
-      // Determine search method: instrument number or advanced search (book/page)
-      if (searchData.instrumentNumber) {
-        this.log(`🔍 Searching by instrument number: ${searchData.instrumentNumber}`);
-
-        // Take a screenshot of the search page to understand the interface
-        const searchPageScreenshot = `/tmp/dallas-search-page-${Date.now()}.png`;
-        await this.page.screenshot({ path: searchPageScreenshot, fullPage: true });
-        this.log(`📸 Search page screenshot: ${searchPageScreenshot}`);
-
-        // Log all input fields on the page with their context
-        const allInputs = await this.page.evaluate(() => {
-          return Array.from(document.querySelectorAll('input, select, textarea')).map((input, index) => {
-            // Get parent element text to understand context
-            let parentText = '';
-            let parent = input.parentElement;
-            while (parent && !parentText && parent !== document.body) {
-              const text = Array.from(parent.childNodes)
-                .filter(n => n.nodeType === Node.TEXT_NODE)
-                .map(n => n.textContent.trim())
-                .join(' ');
-              if (text) parentText = text;
-              parent = parent.parentElement;
-            }
-
-            // Get preceding label or text
-            const label = input.labels?.[0]?.textContent?.trim() ||
-                         input.previousElementSibling?.textContent?.trim() ||
-                         parentText;
-
-            return {
-              index,
-              type: input.type,
-              name: input.name,
-              id: input.id,
-              placeholder: input.placeholder,
-              value: input.value,
-              tagName: input.tagName,
-              label: label,
-              class: input.className
-            };
-          });
-        });
-        this.log(`📝 All form inputs on page: ${JSON.stringify(allInputs, null, 2)}`);
-
-        // Find the search input field - React implementation
-        const propertyRecordsInput = await this.page.evaluate(() => {
-          // Look for React-specific elements and modern search inputs
-          const selectors = [
-            // React select input for property records
-            'input[placeholder*="Search for grantor"], input[placeholder*="doc#"]',
-            // CSS class based selectors for React components
-            'input.css-1a2f1cz',
-            // Generic search input selectors
-            'input[type="search"]',
-            'input[placeholder*="search" i]',
-            // React component selectors
-            '[class*="search"] input',
-            '[class*="input"] input'
-          ];
-          
-          for (const selector of selectors) {
-            const input = document.querySelector(selector);
-            if (input && !input.disabled && input.offsetParent !== null) {
-              return {
-                found: true,
-                selector: selector,
-                id: input.id,
-                name: input.name,
-                placeholder: input.placeholder,
-                className: input.className,
-                context: 'React search input'
-              };
-            }
-          }
-
-          // Look for an input that has "Property Records" as label/preceding text
-          // Then find the NEXT input after it
-          for (let i = 0; i < allInputs.length - 1; i++) {
-            const input = allInputs[i];
-            const nextInput = allInputs[i + 1];
-
-            // Check if this input or its container has "Property Records" text
-            let container = input.parentElement;
-            let hasPropertyRecordsLabel = false;
-
-            while (container && container !== document.body) {
-              const text = container.textContent?.toLowerCase() || '';
-              const immediateText = Array.from(container.childNodes)
-                .filter(n => n.nodeType === Node.TEXT_NODE)
-                .map(n => n.textContent.trim().toLowerCase())
-                .join(' ');
-
-              if (immediateText.includes('property records') ||
-                  container.querySelector('label, span, div')?.textContent?.toLowerCase().includes('property records')) {
-                hasPropertyRecordsLabel = true;
-                break;
-              }
-              container = container.parentElement;
-            }
-
-            if (hasPropertyRecordsLabel) {
-              // The NEXT input is the one to the right of Property Records
-              return {
-                found: true,
-                selector: nextInput.id ? `#${nextInput.id}` : nextInput.name ? `input[name="${nextInput.name}"]` : `input[type="${nextInput.type}"]:nth-of-type(${i + 2})`,
-                id: nextInput.id,
-                name: nextInput.name,
-                placeholder: nextInput.placeholder,
-                className: nextInput.className,
-                context: 'Input to the right of Property Records field'
-              };
-            }
-          }
-
-          // Alternative approach: find all inputs and skip the first one (which is likely the date field)
-          // The second text input is likely the Property Records search field
-          const textInputs = allInputs.filter(input =>
-            input.type === 'text' || input.type === 'search' || !input.type
-          );
-
-          if (textInputs.length >= 2) {
-            // Skip first input (likely date), use second one
-            const targetInput = textInputs[1];
-
-            // Build a better selector
-            let selector = null;
-            if (targetInput.id) {
-              selector = `#${targetInput.id}`;
-            } else if (targetInput.name) {
-              selector = `input[name="${targetInput.name}"]`;
-            } else if (targetInput.className) {
-              selector = `input.${targetInput.className.split(' ').join('.')}`;
-            }
-
-            return {
-              found: true,
-              selector: selector,
-              id: targetInput.id,
-              name: targetInput.name,
-              placeholder: targetInput.placeholder,
-              className: targetInput.className,
-              context: 'Second text input on page (skipping first which is likely date field)',
-              inputIndex: 1  // Return the index so we can use it as fallback
-            };
-          }
-
-          return { found: false };
-        });
-
-        let searchInput = null;
-        let searchInputInfo = null;
-
-        if (propertyRecordsInput.found) {
-          this.log(`✅ Found Property Records search input: ${propertyRecordsInput.selector}`);
-          this.log(`   Input details: ${JSON.stringify(propertyRecordsInput)}`);
-          searchInput = propertyRecordsInput.selector;
-          searchInputInfo = propertyRecordsInput;
-        } else {
-          this.log('⚠️ Could not find input near "Property Records" text, trying other methods...');
-
-          // Fallback: use the input fields list and skip date inputs
-          const nonDateInput = allInputs.find(input =>
-            input.type === 'text' &&
-            !input.name?.toLowerCase().includes('date') &&
-            !input.id?.toLowerCase().includes('date') &&
-            !input.label?.toLowerCase().includes('date')
-          );
-
-          if (nonDateInput) {
-            searchInput = nonDateInput.id ? `#${nonDateInput.id}` : `input[name="${nonDateInput.name}"]`;
-            this.log(`✅ Found non-date text input (index ${nonDateInput.index}): ${searchInput}`);
-            this.log(`   Input details: ${JSON.stringify(nonDateInput)}`);
-          }
-        }
-
-        // If searchInput is null but we have an inputIndex, use index-based selection
-        if (!searchInput && searchInputInfo && searchInputInfo.inputIndex !== undefined) {
-          this.log(`⚠️ Using direct index selection (index: ${searchInputInfo.inputIndex})`);
-
-          // Clear and enter value using index
-          await this.page.evaluate((index, value) => {
-            const allInputs = Array.from(document.querySelectorAll('input[type="text"], input[type="search"], input:not([type="hidden"]):not([type="date"]):not([type="submit"]):not([type="button"])'));
-            const textInputs = allInputs.filter(input => input.type === 'text' || input.type === 'search' || !input.type);
-            const targetInput = textInputs[index];
-            if (targetInput) {
-              targetInput.value = '';
-              targetInput.value = value;
-              targetInput.focus();
-            }
-          }, searchInputInfo.inputIndex, searchData.instrumentNumber);
-
-          this.log(`✅ Entered instrument number using index: ${searchData.instrumentNumber}`);
-        } else if (searchInput) {
-          // Clear any existing value first
-          await this.page.evaluate((sel) => {
-            const input = document.querySelector(sel);
-            if (input) input.value = '';
-          }, searchInput);
-
-          // Enhanced React-aware input handling with better synthetic events
-          try {
-            // Give React time to initialize
-            await new Promise(resolve => setTimeout(resolve, 1000));
-            
-            // First try using React's own event system with proper synthetic events
-            const valueEntered = await this.page.evaluate((sel, value) => {
-              const input = document.querySelector(sel);
-              if (!input) return false;
-              
-              try {
-                // Get React props key
-                const propsKey = Object.keys(input).find(key => key.startsWith('__reactProps$'));
-                
-                if (propsKey && input[propsKey]) {
-                  const props = input[propsKey];
-                  
-                  // Try using onChange handler if available
-                  if (props.onChange) {
-                    // Create proper synthetic event
-                    const event = {
-                      target: input,
-                      currentTarget: input,
-                      type: 'change',
-                      bubbles: true,
-                      cancelable: true,
-                      defaultPrevented: false,
-                      isDefaultPrevented: () => false,
-                      stopPropagation: () => {},
-                      preventDefault: () => {},
-                      value: value
-                    };
-                    
-                    // Set native value first
-                    input.value = value;
-                    
-                    // Dispatch native events
-                    input.dispatchEvent(new Event('focus', { bubbles: true }));
-                    input.dispatchEvent(new Event('input', { bubbles: true }));
-                    input.dispatchEvent(new Event('change', { bubbles: true }));
-                    
-                    // Call handler and update DOM
-                    props.onChange(event);
-                    return true;
-                  }
-                }
-              } catch (e) {
-                console.error('React property access failed:', e);
-              }
-              return false;
-            }, searchInput, searchData.instrumentNumber);
-            
-            if (!valueEntered) {
-              // Fallback to direct typing if React events failed
-              await this.page.click(searchInput, { clickCount: 3 }); // Select all
-              await this.page.keyboard.press('Backspace'); // Clear
-              await this.page.type(searchInput, searchData.instrumentNumber, { delay: 100 });
-            }
-            
-            // Give React time to process
-            await new Promise(resolve => setTimeout(resolve, 1000));
-            this.log(`✅ Entered instrument number: ${searchData.instrumentNumber}`);
-          
-        } catch (inputError) {
-          this.log(`⚠️ Error entering instrument number: ${inputError.message}`);
-          throw inputError;
-        }
-
-          // Verify the value was entered
-          const enteredValue = await this.page.evaluate((sel) => {
-            const input = document.querySelector(sel);
-            return input ? input.value : null;
-          }, searchInput);
-          this.log(`✅ Verified input value: ${enteredValue}`);
-        } else {
-          throw new Error('Could not find search input on public search page');
-        }
-
-        await this.randomWait(1000, 2000);
-
-        // Submit search - look for submit button or press Enter
-        this.log('🔍 Submitting search...');
-
-        // Debug: Check what buttons are available
-        const availableButtons = await this.page.evaluate(() => {
-          const buttons = Array.from(document.querySelectorAll('button, input[type="submit"], input[type="button"]'));
-          return buttons.map(b => ({
-            type: b.type,
-            text: b.textContent?.trim() || b.value,
-            id: b.id,
-            className: b.className,
-            onclick: b.getAttribute('onclick')
-          }));
-        });
-        this.log(`🔍 Available buttons: ${JSON.stringify(availableButtons, null, 2)}`);
-
-        // Enhanced submit button detection and clicking
-        const submitButtonSelectors = [
-          'button[type="submit"]',
-          'input[type="submit"]',
-          'button:has-text("Search")',
-          'button:has-text("Submit")',
-          'button[onclick*="search"]',
-          'button.search-button',
-          '[class*="search-btn"]',
-          '[class*="submit-btn"]',
-          'form button',
-          'button:not([type="button"])'
-        ];
-
-        let submitButtonClicked = false;
-        for (const selector of submitButtonSelectors) {
-          try {
-            // Wait briefly for each selector
-            const button = await this.page.waitForSelector(selector, { timeout: 1000 });
-            if (button) {
-              this.log(`✅ Found submit button: ${selector}`);
-              // Try multiple click methods
-              try {
-                await button.click(); // Standard click
-              } catch (clickError) {
-                try {
-                  await this.page.evaluate((sel) => {
-                    const btn = document.querySelector(sel);
-                    if (btn) {
-                      // Try programmatic click
-                      const clickEvent = new MouseEvent('click', {
-                        bubbles: true,
-                        cancelable: true,
-                        view: window
-                      });
-                      btn.dispatchEvent(clickEvent);
-                      // Also try click() method
-                      btn.click();
-                    }
-                  }, selector);
-                } catch (jsError) {
-                  this.log(`⚠️ JavaScript click failed: ${jsError.message}`);
-                  continue;
-                }
-              }
-              submitButtonClicked = true;
-              this.log(`✅ Clicked submit button`);
-              break;
-            }
-          } catch (e) {
-            this.log(`⚠️ Button ${selector} not found or not clickable`);
-          }
-        }
-
-        if (!submitButtonClicked) {
-          this.log('⚠️ No submit button found, trying alternative submission methods');
-          
-          // Try pressing Enter first
-          await this.page.keyboard.press('Enter');
-          await this.randomWait(1000, 2000);
-          
-          // Check if search was submitted
-          const wasSubmitted = await this.page.evaluate(() => window._searchSubmitted);
-          
-          if (!wasSubmitted) {
-            // Try React-specific form submission
-            await this.page.evaluate((sel) => {
-              const input = document.querySelector(sel);
-              if (input) {
-                // Try to find React form wrapper
-                let form = input.closest('form') || input.closest('[role="search"]') || input.closest('[class*="search"]');
-                
-                if (form) {
-                  // Create and dispatch submit event
-                  const submitEvent = new Event('submit', { bubbles: true, cancelable: true });
-                  form.dispatchEvent(submitEvent);
-                }
-                
-                // Also try triggering React's synthetic events
-                const reactKey = Object.keys(input).find(key => key.startsWith('__reactProps$'));
-                if (reactKey && input[reactKey].onKeyPress) {
-                  input[reactKey].onKeyPress({ key: 'Enter', code: 'Enter', keyCode: 13 });
-                }
-              }
-            }, searchInput);
-            
-            this.log('✅ Tried React-specific form submission');
-          } else {
-            this.log('✅ Search was submitted via Enter key');
-          }
-        }
-
-      } else if (searchData.bookNumber && searchData.pageNumber) {
-        this.log(`🔍 Using advanced search with Book: ${searchData.bookNumber}, Page: ${searchData.pageNumber}`);
-
-        // Click on Advanced Search link
-        const advancedSearchSelectors = [
-          'a:contains("Advanced")',
-          'a[href*="advanced"]',
-          'button:contains("Advanced")'
-        ];
-
-        let advancedLink = null;
-        for (const selector of advancedSearchSelectors) {
-          try {
-            const element = await this.page.$(selector);
-            if (element) {
-              advancedLink = element;
-              break;
-            }
-          } catch (e) {
-            this.log(`⚠️ Advanced search ${selector} not found`);
-          }
-        }
-
-        if (advancedLink) {
-          await advancedLink.click();
-          await this.randomWait(1000, 2000);
-        }
-
-        // Fill in book and page numbers
-        const bookInputSelectors = ['input[name*="book"]', 'input[id*="book"]'];
-        const pageInputSelectors = ['input[name*="page"]', 'input[id*="page"]'];
-
-        for (const selector of bookInputSelectors) {
-          try {
-            await this.page.waitForSelector(selector, { timeout: 3000 });
-            await this.page.type(selector, searchData.bookNumber, { delay: 100 });
-            this.log(`✅ Entered book number`);
-            break;
-          } catch (e) {
-            this.log(`⚠️ Book input ${selector} not found`);
-          }
-        }
-
-        for (const selector of pageInputSelectors) {
-          try {
-            await this.page.waitForSelector(selector, { timeout: 3000 });
-            await this.page.type(selector, searchData.pageNumber, { delay: 100 });
-            this.log(`✅ Entered page number`);
-            break;
-          } catch (e) {
-            this.log(`⚠️ Page input ${selector} not found`);
-          }
-        }
-
-        // Submit search
-        const submitButtonSelectors = [
-          'button[type="submit"]',
-          'input[type="submit"]',
-          'button:contains("Search")'
-        ];
-
-        for (const selector of submitButtonSelectors) {
-          try {
-            await this.page.waitForSelector(selector, { timeout: 3000 });
-            await this.page.click(selector);
-            this.log(`✅ Submitted advanced search`);
-            break;
-          } catch (e) {
-            this.log(`⚠️ Submit button ${selector} not found`);
-          }
-        }
-      } else {
-        throw new Error('No instrument number or book/page available for search');
-      }
-
-      // Wait for results
-      this.log('⏳ Waiting for deed search results...');
-      this.log(`📍 Current URL before wait: ${this.page.url()}`);
-
-      // Enhanced navigation and error handling
-      let navigationSuccess = false;
-      let retryCount = 0;
-      const maxRetries = 3;
-
-      while (!navigationSuccess && retryCount < maxRetries) {
-        try {
-          // Wait for any of these events that might indicate success
-          await Promise.race([
-            this.page.waitForNavigation({ waitUntil: 'networkidle2', timeout: 30000 }),
-            this.page.waitForSelector('table.results, .search-results, [class*="result"]', { timeout: 30000 }),
-            this.page.waitForFunction(() => {
-              const text = document.body.innerText;
-              return text.includes('results found') || text.includes('Results:') || text.includes('No results');
-            }, { timeout: 30000 })
-          ]);
-          
-          navigationSuccess = true;
-          this.log(`✅ Navigation completed to: ${this.page.url()}`);
-          
-          // Verify we're on a results page
-          const pageState = await this.page.evaluate(() => ({
-            url: window.location.href,
-            hasResults: !!document.querySelector('table.results, .search-results, [class*="result"]'),
-            bodyText: document.body.innerText.slice(0, 200)
-          }));
-          
-          if (!pageState.hasResults && !pageState.bodyText.match(/results?|found|search/i)) {
-            throw new Error('Navigation succeeded but no results content found');
-          }
-          
-        } catch (navError) {
-          retryCount++;
-          this.log(`⚠️ Navigation attempt ${retryCount} failed: ${navError.message}`);
-          this.log(`📍 Current URL: ${this.page.url()}`);
-          
-          if (retryCount < maxRetries) {
-            this.log(`🔄 Retrying navigation...`);
-            await this.randomWait(2000, 4000);
-            // Try refreshing the page
-            await this.page.reload({ waitUntil: 'networkidle2' });
-          } else {
-            this.log(`❌ All navigation attempts failed`);
-          }
-        }
-      }
-
-      await this.randomWait(3000, 5000);
-
-      // Log current page info for debugging
-      const pageInfo = await this.page.evaluate(() => ({
-        url: window.location.href,
-        title: document.title,
-        bodyText: document.body.innerText.substring(0, 500)
-      }));
-      this.log(`📍 Current page: ${pageInfo.url}`);
-      this.log(`📄 Page title: ${pageInfo.title}`);
-      this.log(`📝 Page preview: ${pageInfo.bodyText.substring(0, 200)}`);
-
-      // Verify the search was actually performed with our instrument number
-      if (searchData.instrumentNumber && !pageInfo.url.includes(searchData.instrumentNumber)) {
-        this.log(`⚠️ WARNING: Results URL does not contain instrument number ${searchData.instrumentNumber}`);
-        this.log(`   This suggests the search may not have filtered by instrument number`);
-      }
-
-      // Check if we got exactly 1 result (as expected for instrument number search)
-      const resultCount = await this.page.evaluate(() => {
-        const resultText = document.body.innerText;
-        const match = resultText.match(/(\d+)-(\d+)\s+of\s+(\d+)\s+results?/i);
-        return match ? parseInt(match[3]) : null;
-      });
-
-      if (resultCount !== null) {
-        this.log(`📊 Search returned ${resultCount} result(s)`);
-        if (resultCount !== 1) {
-          this.log(`⚠️ WARNING: Expected 1 result for instrument number ${searchData.instrumentNumber}, got ${resultCount}`);
-          this.log(`   The search may not have been submitted correctly`);
-        }
-      }
-
-      // Wait for results to load (may require additional JavaScript execution)
-      this.log('⏳ Waiting for results table to appear...');
-      await this.randomWait(2000, 4000);
-
-      // Take screenshot for debugging
-      const screenshotPath = `/tmp/dallas-deed-search-${Date.now()}.png`;
-      await this.page.screenshot({ path: screenshotPath, fullPage: true });
-      this.log(`📸 Screenshot saved: ${screenshotPath}`);
-
-      // Try to wait for specific result elements
-      const resultSelectors = [
-        'table.results',
-        '.search-results',
-        '.result-row',
-        'table tbody tr',
-        '[class*="result"]',
-        '[id*="result"]'
-      ];
-
-      let resultsAppeared = false;
-      for (const selector of resultSelectors) {
-        try {
-          await this.page.waitForSelector(selector, { timeout: 5000 });
-          this.log(`✅ Found results container: ${selector}`);
-          resultsAppeared = true;
-          break;
-        } catch (e) {
-          // Continue trying
-        }
-      }
-
-      if (!resultsAppeared) {
-        this.log('⚠️ No results container found, attempting recovery...');
-        
-        // Check if we're in an error state
-        const pageState = await this.page.evaluate(() => {
-          const errorIndicators = [
-            'error',
-            'invalid',
-            'no results',
-            'not found',
-            'try again',
-            'session expired',
-            'please login',
-            'maintenance'
-          ];
-          
-          const bodyText = document.body.innerText.toLowerCase();
-          const foundErrors = errorIndicators.filter(e => bodyText.includes(e));
-          
-          return {
-            url: window.location.href,
-            title: document.title,
-            hasErrors: foundErrors.length > 0,
-            errorTypes: foundErrors,
-            hasLoginForm: !!document.querySelector('form input[type="password"]'),
-            hasSearchForm: !!document.querySelector('input[type="text"], input[type="search"]'),
-            hasResults: !!document.querySelector('table, [class*="result"]'),
-            bodyPreview: document.body.innerText.slice(0, 500)
-          };
-        });
-        
-        this.log(`📊 Page state analysis:`);
-        this.log(`URL: ${pageState.url}`);
-        this.log(`Title: ${pageState.title}`);
-        this.log(`Has errors: ${pageState.hasErrors}`);
-        if (pageState.hasErrors) {
-          this.log(`Error types: ${pageState.errorTypes.join(', ')}`);
-        }
-        this.log(`Has login form: ${pageState.hasLoginForm}`);
-        this.log(`Has search form: ${pageState.hasSearchForm}`);
-        this.log(`Has results: ${pageState.hasResults}`);
-        
-        // Take recovery action based on state
-        if (pageState.hasLoginForm) {
-          throw new Error('Session expired or login required');
-        } else if (pageState.hasSearchForm) {
-          this.log('🔄 Found search form, retrying search...');
-          // The search form is still present, try search again
-          return await this.downloadDeed(searchData);
-        } else if (pageState.hasErrors) {
-          throw new Error(`Page error detected: ${pageState.errorTypes.join(', ')}`);
-        }
-      }
-
-      // Click on deed result to view document
-      this.log('📄 Looking for deed document...');
-
-      // First, try to find and click on the result row/link
-      const resultFound = await this.page.evaluate(() => {
-        // Look for result rows that might contain the document
-        const links = Array.from(document.querySelectorAll('a'));
-        const tables = Array.from(document.querySelectorAll('table'));
-        const rows = Array.from(document.querySelectorAll('tr'));
-
-        // Get full HTML of main content area for debugging
-        const mainContent = document.querySelector('main, #main, #content, .content, [role="main"]');
-        const mainHTML = mainContent ? mainContent.innerHTML.substring(0, 2000) : '';
-
-        return {
-          totalLinks: links.length,
-          linkHrefs: links.map(a => a.href).slice(0, 10),
-          linkTexts: links.map(a => a.textContent.trim()).slice(0, 10),
-          tableCount: tables.length,
-          rowCount: rows.length,
-          // Look for any elements with "result" in class or id
-          resultElements: Array.from(document.querySelectorAll('[class*="result"], [id*="result"]')).length,
-          // Check for specific text that might indicate results or errors
-          pageHasResults: document.body.innerText.includes('result') ||
-                         document.body.innerText.includes('Result') ||
-                         document.body.innerText.includes('document') ||
-                         document.body.innerText.includes('Document'),
-          pageHasError: document.body.innerText.includes('No results') ||
-                       document.body.innerText.includes('no results') ||
-                       document.body.innerText.includes('not found'),
-          mainHTML: mainHTML,
-          // Get all div classes and ids
-          divClasses: Array.from(document.querySelectorAll('div[class]')).slice(0, 20).map(d => d.className),
-          divIds: Array.from(document.querySelectorAll('div[id]')).slice(0, 20).map(d => d.id)
-        };
-      });
-
-      this.log(`🔍 Found ${resultFound.totalLinks} links on page`);
-      this.log(`📊 Tables: ${resultFound.tableCount}, Rows: ${resultFound.rowCount}, Result elements: ${resultFound.resultElements}`);
-      this.log(`📝 Page has results: ${resultFound.pageHasResults}, Has error: ${resultFound.pageHasError}`);
-      this.log(`🔗 Sample hrefs: ${resultFound.linkHrefs.join(', ')}`);
-      this.log(`📝 Sample texts: ${resultFound.linkTexts.join(', ')}`);
-      this.log(`🏷️ Div classes: ${resultFound.divClasses.slice(0, 10).join(', ')}`);
-      this.log(`🆔 Div IDs: ${resultFound.divIds.slice(0, 10).join(', ')}`);
-      if (resultFound.mainHTML) {
-        this.log(`📄 Main content HTML (first 500 chars): ${resultFound.mainHTML.substring(0, 500)}`);
-      }
-
-      // For Dallas County, click on the DOC NUMBER in the results table
-      // The document number is clickable and leads to the document detail/view page
-      this.log(`🔍 Looking for clickable document number: ${searchData.instrumentNumber}`);
-
-      // Wait for results to load
-      await new Promise(resolve => setTimeout(resolve, 5000));
-
-      // Try to find the document in the results
+      // Document search implementation
       const documentInfo = await this.page.evaluate((instrumentNumber) => {
-        // Look for the document in the results grid
-        const grid = document.querySelector('#documentsGrid, #searchResults, table');
-        if (!grid) return { found: false, reason: 'No results grid found' };
+        // Helper function to generate a selector for an element
+        function getUniqueSelector(element) {
+          if (element.id) return `#${element.id}`;
+          if (element.getAttribute('data-testid')) 
+            return `[data-testid="${element.getAttribute('data-testid')}"]`;
+          if (element.className) {
+            const classes = Array.from(element.classList)
+              .filter(c => !c.includes('--')) // Filter out dynamic classes
+              .join('.');
+            if (classes) return `.${classes}`;
+          }
+          // Add aria attributes if present
+          if (element.getAttribute('aria-label')) {
+            return `${element.tagName.toLowerCase()}[aria-label="${element.getAttribute('aria-label')}"]`;
+          }
+          // Fall back to tag name + nth-child
+          const parent = element.parentElement;
+          if (parent) {
+            const index = Array.from(parent.children).indexOf(element);
+            return `${element.tagName.toLowerCase()}:nth-child(${index + 1})`;
+          }
+          return element.tagName.toLowerCase();
+        }
 
-        // Look for all table rows
-        const rows = Array.from(grid.querySelectorAll('tr'));
-        if (!rows.length) return { found: false, reason: 'No rows in results' };
-
-        // Find row containing our instrument number
-        for (const row of rows) {
-          const text = row.textContent || '';
-          const cells = Array.from(row.querySelectorAll('td'));
-
-          if (text.includes(instrumentNumber)) {
-            // Found our document, look for action links
-            const links = Array.from(row.querySelectorAll('a'));
-            const viewLinks = links.filter(a => 
-              a.href.includes('document') || 
-              a.href.includes('view') ||
-              a.href.includes('details') ||
-              (a.textContent || '').toLowerCase().includes('view') ||
-              (a.textContent || '').toLowerCase().includes('document')
-            );
-
-            if (viewLinks.length) {
-              return {
-                found: true,
-                link: viewLinks[0].href,
-                text: viewLinks[0].textContent
-              };
-            }
-
-            // If no direct view links, return all links for analysis
-            if (links.length) {
-              return {
-                found: true,
-                links: links.map(a => ({
-                  href: a.href,
-                  text: a.textContent?.trim()
-                }))
-              };
-            }
-
-            // Return row info for debugging
+        // First check for errors
+        const errorElements = document.querySelectorAll('[class*="error"], .alert, .notification');
+        for (const el of errorElements) {
+          const text = el.textContent?.trim();
+          if (text && !text.toLowerCase().includes('no error')) {
             return {
-              found: true,
-              rowText: text,
-              cells: cells.map(td => td.textContent?.trim())
+              found: false,
+              reason: `Error found: ${text}`
             };
           }
         }
 
-        return { found: false, reason: 'Document not found in results' };
+        // Find the results table
+        const table = document.querySelector('table');
+        if (!table) {
+          return {
+            found: false,
+            reason: 'No results table found',
+            debugInfo: {
+              body: document.body.textContent.substring(0, 200),
+              url: window.location.href
+            }
+          };
+        }
+
+        // Look for our document row
+        const rows = Array.from(table.querySelectorAll('tbody tr'));
+        if (!rows.length) {
+          return {
+            found: false,
+            reason: 'Table has no rows',
+            debugInfo: {
+              tableHtml: table.outerHTML.substring(0, 500)
+            }
+          };
+        }
+
+        // Find row with our document number
+        const targetRow = rows.find(row => {
+          const text = row.textContent || '';
+          return text.includes(instrumentNumber);
+        });
+
+        if (!targetRow) {
+          return {
+            found: false,
+            reason: 'Document number not found in results',
+            debugInfo: {
+              rowCount: rows.length,
+              firstRowText: rows[0].textContent
+            }
+          };
+        }
+
+        // Document found, look for interactive elements
+        const actionButton = targetRow.querySelector(
+          '[data-testid="resultActionButton"] button, button[aria-expanded], [class*="menu"] button'
+        );
+        if (actionButton) {
+          return {
+            found: true,
+            hasActionMenu: true,
+            actionSelector: getUniqueSelector(actionButton),
+            rowIndex: rows.indexOf(targetRow)
+          };
+        }
+
+        const checkbox = targetRow.querySelector('input[type="checkbox"]');
+        if (checkbox) {
+          return {
+            found: true,
+            hasCheckbox: true,
+            checkboxSelector: getUniqueSelector(checkbox),
+            rowIndex: rows.indexOf(targetRow)
+          };
+        }
+
+        const clickableRow = targetRow.querySelector('[role="button"], [tabindex="0"]');
+        if (clickableRow) {
+          return {
+            found: true,
+            isClickableRow: true,
+            rowSelector: getUniqueSelector(targetRow),
+            rowIndex: rows.indexOf(targetRow)
+          };
+        }
+
+        // Fall back to simpler interactions
+        return {
+          found: true,
+          fallbackMode: true,
+          rowData: {
+            docNumber: instrumentNumber,
+            text: targetRow.textContent?.trim(),
+            rowIndex: rows.indexOf(targetRow)
+          }
+        };
       }, searchData.instrumentNumber);
+
+      if (!documentInfo) {
+        throw new Error('Failed to evaluate page for document search');
+      }
 
       this.log('📄 Document search result:', JSON.stringify(documentInfo, null, 2));
 
@@ -1482,98 +869,230 @@ class DallasCountyTexasScraper extends DeedScraper {
         throw new Error(`Could not find document in search results: ${documentInfo.reason}`);
       }
 
-      let deedLink = null;
-      let deedLinkHref = null;
-
-      // If we found a direct view link, use it
-      if (documentInfo.link) {
-        deedLink = documentInfo.link;
-        deedLinkHref = documentInfo.link;
+      // Handle the modern React-based UI interactions
+      if (documentInfo.hasActionMenu) {
+        this.log('📱 Using modern React UI interaction pattern');
+        await this.page.click(documentInfo.actionSelector);
+        await this.randomWait(1000, 2000);
+      } else if (documentInfo.isClickableRow) {
+        this.log('🖱️ Clicking row directly');
+        await this.page.click(documentInfo.rowSelector);
+        await this.randomWait(1000, 2000);
+      } else {
+        // Fallback to checking for View/Download links
+        const viewLinks = await this.page.$$('a[href*="view"], a[href*="download"]');
+        if (viewLinks.length) {
+          this.log(`📋 Found ${viewLinks.length} view/download links`);
+          await viewLinks[0].click();
+          await this.randomWait(1000, 2000);
+        } else {
+          throw new Error('No interactive elements found to view document');
+        }
       }
 
-      // Define selectors for finding document links
-      const deedLinkSelectors = [
-        `a[data-docnumber="${searchData.instrumentNumber}"]`,
-        `a[title*="${searchData.instrumentNumber}"]`,
-        'a[href*="document"], a[href*="doc"]',
-        'a[href*="view"], a[href*="details"]',
-        'a[onclick*="document"], a[onclick*="view"]',
-        'tr[data-docid] a, tr[data-docnum] a',
-        '.document-link, .doc-link, .view-link',
-        '[role="link"]:has-text("Document"), [role="link"]:has-text("View")',
-        'a:has-text("Document"), a:has-text("View")',
-        'table tbody tr td a'
-      ];
+      // Check for navigation or loading state changes
+      await Promise.race([
+        this.page.waitForNavigation({ waitUntil: 'networkidle2', timeout: 30000 }),
+        this.page.waitForFunction(
+          () => document.querySelector('iframe') !== null,
+          { timeout: 30000 }
+        )
+      ]);
 
-      // Try each selector until we find a valid document link
-      for (const selector of deedLinkSelectors) {
-        try {
-          this.log(`🔍 Trying selector: ${selector}`);
-          
-          // Wait for selector with a short timeout to avoid long delays
-          await this.page.waitForSelector(selector, { timeout: 2000 }).catch(() => null);
-          
-          // Get all matching elements for this selector
-          const elements = await this.page.$$(selector);
-          
-          if (elements.length > 0) {
-            this.log(`✅ Found ${elements.length} matches for selector: ${selector}`);
+      // Look for document viewer or download options
+      this.log('🔍 Looking for document viewer or download options...');
+      
+      // Wait for any loading indicators to disappear
+      await this.page.waitForFunction(
+        () => !document.querySelector('[class*="loading"], [class*="spinner"]'),
+        { timeout: 30000 }
+      ).catch(() => {}); // Ignore timeout
+      
+      // Return all the navigation and request tracking data
+      return {
+        success: true,
+        navigationHistory: debugLog.events,
+        network: {
+          requests: Array.from(requests.entries()),
+          failures: Array.from(requestFailed.entries())
+        }
+      };
 
-            // Check each element for document-related attributes
-            for (const element of elements) {
-              const linkInfo = await this.page.evaluate((el) => {
-                if (!el) return null;
-                
-                const href = el.href || el.getAttribute('href') || '';
-                const text = el.innerText || el.textContent || '';
-                const onclick = el.getAttribute('onclick') || '';
-                const title = el.getAttribute('title') || '';
-                const dataDoc = el.getAttribute('data-docnumber') || '';
-                
-                // Score the link based on relevance
-                let score = 0;
-                const documentIndicators = ['document', 'deed', 'view', 'pdf'];
-                documentIndicators.forEach(indicator => {
-                  if (href.toLowerCase().includes(indicator)) score += 2;
-                  if (text.toLowerCase().includes(indicator)) score += 2;
-                  if (onclick.toLowerCase().includes(indicator)) score += 1;
-                  if (title.toLowerCase().includes(indicator)) score += 1;
-                });
-                
-                return {
-                  href,
-                  text,
-                  onclick,
-                  title,
-                  dataDoc,
-                  score
-                };
-              }, element);
+    } catch (error) {
+      this.log(`❌ Error downloading deed: ${error.message}`);
+      const debugInfo = {
+        page: {
+          url: await this.page.url(),
+          title: await this.page.title(),
+        },
+        network: {
+          requests: Array.from(requests.entries()),
+          failures: Array.from(requestFailed.entries())
+        },
+        timestamp: new Date().toISOString()
+      };
+      
+      // Save debug info to file
+      const fs = require('fs');
+      const debugPath = `/tmp/dallas-debug-${Date.now()}.json`;
+      fs.writeFileSync(debugPath, JSON.stringify(debugInfo, null, 2));
+      
+      // Take error screenshot
+      const errorScreenshot = `/tmp/dallas-error-${Date.now()}.png`;
+      await this.page.screenshot({ 
+        path: errorScreenshot,
+        fullPage: true 
+      });
+      
+      this.log(`📸 Error screenshot saved to: ${errorScreenshot}`);
+      this.log(`📝 Debug info saved to: ${debugPath}`);
+      
+      return {
+        success: false,
+        error: error.message,
+        debugInfo: {
+          screenshotPath: errorScreenshot,
+          debugLogPath: debugPath,
+          url: debugInfo.page.url,
+          timestamp: debugInfo.timestamp
+        }
+      };
+    } finally {
+      // Cleanup
+      try {
+        await this.page.setRequestInterception(false);
+        this.page.removeAllListeners('request');
+        this.page.removeAllListeners('requestfailed');
+      } catch (e) {
+        this.log(`⚠️ Cleanup error: ${e.message}`);
+      }
+    }
+  }
 
-              // If this link looks promising, try to use it
-              if (linkInfo && linkInfo.href) {
-                deedLink = selector;
-                deedLinkHref = linkInfo.href;
-                this.log(`✅ Found deed link with score ${linkInfo.score || 0}:`);
-                this.log(`🔗 Link href: ${linkInfo.href}`);
-                this.log(`📝 Link text: "${linkInfo.text}"`);
-                this.log(`🏷️ Data attributes: ${linkInfo.dataDoc}`);
-                
-                // If this is a high-confidence match (score > 3), use it immediately
-                if (linkInfo.score > 3) {
-                  break;
-                }
-              }
-            }
-            
-            // If we found a high-confidence match in this selector's elements, stop searching
-            if (deedLink && deedLinkHref && typeof deedLinkHref === 'string') {
+        // No matching row found, return error
+        return { found: false, reason: 'Document not found in results' };
+      }, searchData.instrumentNumber);
+
+      if (!documentInfo) {
+        throw new Error('Failed to evaluate page for document search');
+      }
+
+      return documentInfo;
+    } catch (error) {
+      this.log(`Error finding document: ${error.message}`);
+      return {
+        found: false,
+        reason: 'Document search failed',
+        error: error.message
+      };
+    }
+
+      this.log('📄 Document search result:', JSON.stringify(documentInfo, null, 2));
+
+      if (!documentInfo.found) {
+        throw new Error(`Could not find document in search results: ${documentInfo.reason}`);
+      }
+
+      // Handle the modern React-based UI interactions
+      if (documentInfo.hasActionMenu) {
+        this.log('🖱️ Found action menu button, clicking...');
+        await this.page.click(documentInfo.actionSelector);
+        await this.randomWait(1000, 2000);
+        
+        // Look for document/view action in the menu
+        const menuItemSelectors = [
+          'li:has-text("View")',
+          'li:has-text("Document")',
+          '[role="menuitem"]:has-text("View")',
+          '[role="menuitem"]:has-text("Document")',
+          'button:has-text("View")',
+          'button:has-text("Document")'
+        ];
+
+        for (const menuSelector of menuItemSelectors) {
+          try {
+            const menuItem = await this.page.$(menuSelector);
+            if (menuItem) {
+              await menuItem.click();
+              this.log(`✅ Clicked menu item: ${menuSelector}`);
               break;
             }
+          } catch (e) {
+            this.log(`⚠️ Menu item not found: ${menuSelector}`);
+          }
+        }
+      } else if (documentInfo.hasCheckbox) {
+        this.log('🖱️ Found checkbox, selecting row...');
+        await this.page.click(documentInfo.checkboxSelector);
+        await this.randomWait(1000, 2000);
+        
+        // Look for action buttons that appear after selection
+        const actionButtonSelectors = [
+          'button:has-text("View")',
+          'button:has-text("Document")',
+          '[role="button"]:has-text("View")',
+          '[role="button"]:has-text("Document")'
+        ];
+
+        for (const buttonSelector of actionButtonSelectors) {
+          try {
+            const button = await this.page.$(buttonSelector);
+            if (button) {
+              await button.click();
+              this.log(`✅ Clicked action button: ${buttonSelector}`);
+              break;
+            }
+          } catch (e) {
+            this.log(`⚠️ Action button not found: ${buttonSelector}`);
+          }
+        }
+      } else if (documentInfo.isClickableRow) {
+        this.log('🖱️ Found clickable row, clicking...');
+        await this.page.click(`tbody ${documentInfo.rowSelector}`);
+        await this.randomWait(1000, 2000);
+      } else if (documentInfo.hasClickableElement) {
+        this.log('🖱️ Found clickable element, clicking...');
+        await this.page.click(documentInfo.elementSelector);
+        await this.randomWait(1000, 2000);
+      } else if (documentInfo.fallbackMode) {
+        this.log('⚠️ No interactive elements found, trying alternative methods...');
+        
+        // Try clicking the cell containing the document number
+        const cells = await this.page.$$('td');
+        for (const cell of cells) {
+          const text = await cell.evaluate(el => el.textContent?.trim());
+          if (text === searchData.instrumentNumber) {
+            await cell.click();
+            this.log('✅ Clicked on document number cell');
+            await this.randomWait(1000, 2000);
+            break;
+          }
+        }
+      }
+
+      // Wait for potential overlay/dialog after clicking
+      await this.randomWait(2000, 3000);
+      
+      // Check for "View Document" or similar buttons that may appear
+      const viewButtonSelectors = [
+        'button:has-text("View Document")',
+        'button:has-text("Download")',
+        'button:has-text("View PDF")',
+        'a[href*=".pdf"]',
+        'a[href*="document"]',
+        '[role="button"]:has-text("View")'
+      ];
+
+      for (const buttonSelector of viewButtonSelectors) {
+        try {
+          const button = await this.page.waitForSelector(buttonSelector, { timeout: 2000 });
+          if (button) {
+            await button.click();
+            this.log(`✅ Clicked view button: ${buttonSelector}`);
+            break;
           }
         } catch (e) {
-          this.log(`⚠️ Error checking selector ${selector}: ${e.message}`);
-          continue;
+          this.log(`⚠️ View button not found: ${buttonSelector}`);
         }
       }      // Check if the link we found is actually a PDF or a detail page
       if (deedLink && deedLinkHref && !deedLinkHref.includes('.pdf')) {
