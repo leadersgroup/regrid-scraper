@@ -145,37 +145,124 @@ class DallasCountyTexasScraper extends DeedScraper {
       this.log(`Viewer search result: ${JSON.stringify(viewerFound)}`);
       await this.randomWait(3000, 4000);
 
-      // Check if document viewer/image opened
-      const documentInfo = await this.page.evaluate(() => {
-        // Look for iframe, image viewer, or PDF viewer
-        const iframe = document.querySelector('iframe');
-        const images = Array.from(document.querySelectorAll('img')).filter(img =>
-          img.src && img.src.includes('document') || img.width > 500
-        );
-        const canvas = document.querySelector('canvas');
+      // Get page count from document viewer
+      this.log('📄 Getting document page count...');
+      const pageInfo = await this.page.evaluate(() => {
+        const pageText = document.body.innerText;
+        const pageMatch = pageText.match(/(\d+)\s+of\s+(\d+)/i);
+
+        // Also look for "Number of Pages" field
+        const cells = Array.from(document.querySelectorAll('td, div, span'));
+        let pagesFromField = null;
+        for (const cell of cells) {
+          const text = cell.textContent || '';
+          if (text.includes('Number of Pages')) {
+            const match = text.match(/Number of Pages:\s*(\d+)/);
+            if (match) pagesFromField = parseInt(match[1]);
+          }
+        }
 
         return {
-          hasIframe: !!iframe,
-          iframeSrc: iframe?.src || null,
-          hasLargeImages: images.length > 0,
-          imagesSrc: images.map(img => img.src).slice(0, 3),
-          hasCanvas: !!canvas,
-          url: window.location.href
+          currentPage: pageMatch ? parseInt(pageMatch[1]) : 1,
+          totalPages: pageMatch ? parseInt(pageMatch[2]) : (pagesFromField || 1)
         };
       });
 
-      this.log(`Document info: ${JSON.stringify(documentInfo)}`);
-      await this.page.screenshot({ path: `/tmp/dallas-deed-viewer-${Date.now()}.png`, fullPage: true });
+      this.log(`✅ Document has ${pageInfo.totalPages} page(s)`);
 
-      // For now, return that we've successfully located the document
-      this.log('✅ Deed document found in Dallas County records');
-      this.log('ℹ️  Document viewing/downloading may require additional implementation');
+      // Find the document viewer element to screenshot
+      const viewerSelector = await this.page.evaluate(() => {
+        // Look for the main viewer container
+        const viewer = document.querySelector('[class*="viewer"]') ||
+                      document.querySelector('[class*="document"]') ||
+                      document.querySelector('main');
+        return viewer ? true : false;
+      });
+
+      if (!viewerSelector) {
+        this.log('⚠️ Could not find document viewer element');
+      }
+
+      // Capture screenshots of all pages
+      this.log(`📸 Capturing ${pageInfo.totalPages} page screenshot(s)...`);
+      const pageBuffers = [];
+
+      for (let pageNum = 1; pageNum <= pageInfo.totalPages; pageNum++) {
+        this.log(`  Page ${pageNum}/${pageInfo.totalPages}: Capturing...`);
+
+        // Wait for page to render
+        await this.randomWait(2000, 3000);
+
+        // Take screenshot of the document viewer area
+        const screenshot = await this.page.screenshot({
+          type: 'png',
+          fullPage: false
+        });
+
+        pageBuffers.push(screenshot);
+        this.log(`    ✅ Captured: ${(screenshot.length / 1024).toFixed(2)} KB`);
+
+        // Click next page button if not on last page
+        if (pageNum < pageInfo.totalPages) {
+          const clicked = await this.page.evaluate(() => {
+            const buttons = Array.from(document.querySelectorAll('button'));
+            const nextBtn = buttons.find(btn => {
+              const ariaLabel = (btn.getAttribute('aria-label') || '').toLowerCase();
+              const title = (btn.title || '').toLowerCase();
+              return ariaLabel.includes('next') || title.includes('next') ||
+                     btn.textContent.trim() === '▶' || btn.textContent.trim() === '>';
+            });
+            if (nextBtn) {
+              nextBtn.click();
+              return true;
+            }
+            return false;
+          });
+
+          if (clicked) {
+            this.log(`    ⏭️  Clicked next page`);
+          } else {
+            this.log(`    ⚠️ Could not find next page button`);
+          }
+        }
+      }
+
+      // Convert screenshots to PDF using pdf-lib
+      this.log('📄 Converting screenshots to PDF...');
+      const { PDFDocument } = require('pdf-lib');
+      const pdfDoc = await PDFDocument.create();
+
+      for (let i = 0; i < pageBuffers.length; i++) {
+        this.log(`  Adding page ${i + 1}/${pageBuffers.length} to PDF...`);
+        const image = await pdfDoc.embedPng(pageBuffers[i]);
+        const page = pdfDoc.addPage([image.width, image.height]);
+        page.drawImage(image, {
+          x: 0,
+          y: 0,
+          width: image.width,
+          height: image.height
+        });
+      }
+
+      const pdfBytes = await pdfDoc.save();
+      const pdfBuffer = Buffer.from(pdfBytes);
+      this.log(`✅ PDF created: ${(pdfBuffer.length / 1024).toFixed(2)} KB`);
+
+      // Convert to base64 for return
+      const pdfBase64 = pdfBuffer.toString('base64');
+
+      // Generate filename
+      const filename = `dallas_deed_${searchData.instrumentNumber}.pdf`;
 
       return {
         success: true,
-        message: 'Deed document found and located',
+        pdfBase64: pdfBase64,
+        filename: filename,
+        downloadPath: '',
         instrumentNumber: searchData.instrumentNumber,
-        documentInfo: documentInfo
+        timestamp: new Date().toISOString(),
+        fileSize: pdfBuffer.length,
+        pageCount: pageInfo.totalPages
       };
     } catch (error) {
       this.log(`❌ Download error: ${error.message}`);
