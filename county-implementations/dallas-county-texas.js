@@ -115,54 +115,69 @@ class DallasCountyTexasScraper extends DeedScraper {
 
         await this.randomWait(2000, 3000);
 
-        // Fill in book and page fields
-        this.log('📝 Filling book and page fields...');
+        // Fill in volume and page fields (NOT book)
+        this.log('📝 Filling volume and page fields...');
 
-        // Find and fill book field
-        const bookFilled = await this.page.evaluate((book) => {
-          const inputs = Array.from(document.querySelectorAll('input'));
-          const bookInput = inputs.find(input => {
-            const label = input.labels?.[0]?.textContent?.toLowerCase() || '';
-            const placeholder = (input.placeholder || '').toLowerCase();
-            return label.includes('book') || label.includes('volume') ||
-                   placeholder.includes('book') || placeholder.includes('volume');
-          });
-          if (bookInput) {
-            bookInput.value = book;
-            bookInput.dispatchEvent(new Event('input', { bubbles: true }));
-            bookInput.dispatchEvent(new Event('change', { bubbles: true }));
-            return true;
+        // Try to fill by ID first, then fall back to label/placeholder search
+        const filled = await this.page.evaluate((volume, page) => {
+          // For vol/page format, use #volume field specifically (NOT #book)
+          let volumeInput = document.querySelector('#volume');
+          let pageInput = document.querySelector('#page');
+
+          // If not found by ID, search by label/placeholder
+          if (!volumeInput) {
+            const inputs = Array.from(document.querySelectorAll('input'));
+            volumeInput = inputs.find(input => {
+              const label = input.labels?.[0]?.textContent?.toLowerCase() || '';
+              const placeholder = (input.placeholder || '').toLowerCase();
+              const id = (input.id || '').toLowerCase();
+              return label.includes('volume') || id.includes('volume');
+            });
           }
-          return false;
-        }, searchData.bookNumber);
 
-        if (!bookFilled) {
-          return { success: false, error: 'Could not find book/volume field' };
+          if (!pageInput) {
+            const inputs = Array.from(document.querySelectorAll('input'));
+            pageInput = inputs.find(input => {
+              const label = input.labels?.[0]?.textContent?.toLowerCase() || '';
+              const placeholder = (input.placeholder || '').toLowerCase();
+              const id = (input.id || '').toLowerCase();
+              return label.includes('page') || placeholder.includes('page') ||
+                     id.includes('page');
+            });
+          }
+
+          if (!volumeInput || !pageInput) {
+            return {
+              success: false,
+              volumeFound: !!volumeInput,
+              pageFound: !!pageInput
+            };
+          }
+
+          // Fill the fields (ONLY volume and page, NOT book)
+          volumeInput.value = volume;
+          volumeInput.dispatchEvent(new Event('input', { bubbles: true }));
+          volumeInput.dispatchEvent(new Event('change', { bubbles: true }));
+
+          pageInput.value = page;
+          pageInput.dispatchEvent(new Event('input', { bubbles: true }));
+          pageInput.dispatchEvent(new Event('change', { bubbles: true }));
+
+          return {
+            success: true,
+            volumeId: volumeInput.id,
+            pageId: pageInput.id
+          };
+        }, searchData.bookNumber, searchData.pageNumber);
+
+        if (!filled.success) {
+          return {
+            success: false,
+            error: `Could not find ${!filled.volumeFound ? 'volume' : 'page'} field`
+          };
         }
 
-        await this.randomWait(500, 1000);
-
-        // Find and fill page field
-        const pageFilled = await this.page.evaluate((page) => {
-          const inputs = Array.from(document.querySelectorAll('input'));
-          const pageInput = inputs.find(input => {
-            const label = input.labels?.[0]?.textContent?.toLowerCase() || '';
-            const placeholder = (input.placeholder || '').toLowerCase();
-            return label.includes('page') || placeholder.includes('page');
-          });
-          if (pageInput) {
-            pageInput.value = page;
-            pageInput.dispatchEvent(new Event('input', { bubbles: true }));
-            pageInput.dispatchEvent(new Event('change', { bubbles: true }));
-            return true;
-          }
-          return false;
-        }, searchData.pageNumber);
-
-        if (!pageFilled) {
-          return { success: false, error: 'Could not find page field' };
-        }
-
+        this.log(`  ✓ Filled volume: #${filled.volumeId}, page: #${filled.pageId}`);
         await this.randomWait(1000, 2000);
 
         // Click search button
@@ -184,7 +199,7 @@ class DallasCountyTexasScraper extends DeedScraper {
           await this.page.keyboard.press('Enter');
         }
 
-        searchIdentifier = `Book ${searchData.bookNumber}, Page ${searchData.pageNumber}`;
+        searchIdentifier = `Volume ${searchData.bookNumber}, Page ${searchData.pageNumber}`;
       }
 
       await this.randomWait(3000, 5000);
