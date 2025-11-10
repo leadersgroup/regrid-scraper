@@ -116,68 +116,40 @@ class DallasCountyTexasScraper extends DeedScraper {
         await this.randomWait(2000, 3000);
 
         // Fill in volume and page fields (NOT book)
+        // Use page.type() to properly trigger React's onChange handlers
         this.log('📝 Filling volume and page fields...');
 
-        // Try to fill by ID first, then fall back to label/placeholder search
-        const filled = await this.page.evaluate((volume, page) => {
-          // For vol/page format, use #volume field specifically (NOT #book)
-          let volumeInput = document.querySelector('#volume');
-          let pageInput = document.querySelector('#page');
+        // Remove leading zeros from page number (e.g., "0972" -> "972")
+        const volumeNumber = searchData.bookNumber;
+        const pageNumber = String(parseInt(searchData.pageNumber, 10));
+        this.log(`  Formatting: volume=${volumeNumber}, page=${searchData.pageNumber} -> ${pageNumber}`);
 
-          // If not found by ID, search by label/placeholder
-          if (!volumeInput) {
-            const inputs = Array.from(document.querySelectorAll('input'));
-            volumeInput = inputs.find(input => {
-              const label = input.labels?.[0]?.textContent?.toLowerCase() || '';
-              const placeholder = (input.placeholder || '').toLowerCase();
-              const id = (input.id || '').toLowerCase();
-              return label.includes('volume') || id.includes('volume');
-            });
-          }
-
-          if (!pageInput) {
-            const inputs = Array.from(document.querySelectorAll('input'));
-            pageInput = inputs.find(input => {
-              const label = input.labels?.[0]?.textContent?.toLowerCase() || '';
-              const placeholder = (input.placeholder || '').toLowerCase();
-              const id = (input.id || '').toLowerCase();
-              return label.includes('page') || placeholder.includes('page') ||
-                     id.includes('page');
-            });
-          }
-
-          if (!volumeInput || !pageInput) {
-            return {
-              success: false,
-              volumeFound: !!volumeInput,
-              pageFound: !!pageInput
-            };
-          }
-
-          // Fill the fields (ONLY volume and page, NOT book)
-          volumeInput.value = volume;
-          volumeInput.dispatchEvent(new Event('input', { bubbles: true }));
-          volumeInput.dispatchEvent(new Event('change', { bubbles: true }));
-
-          pageInput.value = page;
-          pageInput.dispatchEvent(new Event('input', { bubbles: true }));
-          pageInput.dispatchEvent(new Event('change', { bubbles: true }));
-
-          return {
-            success: true,
-            volumeId: volumeInput.id,
-            pageId: pageInput.id
-          };
-        }, searchData.bookNumber, searchData.pageNumber);
-
-        if (!filled.success) {
+        // Clear and type into volume field
+        const volumeField = await this.page.$('#volume');
+        if (!volumeField) {
           return {
             success: false,
-            error: `Could not find ${!filled.volumeFound ? 'volume' : 'page'} field`
+            error: 'Volume field not found'
           };
         }
 
-        this.log(`  ✓ Filled volume: #${filled.volumeId}, page: #${filled.pageId}`);
+        await volumeField.click({ clickCount: 3 }); // Select all
+        await volumeField.type(volumeNumber);
+        this.log(`  ✓ Typed volume: ${volumeNumber}`);
+        await this.randomWait(500, 1000);
+
+        // Clear and type into page field
+        const pageField = await this.page.$('#page');
+        if (!pageField) {
+          return {
+            success: false,
+            error: 'Page field not found'
+          };
+        }
+
+        await pageField.click({ clickCount: 3 }); // Select all
+        await pageField.type(pageNumber);
+        this.log(`  ✓ Typed page: ${pageNumber}`);
         await this.randomWait(1000, 2000);
 
         // Click search button
@@ -209,49 +181,7 @@ class DallasCountyTexasScraper extends DeedScraper {
       await this.waitForLoading();
       await this.randomWait(2000, 3000);
 
-      // Find and click on the row containing the document
-      this.log('📄 Looking for document row...');
-      const rowClicked = await this.page.evaluate((bookNum, pageNum) => {
-        // Find the row containing our document
-        const rows = Array.from(document.querySelectorAll('tbody tr'));
-        const docRow = rows.find(row => {
-          const text = row.textContent;
-          // Match either by book/page or by any identifying info
-          if (bookNum && pageNum) {
-            return text.includes(bookNum) && text.includes(pageNum);
-          }
-          return rows.length > 0; // If only one result, take it
-        });
-
-        if (!docRow) {
-          return { found: false, reason: 'Row not found' };
-        }
-
-        // Look for the button in the row (a11y-menu__control)
-        const button = docRow.querySelector('button.a11y-menu__control');
-        if (button) {
-          button.click();
-          return { found: true, clicked: 'button' };
-        }
-
-        // If no button, try clicking the row itself
-        docRow.click();
-        return { found: true, clicked: 'row' };
-      }, searchData.bookNumber, searchData.pageNumber);
-
-      if (!rowClicked.found) {
-        this.log('⚠️ Could not find document row');
-        await this.page.screenshot({ path: `/tmp/dallas-clerk-no-row-${Date.now()}.png`, fullPage: true });
-        return {
-          success: false,
-          error: 'Document row not found in results'
-        };
-      }
-
-      this.log(`✅ Clicked ${rowClicked.clicked} - checking for document viewer`);
-      await this.randomWait(2000, 3000);
-
-      // Monitor network requests to capture document image URLs BEFORE clicking on viewer
+      // Set up network monitoring BEFORE clicking to capture image URLs
       this.log('🔍 Setting up network monitoring for document images...');
       const imageUrls = [];
 
@@ -266,33 +196,77 @@ class DallasCountyTexasScraper extends DeedScraper {
         }
       });
 
-      // Look for document viewer, preview, or image options
-      // Try clicking directly on the row to open document viewer instead of the menu
-      this.log('📄 Looking for document preview/viewer...');
-      const viewerFound = await this.page.evaluate((instrumentNum) => {
-        // Close any menus first
+      // Find and click on the document link (NOT the button)
+      this.log('📄 Looking for document row...');
+      // Strip leading zeros from page number for matching (e.g., "0972" -> "972")
+      const pageNumForMatching = String(parseInt(searchData.pageNumber, 10));
+      const rowClicked = await this.page.evaluate((bookNum, pageNum) => {
+        // Find the row containing our document
         const rows = Array.from(document.querySelectorAll('tbody tr'));
-        const docRow = rows.find(row => row.textContent.includes(instrumentNum));
+        const docRow = rows.find(row => {
+          const text = row.textContent;
+          // Match either by book/page or by any identifying info
+          if (bookNum && pageNum) {
+            return text.includes(bookNum) && text.includes(pageNum);
+          }
+          return rows.length > 0; // If only one result, take it
+        });
 
         if (!docRow) {
-          return { found: false, reason: 'Row disappeared' };
+          return { found: false, reason: 'Row not found', rowCount: rows.length };
         }
 
-        // Click on a cell in the row (not the button) to try to open viewer
-        const cells = docRow.querySelectorAll('td');
-        if (cells.length > 3) {
-          // Click on the grantee or document type cell
-          cells[4].click(); // Try clicking the GRANTEE cell
-          return { found: true, clicked: 'cell' };
+        // Click on the document ID or volume/page link (usually in first few cells)
+        // Look for a clickable link that opens the document viewer
+        const cells = Array.from(docRow.querySelectorAll('td'));
+
+        // Try to find a link with the volume/page numbers
+        for (const cell of cells) {
+          const link = cell.querySelector('a');
+          if (link) {
+            const linkText = link.textContent;
+            if (linkText.includes(bookNum) || linkText.includes(pageNum)) {
+              link.click();
+              return { found: true, clicked: 'volume-link' };
+            }
+          }
         }
 
-        return { found: false, reason: 'No clickable cells' };
-      }, searchData.instrumentNumber);
+        // Try clicking on cells that contain volume/page text
+        for (const cell of cells) {
+          const text = cell.textContent;
+          if (text.includes(bookNum) && text.includes(pageNum)) {
+            cell.click();
+            return { found: true, clicked: 'volume-cell' };
+          }
+        }
 
-      this.log(`Viewer search result: ${JSON.stringify(viewerFound)}`);
+        // Last resort: click any link in the row (usually the document ID)
+        const firstLink = docRow.querySelector('a');
+        if (firstLink) {
+          firstLink.click();
+          return { found: true, clicked: 'first-link' };
+        }
 
-      // Wait for initial image to load
-      await this.randomWait(3000, 4000);
+        // Final fallback: click the row itself
+        docRow.click();
+        return { found: true, clicked: 'row' };
+      }, searchData.bookNumber, pageNumForMatching);
+
+      if (!rowClicked.found) {
+        this.log('⚠️ Could not find document row');
+        await this.page.screenshot({ path: `/tmp/dallas-clerk-no-row-${Date.now()}.png`, fullPage: true });
+        return {
+          success: false,
+          error: 'Document row not found in results'
+        };
+      }
+
+      this.log(`✅ Clicked ${rowClicked.clicked} - waiting for document to load`);
+
+      // Wait longer for the document images to load (they load asynchronously)
+      // Images can take 5-10 seconds to appear in the network
+      await this.randomWait(8000, 10000);
 
       // Get page count from document viewer
       this.log('📄 Getting document page count...');
