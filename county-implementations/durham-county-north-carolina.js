@@ -526,28 +526,18 @@ class DurhamCountyNorthCarolinaScraper extends DeedScraper {
 
       await this.randomWait(3000, 5000);
 
-      // Find first result (document number like 2024114785) and hover to reveal download button
-      this.log('📄 Looking for first result...');
+      // Find document number in body text (not in a table)
+      this.log('📄 Looking for document number in results...');
       const resultInfo = await this.page.evaluate(() => {
-        // Look for result rows in table - typically the first data row after headers
-        const rows = Array.from(document.querySelectorAll('tbody tr, table tr'));
+        // Look for 10-digit document number in body text
+        const bodyText = document.body.innerText;
+        const match = bodyText.match(/\b(\d{10})\b/);
 
-        for (const row of rows) {
-          // Skip header rows
-          if (row.querySelector('th')) continue;
-
-          const cells = Array.from(row.querySelectorAll('td'));
-          // Look for document number pattern (e.g., 2024114785 - typically 10 digits)
-          for (const cell of cells) {
-            const text = cell.textContent.trim();
-            if (/^\d{10}$/.test(text)) {
-              return {
-                success: true,
-                documentNumber: text,
-                hasRow: true
-              };
-            }
-          }
+        if (match) {
+          return {
+            success: true,
+            documentNumber: match[1]
+          };
         }
 
         return { success: false };
@@ -560,55 +550,83 @@ class DurhamCountyNorthCarolinaScraper extends DeedScraper {
         };
       }
 
-      this.log(`✅ Found result: ${resultInfo.documentNumber}`);
+      this.log(`✅ Found document number: ${resultInfo.documentNumber}`);
 
-      // Hover over the first result row to reveal download button
-      this.log('🖱️  Hovering over result to reveal download button...');
-      const hoverResult = await this.page.evaluate((docNum) => {
-        const rows = Array.from(document.querySelectorAll('tbody tr, table tr'));
+      // Find and click the document number element (it should be clickable)
+      this.log('🖱️  Clicking document number...');
+      const clickResult = await this.page.evaluate((docNum) => {
+        // Search for clickable elements containing the document number
+        const allElements = Array.from(document.querySelectorAll('a, button, div, span, td'));
 
-        for (const row of rows) {
-          const cells = Array.from(row.querySelectorAll('td'));
-          for (const cell of cells) {
-            if (cell.textContent.trim() === docNum) {
-              // Trigger hover on the row
-              const mouseoverEvent = new MouseEvent('mouseover', {
-                bubbles: true,
-                cancelable: true,
-                view: window
-              });
-              row.dispatchEvent(mouseoverEvent);
-              return { success: true };
-            }
+        for (const el of allElements) {
+          const text = el.textContent.trim();
+          // Check if this element contains just the document number or starts with it
+          if (text === docNum || text.startsWith(docNum)) {
+            // Try to click it
+            el.click();
+            return { success: true, clicked: true };
           }
         }
+
         return { success: false };
       }, resultInfo.documentNumber);
 
-      await this.randomWait(1000, 2000);
+      if (!clickResult.success) {
+        this.log('⚠️ Could not click document number');
+        return {
+          success: false,
+          error: 'Could not click document number'
+        };
+      }
 
-      // Click the download PDF button that appears on hover
-      this.log('📥 Clicking download PDF button...');
-      const downloadClicked = await this.page.evaluate(() => {
-        // Look for download/PDF button - could be icon or text
-        const buttons = Array.from(document.querySelectorAll('button, a, i, img, span[class*="icon"], [class*="download"], [class*="pdf"]'));
+      this.log('✅ Clicked document number');
+      await this.randomWait(3000, 5000);
 
-        for (const btn of buttons) {
-          const text = btn.textContent?.toLowerCase() || btn.title?.toLowerCase() || btn.alt?.toLowerCase() || '';
-          const className = btn.className?.toLowerCase() || '';
+      // Find and click either a Download button or View button/link
+      this.log('📥 Looking for Download or View button...');
+      const btnClicked = await this.page.evaluate(() => {
+        // Look for clickable elements (buttons, links, clickable divs/spans)
+        const elements = Array.from(document.querySelectorAll('a, button, input[type="button"], input[type="submit"], div[onclick], span[onclick], i[onclick]'));
 
-          // Look for download, PDF, or document icons/text
-          if (text.includes('download') ||
-              text.includes('pdf') ||
-              className.includes('download') ||
-              className.includes('pdf') ||
-              btn.querySelector('[class*="download"]') ||
-              btn.querySelector('[class*="pdf"]')) {
+        // Priority 1: Look for Download button
+        for (const el of elements) {
+          const text = (el.textContent || el.value || el.title || el.alt || '').trim().toLowerCase();
+          const className = (el.className || '').toLowerCase();
+          const id = (el.id || '').toLowerCase();
 
-            // Check if visible (download button appears on hover)
-            if (btn.offsetParent !== null) {
-              btn.click();
-              return { success: true };
+          // Check for download-related text/attributes
+          if ((text.includes('download') || className.includes('download') || id.includes('download')) &&
+              el.offsetParent !== null) {
+            el.click();
+            return { success: true, text: el.textContent || el.value || el.title || 'Download', type: 'download' };
+          }
+        }
+
+        // Priority 2: Look for View button/link
+        for (const el of elements) {
+          const text = (el.textContent || el.value || el.title || '').trim().toLowerCase();
+
+          // Look specifically for "view" button (case-insensitive)
+          if ((text === 'view' || text.includes('view')) && el.offsetParent !== null) {
+            el.click();
+            return { success: true, text: el.textContent || el.value || el.title, type: 'view' };
+          }
+        }
+
+        // Priority 3: Look for icon buttons (download/view icons)
+        const iconElements = Array.from(document.querySelectorAll('i, img, svg'));
+        for (const el of iconElements) {
+          const className = (el.className || '').toLowerCase();
+          const title = (el.title || el.alt || '').toLowerCase();
+
+          if ((className.includes('download') || className.includes('view') ||
+               title.includes('download') || title.includes('view')) &&
+              el.offsetParent !== null) {
+            // Click the icon or its parent if parent is clickable
+            const clickTarget = el.onclick || el.parentElement?.onclick ? el : el.parentElement;
+            if (clickTarget) {
+              clickTarget.click();
+              return { success: true, text: title || className, type: 'icon' };
             }
           }
         }
@@ -616,16 +634,69 @@ class DurhamCountyNorthCarolinaScraper extends DeedScraper {
         return { success: false };
       });
 
-      if (!downloadClicked.success) {
-        this.log('⚠️ Download button not found after hover');
+      if (!btnClicked.success) {
+        this.log('⚠️ Could not find Download or View button');
         return {
           success: false,
-          error: 'Could not find download PDF button'
+          error: 'Could not find Download or View button'
         };
       }
 
-      this.log('✅ Clicked download button');
-      await this.randomWait(3000, 5000);
+      this.log(`✅ Clicked ${btnClicked.type} button: ${btnClicked.text}`);
+
+      // Wait for new window/tab with PDF to open using browser.waitForTarget()
+      this.log('⏳ Waiting for PDF window to open...');
+
+      let pdfPage = null;
+      try {
+        // Wait for a new target (window/tab) to be created
+        const newTarget = await this.browser.waitForTarget(
+          target => target.type() === 'page' && target.url() !== 'about:blank',
+          { timeout: 10000 }
+        );
+
+        pdfPage = await newTarget.page();
+        this.log(`✅ New window opened: ${pdfPage.url()}`);
+      } catch (error) {
+        // Fallback: Try to find new page manually
+        this.log('⚠️ waitForTarget timeout, trying manual detection...');
+        await this.randomWait(3000, 5000);
+
+        const allPages = await this.browser.pages();
+        this.log(`📄 Found ${allPages.length} total windows`);
+
+        for (const page of allPages) {
+          const url = page.url();
+          this.log(`  - Checking window: ${url}`);
+          // Look for PDF URL or new window on rodweb domain that's not the search page
+          if (url.includes('.pdf') ||
+              (page !== this.page && url.includes('rodweb.dconc.gov') && !url.includes('DOCSEARCH'))) {
+            pdfPage = page;
+            break;
+          }
+        }
+
+        // If still no PDF window found, try the last page
+        if (!pdfPage && allPages.length > 1) {
+          const lastPage = allPages[allPages.length - 1];
+          if (lastPage !== this.page && lastPage.url() !== 'about:blank') {
+            pdfPage = lastPage;
+            this.log(`⚠️ Using last window: ${pdfPage.url()}`);
+          }
+        }
+      }
+
+      if (!pdfPage || pdfPage === this.page) {
+        return {
+          success: false,
+          error: 'Could not find PDF window'
+        };
+      }
+
+      // Switch to PDF page
+      this.page = pdfPage;
+      await this.randomWait(2000, 3000);
+      this.log(`✅ Switched to PDF window: ${this.page.url()}`);
 
       // Download the PDF
       this.log('📥 Attempting to download PDF...');
