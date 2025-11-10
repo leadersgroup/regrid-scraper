@@ -119,6 +119,21 @@ class DallasCountyTexasScraper extends DeedScraper {
       this.log(`✅ Clicked ${rowClicked.clicked} - checking for document viewer`);
       await this.randomWait(2000, 3000);
 
+      // Monitor network requests to capture document image URLs BEFORE clicking on viewer
+      this.log('🔍 Setting up network monitoring for document images...');
+      const imageUrls = [];
+
+      this.page.on('response', async (response) => {
+        const url = response.url();
+        // Look for document image PNGs: /files/documents/{docId}/images/{imageId}_{pageNum}.png
+        if (url.includes('/files/documents/') && url.includes('/images/') && url.endsWith('.png')) {
+          if (!imageUrls.includes(url)) {
+            imageUrls.push(url);
+            this.log(`  📷 Found image: ${url.split('/').pop()}`);
+          }
+        }
+      });
+
       // Look for document viewer, preview, or image options
       // Try clicking directly on the row to open document viewer instead of the menu
       this.log('📄 Looking for document preview/viewer...');
@@ -143,6 +158,8 @@ class DallasCountyTexasScraper extends DeedScraper {
       }, searchData.instrumentNumber);
 
       this.log(`Viewer search result: ${JSON.stringify(viewerFound)}`);
+
+      // Wait for initial image to load
       await this.randomWait(3000, 4000);
 
       // Get page count from document viewer
@@ -170,65 +187,74 @@ class DallasCountyTexasScraper extends DeedScraper {
 
       this.log(`✅ Document has ${pageInfo.totalPages} page(s)`);
 
-      // Find the document viewer element to screenshot
-      const viewerSelector = await this.page.evaluate(() => {
-        // Look for the main viewer container
-        const viewer = document.querySelector('[class*="viewer"]') ||
-                      document.querySelector('[class*="document"]') ||
-                      document.querySelector('main');
-        return viewer ? true : false;
+      // Verify we have at least one image URL
+      if (imageUrls.length === 0) {
+        throw new Error('No document images found');
+      }
+
+      // Construct URLs for all pages based on the first image URL pattern
+      // Pattern: /files/documents/{docId}/images/{imageId}_{pageNum}.png
+      const firstImageUrl = imageUrls[0];
+      const urlMatch = firstImageUrl.match(/(.+\/)(\d+)_(\d+)\.png$/);
+
+      if (!urlMatch) {
+        throw new Error(`Could not parse image URL pattern: ${firstImageUrl}`);
+      }
+
+      const baseUrl = urlMatch[1]; // e.g., "https://dallas.tx.publicsearch.us/files/documents/232080994/images/"
+      const imageId = urlMatch[2]; // e.g., "221553289"
+
+      // Generate all page URLs
+      const allImageUrls = [];
+      for (let pageNum = 1; pageNum <= pageInfo.totalPages; pageNum++) {
+        const pageUrl = `${baseUrl}${imageId}_${pageNum}.png`;
+        allImageUrls.push(pageUrl);
+      }
+
+      this.log(`📋 Generated ${allImageUrls.length} image URL(s) from pattern`);
+      allImageUrls.forEach((url, idx) => {
+        this.log(`  ${idx + 1}. ${url.split('/').pop()}`);
       });
 
-      if (!viewerSelector) {
-        this.log('⚠️ Could not find document viewer element');
-      }
+      this.log(`📥 Downloading ${allImageUrls.length} image(s)...`);
 
-      // Capture screenshots of all pages
-      this.log(`📸 Capturing ${pageInfo.totalPages} page screenshot(s)...`);
+      // Download images using fetch with cookies
+      const https = require('https');
+      const cookies = await this.page.cookies();
+      const cookieString = cookies.map(c => `${c.name}=${c.value}`).join('; ');
+
       const pageBuffers = [];
+      for (let i = 0; i < allImageUrls.length; i++) {
+        const url = allImageUrls[i];
+        this.log(`  Downloading ${i + 1}/${allImageUrls.length}: ${url.split('/').pop()}`);
 
-      for (let pageNum = 1; pageNum <= pageInfo.totalPages; pageNum++) {
-        this.log(`  Page ${pageNum}/${pageInfo.totalPages}: Capturing...`);
+        const imageBuffer = await new Promise((resolve, reject) => {
+          const urlObj = new URL(url);
+          const options = {
+            hostname: urlObj.hostname,
+            port: 443,
+            path: urlObj.pathname + urlObj.search,
+            method: 'GET',
+            headers: {
+              'Cookie': cookieString,
+              'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36'
+            }
+          };
 
-        // Wait for page to render
-        await this.randomWait(2000, 3000);
-
-        // Take screenshot of the document viewer area
-        const screenshot = await this.page.screenshot({
-          type: 'png',
-          fullPage: false
+          https.get(options, (res) => {
+            const chunks = [];
+            res.on('data', (chunk) => chunks.push(chunk));
+            res.on('end', () => resolve(Buffer.concat(chunks)));
+            res.on('error', reject);
+          }).on('error', reject);
         });
 
-        pageBuffers.push(screenshot);
-        this.log(`    ✅ Captured: ${(screenshot.length / 1024).toFixed(2)} KB`);
-
-        // Click next page button if not on last page
-        if (pageNum < pageInfo.totalPages) {
-          const clicked = await this.page.evaluate(() => {
-            const buttons = Array.from(document.querySelectorAll('button'));
-            const nextBtn = buttons.find(btn => {
-              const ariaLabel = (btn.getAttribute('aria-label') || '').toLowerCase();
-              const title = (btn.title || '').toLowerCase();
-              return ariaLabel.includes('next') || title.includes('next') ||
-                     btn.textContent.trim() === '▶' || btn.textContent.trim() === '>';
-            });
-            if (nextBtn) {
-              nextBtn.click();
-              return true;
-            }
-            return false;
-          });
-
-          if (clicked) {
-            this.log(`    ⏭️  Clicked next page`);
-          } else {
-            this.log(`    ⚠️ Could not find next page button`);
-          }
-        }
+        pageBuffers.push(imageBuffer);
+        this.log(`    ✅ Downloaded: ${(imageBuffer.length / 1024).toFixed(2)} KB`);
       }
 
-      // Convert screenshots to PDF using pdf-lib
-      this.log('📄 Converting screenshots to PDF...');
+      // Convert images to PDF using pdf-lib
+      this.log('📄 Converting images to PDF...');
       const { PDFDocument } = require('pdf-lib');
       const pdfDoc = await PDFDocument.create();
 
