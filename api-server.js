@@ -39,6 +39,7 @@ const HarrisCountyTexasScraper = require('./county-implementations/harris-county
 const TarrantCountyTexasScraper = require('./county-implementations/tarrant-county-texas');
 const DallasCountyTexasScraper = require('./county-implementations/dallas-county-texas');
 const BexarCountyTexasScraper = require('./county-implementations/bexar-county-texas');
+const DurhamCountyNorthCarolinaScraper = require('./county-implementations/durham-county-north-carolina');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -256,6 +257,18 @@ app.get('/api/counties', (req, res) => {
           'Full PDF download'
         ],
         cost: '$0.001 per deed (with 2Captcha API)'
+      },
+      {
+        name: 'Durham County',
+        state: 'NC',
+        stateCode: 'North Carolina',
+        features: [
+          'Property search by address',
+          'Book and Page extraction',
+          'Register of Deeds integration',
+          'Full PDF download'
+        ],
+        cost: 'Free (no CAPTCHA)'
       }
     ]
   });
@@ -283,7 +296,8 @@ function normalizeCountyName(county) {
     'harris': 'Harris',
     'tarrant': 'Tarrant',
     'dallas': 'Dallas',
-    'bexar': 'Bexar'
+    'bexar': 'Bexar',
+    'durham': 'Durham'
   };
 
   return countyMap[normalized] || county;
@@ -337,6 +351,8 @@ async function processDeedDownload(address, county, state, options = {}) {
     scraper = new DallasCountyTexasScraper(scraperOptions);
   } else if (detectedCounty === 'Bexar' && detectedState === 'TX') {
     scraper = new BexarCountyTexasScraper(scraperOptions);
+  } else if (detectedCounty === 'Durham' && detectedState === 'NC') {
+    scraper = new DurhamCountyNorthCarolinaScraper(scraperOptions);
   } else {
     throw new Error(`County "${detectedCounty}, ${detectedState}" is not yet supported`);
   }
