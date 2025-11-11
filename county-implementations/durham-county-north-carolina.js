@@ -849,11 +849,21 @@ class DurhamCountyNorthCarolinaScraper extends DeedScraper {
           this.log('✅ Found direct PDF URL');
           const pdfBase64 = await this.downloadPdfFromUrl(currentUrl);
 
+          // Calculate file size
+          const fileSize = Buffer.from(pdfBase64, 'base64').length;
+
+          // Generate filename
+          const filename = `durham_deed_book${searchData.bookNumber}_page${searchData.pageNumber}.pdf`;
+
           return {
             success: true,
             pdfBase64,
+            filename,
+            downloadPath: '',
             bookNumber: searchData.bookNumber,
-            pageNumber: searchData.pageNumber
+            pageNumber: searchData.pageNumber,
+            timestamp: new Date().toISOString(),
+            fileSize
           };
         }
 
@@ -905,11 +915,21 @@ class DurhamCountyNorthCarolinaScraper extends DeedScraper {
         this.log(`✅ Found PDF in ${pdfInfo.type}: ${pdfInfo.url}`);
         const pdfBase64 = await this.downloadPdfFromUrl(pdfInfo.url);
 
+        // Calculate file size
+        const fileSize = Buffer.from(pdfBase64, 'base64').length;
+
+        // Generate filename
+        const filename = `durham_deed_book${searchData.bookNumber}_page${searchData.pageNumber}.pdf`;
+
         return {
           success: true,
           pdfBase64,
+          filename,
+          downloadPath: '',
           bookNumber: searchData.bookNumber,
-          pageNumber: searchData.pageNumber
+          pageNumber: searchData.pageNumber,
+          timestamp: new Date().toISOString(),
+          fileSize
         };
       }
 
@@ -946,11 +966,21 @@ class DurhamCountyNorthCarolinaScraper extends DeedScraper {
         this.log('✅ Found direct PDF URL');
         const pdfBase64 = await this.downloadPdfFromUrl(currentUrl);
 
+        // Calculate file size
+        const fileSize = Buffer.from(pdfBase64, 'base64').length;
+
+        // Generate filename
+        const filename = `durham_deed_book${searchData.bookNumber}_page${searchData.pageNumber}.pdf`;
+
         return {
           success: true,
           pdfBase64,
+          filename,
+          downloadPath: '',
           bookNumber: searchData.bookNumber,
-          pageNumber: searchData.pageNumber
+          pageNumber: searchData.pageNumber,
+          timestamp: new Date().toISOString(),
+          fileSize
         };
       }
 
@@ -973,11 +1003,21 @@ class DurhamCountyNorthCarolinaScraper extends DeedScraper {
         this.log(`✅ Found PDF in ${pdfInfo.type}: ${pdfInfo.url}`);
         const pdfBase64 = await this.downloadPdfFromUrl(pdfInfo.url);
 
+        // Calculate file size
+        const fileSize = Buffer.from(pdfBase64, 'base64').length;
+
+        // Generate filename
+        const filename = `durham_deed_book${searchData.bookNumber}_page${searchData.pageNumber}.pdf`;
+
         return {
           success: true,
           pdfBase64,
+          filename,
+          downloadPath: '',
           bookNumber: searchData.bookNumber,
-          pageNumber: searchData.pageNumber
+          pageNumber: searchData.pageNumber,
+          timestamp: new Date().toISOString(),
+          fileSize
         };
       }
 
@@ -999,17 +1039,53 @@ class DurhamCountyNorthCarolinaScraper extends DeedScraper {
    * Helper: Download PDF from URL
    */
   async downloadPdfFromUrl(url) {
-    // Navigate to PDF URL
-    await this.page.goto(url, { waitUntil: 'networkidle2', timeout: 60000 });
-    await this.randomWait(2000, 3000);
+    try {
+      this.log(`📥 Downloading PDF from: ${url}`);
 
-    // Get PDF content as base64
-    const pdfBuffer = await this.page.pdf({
-      format: 'A4',
-      printBackground: true
-    });
+      // If the URL is a PDF.js viewer, extract the actual PDF URL
+      let pdfUrl = url;
+      if (url.includes('pdfjs') || url.includes('file=')) {
+        // Extract the actual PDF path from the viewer URL
+        const match = url.match(/file=([^&]+)/);
+        if (match) {
+          let extractedPath = decodeURIComponent(match[1]);
+          // Remove any query parameters from the extracted path
+          extractedPath = extractedPath.split('?')[0];
 
-    return pdfBuffer.toString('base64');
+          this.log(`  Extracted PDF path: ${extractedPath}`);
+
+          // Construct full URL if it's a relative path
+          if (extractedPath.startsWith('/')) {
+            const baseUrl = new URL(url).origin;
+            pdfUrl = baseUrl + extractedPath;
+          } else {
+            pdfUrl = extractedPath;
+          }
+
+          this.log(`  Full PDF URL: ${pdfUrl}`);
+        }
+      }
+
+      // Use Puppeteer's page.goto to fetch the PDF with proper cookies/auth
+      const response = await this.page.goto(pdfUrl, {
+        waitUntil: 'networkidle2',
+        timeout: 60000
+      });
+
+      if (!response || !response.ok()) {
+        throw new Error(`Failed to download PDF: ${response?.status()} ${response?.statusText()}`);
+      }
+
+      // Get the PDF buffer
+      const pdfBuffer = await response.buffer();
+      this.log(`✅ PDF downloaded: ${(pdfBuffer.length / 1024).toFixed(2)} KB`);
+
+      return pdfBuffer.toString('base64');
+
+    } catch (error) {
+      this.log(`❌ Error downloading PDF: ${error.message}`);
+      throw error;
+    }
   }
 }
 
