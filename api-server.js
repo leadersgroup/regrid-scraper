@@ -41,6 +41,7 @@ const DallasCountyTexasScraper = require('./county-implementations/dallas-county
 const BexarCountyTexasScraper = require('./county-implementations/bexar-county-texas');
 const DurhamCountyNorthCarolinaScraper = require('./county-implementations/durham-county-north-carolina');
 const WakeCountyNorthCarolinaScraper = require('./county-implementations/wake-county-north-carolina');
+const MecklenburgCountyNorthCarolinaScraper = require('./county-implementations/mecklenburg-county-north-carolina');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -283,6 +284,19 @@ app.get('/api/counties', (req, res) => {
           'Full PDF download'
         ],
         cost: '$0.001 per deed (with 2Captcha API)'
+      },
+      {
+        name: 'Mecklenburg County',
+        state: 'NC',
+        stateCode: 'North Carolina',
+        features: [
+          'Property search with autocomplete',
+          'Deeds and Sale Price tab integration',
+          'Book-Page link extraction',
+          'Disclaimer page handling',
+          'Full PDF download'
+        ],
+        cost: 'Free (no CAPTCHA)'
       }
     ]
   });
@@ -312,7 +326,8 @@ function normalizeCountyName(county) {
     'dallas': 'Dallas',
     'bexar': 'Bexar',
     'durham': 'Durham',
-    'wake': 'Wake'
+    'wake': 'Wake',
+    'mecklenburg': 'Mecklenburg'
   };
 
   return countyMap[normalized] || county;
@@ -370,6 +385,8 @@ async function processDeedDownload(address, county, state, options = {}) {
     scraper = new DurhamCountyNorthCarolinaScraper(scraperOptions);
   } else if (detectedCounty === 'Wake' && detectedState === 'NC') {
     scraper = new WakeCountyNorthCarolinaScraper(scraperOptions);
+  } else if (detectedCounty === 'Mecklenburg' && detectedState === 'NC') {
+    scraper = new MecklenburgCountyNorthCarolinaScraper(scraperOptions);
   } else {
     throw new Error(`County "${detectedCounty}, ${detectedState}" is not yet supported`);
   }
