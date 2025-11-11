@@ -268,17 +268,6 @@ class MecklenburgCountyNorthCarolinaScraper extends DeedScraper {
       // Switch to the new tab (ROD page)
       this.page = rodPage;
 
-      // Set up image request capture BEFORE clicking disclaimer
-      this.imageRequests = [];
-      const requestHandler = (request) => {
-        const url = request.url();
-        if (url.includes('generator.leadgen')) {
-          this.imageRequests.push(url);
-        }
-      };
-
-      this.page.on('request', requestHandler);
-
       // Check if we're on disclaimer page
       const currentUrl = this.page.url();
       if (currentUrl.includes('disclaimer') || await this.page.evaluate(() => {
@@ -314,10 +303,6 @@ class MecklenburgCountyNorthCarolinaScraper extends DeedScraper {
         }
       }
 
-      // Stop listening for requests
-      this.page.off('request', requestHandler);
-      this.log(`📍 Captured ${this.imageRequests.length} image requests`);
-
       // Extract page count from the page
       this.log('🔍 Extracting page count...');
       const pageCount = await this.page.evaluate(() => {
@@ -349,112 +334,203 @@ class MecklenburgCountyNorthCarolinaScraper extends DeedScraper {
   }
 
   /**
-   * Download PDF by fetching full-size images from LTViewer's generator.leadgen endpoint
+   * Download PDF by clicking the "Image" button and then "Get image now"
    */
   async downloadDeedPdf(pageCount = 3) {
     const startTime = Date.now();
 
     try {
-      this.log(`🔍 Downloading ${pageCount} page(s) from LTViewer...`);
+      this.log(`🖼️ Clicking "Image" button to open PDF export page...`);
 
-      // Use the image requests captured during getDeedInfo
-      if (!this.imageRequests || this.imageRequests.length === 0) {
-        throw new Error('Could not find any generator.leadgen requests');
-      }
+      // Setup new page listener BEFORE clicking the button
+      const newPagePromise = new Promise(resolve =>
+        this.browser.once('targetcreated', target => resolve(target.page()))
+      );
 
-      //Parse the captured URLs to find the unique page images (not tiles)
-      // Look for URLs with  WTV=true (Web Thumbnail Viewer) or large viewport sizes
-      const pageUrls = {};
+      // Click the "Image" button (either "This Image (Clean)" or "This Image (Unofficial)")
+      const imageButtonClicked = await this.page.evaluate(() => {
+        // Try both button IDs
+        const buttonIds = [
+          'cphNoMargin_OptionsBar1_lnkImage',  // "This Image (Clean)"
+          'cphNoMargin_OptionsBar1_lnkDld'     // "This Image (Unofficial)"
+        ];
 
-      for (const url of this.imageRequests) {
-        const pnMatch = url.match(/PN=(\d+)/);
-        if (pnMatch) {
-          const pageNum = parseInt(pnMatch[1], 10);
-
-          // Prefer URLs that look like full-page requests (larger dimensions)
-          const srwMatch = url.match(/SRW=(\d+)/);
-          const dtMatch = url.match(/DTW=(\d+)/);
-
-          // Skip thumbnail requests (WTV=true with small dimensions)
-          if (url.includes('WTV=true') && dtMatch && parseInt(dtMatch[1]) < 200) {
-            continue;
-          }
-
-          // Keep the URL with the largest dimensions for each page
-          if (!pageUrls[pageNum] || (srwMatch && parseInt(srwMatch[1]) > 500)) {
-            pageUrls[pageNum] = url;
+        for (const id of buttonIds) {
+          const button = document.getElementById(id);
+          if (button) {
+            button.click();
+            return { success: true, id, text: button.textContent.trim() };
           }
         }
-      }
 
-      this.log(`📍 Found image URLs for ${Object.keys(pageUrls).length} page(s)`);
-
-      // Download images using the captured URLs
-      const axios = require('axios');
-      const imageBuffers = [];
-
-      for (let pageNum = 1; pageNum <= pageCount; pageNum++) {
-        this.log(`📥 Downloading page ${pageNum}/${pageCount}...`);
-
-        if (!pageUrls[pageNum]) {
-          this.log(`  ⚠️ No URL found for page ${pageNum}`);
-          continue;
-        }
-
-        try {
-          const response = await axios.get(pageUrls[pageNum], {
-            responseType: 'arraybuffer',
-            timeout: 30000
-          });
-
-          if (response.data && response.data.length > 1000) {
-            imageBuffers.push(Buffer.from(response.data));
-            this.log(`  ✅ Downloaded: ${(response.data.length / 1024).toFixed(2)} KB`);
-          } else {
-            this.log(`  ⚠️ Page ${pageNum} response too small (${response.data.length} bytes)`);
+        // Fallback: Try to find by text
+        const allLinks = Array.from(document.querySelectorAll('a'));
+        for (const link of allLinks) {
+          const text = link.textContent.toLowerCase();
+          if (text.includes('this image') && (text.includes('clean') || text.includes('unofficial'))) {
+            link.click();
+            return { success: true, id: link.id, text: link.textContent.trim() };
           }
-        } catch (error) {
-          this.log(`  ⚠️ Failed to download page ${pageNum}: ${error.message}`);
+        }
+
+        return { success: false };
+      });
+
+      if (!imageButtonClicked.success) {
+        throw new Error('Could not find "Image" button on ROD page');
+      }
+
+      this.log(`✅ Clicked: ${imageButtonClicked.text}`);
+
+      // Wait for the new page/popup to open
+      this.log('⏳ Waiting for export page to open...');
+      const exportTarget = await newPagePromise;
+
+      // Get the page from the target (popup window)
+      let exportPage = await exportTarget.page();
+
+      // If page() returns null, try getting all pages and find the new one
+      if (!exportPage) {
+        this.log('  Popup detected, finding new page...');
+        await new Promise(resolve => setTimeout(resolve, 2000));
+
+        const pages = await this.browser.pages();
+        // Find the page that's not the original ROD page or property page
+        exportPage = pages.find(p =>
+          p.url().includes('SearchImage.aspx') &&
+          p !== this.page
+        );
+
+        if (!exportPage) {
+          // Last resort: just get the last page
+          exportPage = pages[pages.length - 1];
         }
       }
 
-      if (imageBuffers.length === 0) {
-        throw new Error('Could not download any pages');
-      }
+      // Wait for page to load
+      await new Promise(resolve => setTimeout(resolve, 2000));
+      this.log(`✅ Export page opened: ${exportPage.url()}`);
 
-      // Convert images to PDF using pdf-lib
-      this.log('📄 Converting images to PDF...');
-      const { PDFDocument } = require('pdf-lib');
-      const pdfDoc = await PDFDocument.create();
+      // Switch to the export page
+      const previousPage = this.page;
+      this.page = exportPage;
 
-      for (let i = 0; i < imageBuffers.length; i++) {
-        this.log(`  Adding page ${i + 1}/${imageBuffers.length}...`);
+      // Wait for page to fully load
+      await new Promise(resolve => setTimeout(resolve, 3000));
 
-        try {
-          // Try to embed as PNG first
-          const image = await pdfDoc.embedPng(imageBuffers[i]).catch(async () => {
-            // If PNG fails, try JPEG
-            return await pdfDoc.embedJpg(imageBuffers[i]);
-          });
+      // Find and click "Get image now" button
+      this.log('🔍 Looking for "Get image now" button...');
+      const getImageClicked = await this.page.evaluate(() => {
+        const allElements = Array.from(document.querySelectorAll('a, button, input[type="button"], input[type="submit"]'));
 
-          const page = pdfDoc.addPage([image.width, image.height]);
-          page.drawImage(image, {
-            x: 0,
-            y: 0,
-            width: image.width,
-            height: image.height
-          });
-        } catch (embedError) {
-          this.log(`  ⚠️ Could not embed page ${i + 1}: ${embedError.message}`);
+        for (const el of allElements) {
+          const text = (el.textContent || el.value || '').toLowerCase().trim();
+          if (text.includes('get image now') ||
+              text.includes('get image') ||
+              text.includes('download image') ||
+              text.includes('export')) {
+            el.click();
+            return { success: true, text: el.textContent || el.value };
+          }
         }
+
+        return { success: false };
+      });
+
+      if (!getImageClicked.success) {
+        throw new Error('Could not find "Get image now" button');
       }
 
-      const pdfBytes = await pdfDoc.save();
-      const pdfBuffer = Buffer.from(pdfBytes);
-      this.log(`✅ PDF created: ${(pdfBuffer.length / 1024).toFixed(2)} KB`);
+      this.log(`✅ Clicked: ${getImageClicked.text}`);
 
-      // Convert to base64
-      const pdfBase64 = pdfBuffer.toString('base64');
+      // Wait for PDF to load
+      this.log('⏳ Waiting for PDF to load...');
+      await new Promise(resolve => setTimeout(resolve, 5000));
+
+      // The PDF should now be loaded in the page
+      // Try to download it using CDP or by detecting the PDF URL
+      this.log('📥 Downloading PDF...');
+
+      // Check if the page navigated to a PDF URL
+      const currentUrl = this.page.url();
+      this.log(`  Current URL: ${currentUrl}`);
+
+      let pdfBase64;
+
+      if (currentUrl.toLowerCase().endsWith('.pdf') || currentUrl.includes('pdf')) {
+        // Direct PDF URL - use downloadPdfFromUrl method
+        pdfBase64 = await this.downloadPdfFromUrl(currentUrl);
+      } else {
+        // PDF might be embedded or loaded via JavaScript
+        // Try to find a PDF blob or data URL
+        pdfBase64 = await this.page.evaluate(async () => {
+          // Look for PDF in iframes
+          const iframes = Array.from(document.querySelectorAll('iframe'));
+          for (const iframe of iframes) {
+            const src = iframe.src;
+            if (src && (src.includes('.pdf') || src.includes('pdf'))) {
+              // Found PDF URL in iframe
+              const response = await fetch(src);
+              const blob = await response.blob();
+              return new Promise((resolve, reject) => {
+                const reader = new FileReader();
+                reader.onloadend = () => {
+                  const base64 = reader.result.split(',')[1];
+                  resolve(base64);
+                };
+                reader.onerror = reject;
+                reader.readAsDataURL(blob);
+              });
+            }
+          }
+
+          // Look for object/embed tags
+          const objects = Array.from(document.querySelectorAll('object, embed'));
+          for (const obj of objects) {
+            const src = obj.data || obj.src;
+            if (src && (src.includes('.pdf') || src.includes('pdf'))) {
+              const response = await fetch(src);
+              const blob = await response.blob();
+              return new Promise((resolve, reject) => {
+                const reader = new FileReader();
+                reader.onloadend = () => {
+                  const base64 = reader.result.split(',')[1];
+                  resolve(base64);
+                };
+                reader.onerror = reject;
+                reader.readAsDataURL(blob);
+              });
+            }
+          }
+
+          throw new Error('Could not find PDF in page');
+        }).catch(async (evalError) => {
+          // If evaluate fails, try waiting for navigation to PDF URL
+          this.log(`  ⚠️ ${evalError.message}, waiting for navigation...`);
+          await this.page.waitForNavigation({ timeout: 10000 }).catch(() => {});
+
+          const newUrl = this.page.url();
+          if (newUrl !== currentUrl && (newUrl.toLowerCase().endsWith('.pdf') || newUrl.includes('pdf'))) {
+            return await this.downloadPdfFromUrl(newUrl);
+          }
+
+          throw new Error('Could not find or download PDF');
+        });
+      }
+
+      // Verify PDF
+      const pdfBuffer = Buffer.from(pdfBase64, 'base64');
+      const pdfSignature = pdfBuffer.toString('utf8', 0, 4);
+
+      if (pdfSignature !== '%PDF') {
+        throw new Error(`Downloaded content is not a PDF. First bytes: ${pdfBuffer.toString('utf8', 0, 50)}`);
+      }
+
+      this.log(`✅ PDF downloaded: ${(pdfBuffer.length / 1024).toFixed(2)} KB`);
+
+      // Close the export page and return to the ROD page
+      await this.page.close();
+      this.page = previousPage;
 
       return {
         success: true,
