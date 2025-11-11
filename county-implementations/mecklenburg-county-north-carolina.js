@@ -355,29 +355,75 @@ class MecklenburgCountyNorthCarolinaScraper extends DeedScraper {
         this.browser.once('targetcreated', target => resolve(target))
       );
 
-      // Click the "Image" button (either "This Image (Clean)" or "This Image (Unofficial)")
+      // Click the image icon (the small icon next to "Image:" text in the main document)
       const imageButtonClicked = await this.page.evaluate(() => {
-        // Try both button IDs
-        const buttonIds = [
-          'cphNoMargin_OptionsBar1_lnkImage',  // "This Image (Clean)"
-          'cphNoMargin_OptionsBar1_lnkDld'     // "This Image (Unofficial)"
-        ];
+        // Strategy 1: Look for "Image:" text in table cells and find the icon next to it
+        const tableCells = Array.from(document.querySelectorAll('td, th'));
 
-        for (const id of buttonIds) {
-          const button = document.getElementById(id);
-          if (button) {
-            button.click();
-            return { success: true, id, text: button.textContent.trim() };
+        for (const cell of tableCells) {
+          const text = cell.textContent.trim();
+          if (text === 'Image:' || text.startsWith('Image:')) {
+            // Found the "Image:" label, look for icon in next cell or within same row
+            const row = cell.parentElement;
+            const nextCell = cell.nextElementSibling;
+
+            // Check next cell for a link with an image
+            if (nextCell) {
+              const link = nextCell.querySelector('a');
+              if (link) {
+                link.click();
+                return { success: true, text: 'Image icon (in next cell)' };
+              }
+
+              // Or check if there's an image that's clickable
+              const img = nextCell.querySelector('img');
+              if (img && img.parentElement.tagName === 'A') {
+                img.parentElement.click();
+                return { success: true, text: 'Image icon (img in next cell)' };
+              }
+            }
+
+            // Check in the same row for any clickable images
+            if (row) {
+              const links = row.querySelectorAll('a');
+              for (const link of links) {
+                const img = link.querySelector('img');
+                if (img) {
+                  link.click();
+                  return { success: true, text: 'Image icon (in same row)' };
+                }
+              }
+            }
           }
         }
 
-        // Fallback: Try to find by text
-        const allLinks = Array.from(document.querySelectorAll('a'));
-        for (const link of allLinks) {
-          const text = link.textContent.toLowerCase();
-          if (text.includes('this image') && (text.includes('clean') || text.includes('unofficial'))) {
-            link.click();
-            return { success: true, id: link.id, text: link.textContent.trim() };
+        // Strategy 2: Look for small document/image icons in the main document
+        const imageIcons = Array.from(document.querySelectorAll('a img'));
+        for (const icon of imageIcons) {
+          const src = icon.src || '';
+          const alt = (icon.alt || '').toLowerCase();
+          const title = (icon.title || '').toLowerCase();
+
+          // Look for document/image icons
+          if (src.includes('doc') || src.includes('image') || src.includes('icon') ||
+              alt.includes('image') || title.includes('image')) {
+            const parent = icon.parentElement;
+            if (parent && parent.tagName === 'A') {
+              parent.click();
+              return { success: true, text: `Image icon (${src.split('/').pop()})` };
+            }
+          }
+        }
+
+        // Strategy 3: Look for any link with "image" in attributes
+        const clickables = Array.from(document.querySelectorAll('a'));
+        for (const el of clickables) {
+          const title = (el.title || '').toLowerCase();
+          const href = (el.href || '').toLowerCase();
+
+          if (title.includes('image') || href.includes('image')) {
+            el.click();
+            return { success: true, text: el.title || 'Image link' };
           }
         }
 
@@ -390,44 +436,40 @@ class MecklenburgCountyNorthCarolinaScraper extends DeedScraper {
 
       this.log(`✅ Clicked: ${imageButtonClicked.text}`);
 
-      // Wait for the new page/popup to open
-      this.log('⏳ Waiting for export page to open...');
-      const exportTarget = await newPagePromise;
+      // Wait for the new popup window to open
+      this.log('⏳ Waiting for popup window to open...');
 
-      // Get the page from the target (popup window)
-      let exportPage = await exportTarget.page();
+      const exportTarget = await Promise.race([
+        newPagePromise,
+        new Promise((_, reject) =>
+          setTimeout(() => reject(new Error('Popup timeout after 15 seconds')), 15000)
+        )
+      ]);
 
-      // If page() returns null, try getting all pages and find the new one
-      if (!exportPage) {
-        this.log('  Popup detected, finding new page...');
+      await new Promise(resolve => setTimeout(resolve, 2000));
+
+      // Get the popup page
+      let popupPage = await exportTarget.page();
+
+      // If page() returns null, find it manually
+      if (!popupPage) {
+        this.log('  Finding popup manually...');
         await new Promise(resolve => setTimeout(resolve, 2000));
-
         const pages = await this.browser.pages();
-        // Find the page that's not the original ROD page or property page
-        exportPage = pages.find(p =>
-          p.url().includes('SearchImage.aspx') &&
-          p !== this.page
-        );
-
-        if (!exportPage) {
-          // Last resort: just get the last page
-          exportPage = pages[pages.length - 1];
-        }
+        popupPage = pages[pages.length - 1];
       }
 
-      // Wait for page to load
-      await new Promise(resolve => setTimeout(resolve, 2000));
-      this.log(`✅ Export page opened: ${exportPage.url()}`);
+      this.log(`✅ Popup window opened: ${popupPage.url()}`);
 
-      // Switch to the export page
+      // Switch to the popup
       const previousPage = this.page;
-      this.page = exportPage;
+      this.page = popupPage;
 
-      // Wait for page to fully load
-      await new Promise(resolve => setTimeout(resolve, 5000));
+      // Wait for popup to fully load
+      await new Promise(resolve => setTimeout(resolve, 3000));
 
-      // Find and click "Get item(s) now" button
-      this.log('🔍 Looking for "Get item(s) now" button...');
+      // Find and click "Get image now" button
+      this.log('🔍 Looking for "Get image now" button...');
 
       // First, log all buttons found for debugging
       const allButtons = await this.page.evaluate(() => {
