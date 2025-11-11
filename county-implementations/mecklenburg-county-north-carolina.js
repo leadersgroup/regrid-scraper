@@ -468,6 +468,26 @@ class MecklenburgCountyNorthCarolinaScraper extends DeedScraper {
       // Wait for popup to fully load
       await new Promise(resolve => setTimeout(resolve, 3000));
 
+      // Check if there's a "Keep Working" session prompt and click it
+      const keepWorkingFound = await this.page.evaluate(() => {
+        const allElements = Array.from(document.querySelectorAll('a, button'));
+        for (const el of allElements) {
+          const text = (el.textContent || '').toLowerCase().trim();
+          if (text === 'keep working') {
+            el.click();
+            return true;
+          }
+        }
+        return false;
+      });
+
+      if (keepWorkingFound) {
+        this.log('✅ Clicked "Keep Working" button');
+        // Wait for the page to reload/update after clicking Keep Working
+        this.log('⏳ Waiting for page to load after clicking "Keep Working"...');
+        await new Promise(resolve => setTimeout(resolve, 5000));
+      }
+
       // Find and click "Get image now" button
       this.log('🔍 Looking for "Get image now" button...');
 
