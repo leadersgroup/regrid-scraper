@@ -483,32 +483,62 @@ class MecklenburgCountyNorthCarolinaScraper extends DeedScraper {
 
       if (keepWorkingFound) {
         this.log('✅ Clicked "Keep Working" button');
-        // Wait for the page to reload/update after clicking Keep Working
-        this.log('⏳ Waiting for page to load after clicking "Keep Working"...');
-        await new Promise(resolve => setTimeout(resolve, 5000));
+        // Just dismiss the session warning and proceed
+        await new Promise(resolve => setTimeout(resolve, 2000));
       }
+
+      // The page might load content in an iframe or take time to load
+      // Wait for actual content to appear (forms, inputs, etc.)
+      this.log('⏳ Waiting for page content to load...');
+
+      await this.page.waitForFunction(() => {
+        // Check main document
+        const mainInputs = document.querySelectorAll('input[type="button"], input[type="submit"], button');
+        const mainForms = document.querySelectorAll('form');
+
+        // Check for any iframes
+        const iframes = document.querySelectorAll('iframe');
+
+        // Content is ready if we have buttons/forms OR if session dialog is gone
+        const hasContent = mainInputs.length > 0 || mainForms.length > 0 || iframes.length > 0;
+        const noSessionDialog = !document.body.innerText.includes('Keep Working');
+
+        return hasContent || noSessionDialog;
+      }, { timeout: 20000 }).catch(() => {
+        this.log('⚠️ Timeout waiting for content, continuing anyway...');
+      });
+
+      await new Promise(resolve => setTimeout(resolve, 2000));
 
       // Find and click "Get image now" button
       this.log('🔍 Looking for "Get image now" button...');
 
-      // First, log all buttons found for debugging
-      const allButtons = await this.page.evaluate(() => {
-        const allElements = Array.from(document.querySelectorAll('a, button, input[type="button"], input[type="submit"]'));
-        return allElements.map(el => ({
+      // First, check if there are iframes and log all content
+      const pageInfo = await this.page.evaluate(() => {
+        const mainButtons = Array.from(document.querySelectorAll('a, button, input[type="button"], input[type="submit"]')).map(el => ({
           tag: el.tagName,
           text: (el.textContent || el.value || '').trim(),
-          id: el.id,
-          className: el.className
+          id: el.id
         }));
+
+        const iframes = Array.from(document.querySelectorAll('iframe')).map(iframe => ({
+          src: iframe.src,
+          id: iframe.id,
+          name: iframe.name
+        }));
+
+        return { mainButtons, iframes, bodyText: document.body.innerText.substring(0, 300) };
       });
 
-      this.log(`  Found ${allButtons.length} buttons/links on page`);
-      allButtons.forEach((b, i) => {
+      this.log(`  Found ${pageInfo.mainButtons.length} buttons in main page`);
+      this.log(`  Found ${pageInfo.iframes.length} iframes`);
+      pageInfo.mainButtons.forEach((b, i) => {
         if (b.text) {
           this.log(`    [${i}] ${b.tag}: "${b.text.substring(0, 50)}"`);
         }
       });
 
+      // Try to click "Get image now" button in main page first
       const getImageClicked = await this.page.evaluate(() => {
         const allElements = Array.from(document.querySelectorAll('a, button, input[type="button"], input[type="submit"]'));
 
