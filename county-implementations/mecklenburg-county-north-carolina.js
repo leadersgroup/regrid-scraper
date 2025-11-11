@@ -554,78 +554,67 @@ class MecklenburgCountyNorthCarolinaScraper extends DeedScraper {
 
       // Wait for PDF to load
       this.log('⏳ Waiting for PDF to load...');
-      await new Promise(resolve => setTimeout(resolve, 5000));
+      await new Promise(resolve => setTimeout(resolve, 8000));
 
-      // The PDF should now be loaded in the page
-      // Try to download it using CDP or by detecting the PDF URL
-      this.log('📥 Downloading PDF...');
+      // After clicking "Get Image Now", the PDF loads in an iframe
+      this.log('📥 Looking for PDF in frames...');
 
-      // Check if the page navigated to a PDF URL
-      const currentUrl = this.page.url();
-      this.log(`  Current URL: ${currentUrl}`);
+      let pdfBase64 = null;
+      let pdfUrl = null;
 
-      let pdfBase64;
+      // Check all frames for PDF content
+      const allFrames = this.page.frames();
+      this.log(`  Checking ${allFrames.length} frames for PDF...`);
 
-      if (currentUrl.toLowerCase().endsWith('.pdf') || currentUrl.includes('pdf')) {
-        // Direct PDF URL - use downloadPdfFromUrl method
-        pdfBase64 = await this.downloadPdfFromUrl(currentUrl);
-      } else {
-        // PDF might be embedded or loaded via JavaScript
-        // Try to find a PDF blob or data URL
-        pdfBase64 = await this.page.evaluate(async () => {
-          // Look for PDF in iframes
-          const iframes = Array.from(document.querySelectorAll('iframe'));
-          for (const iframe of iframes) {
-            const src = iframe.src;
-            if (src && (src.includes('.pdf') || src.includes('pdf'))) {
-              // Found PDF URL in iframe
-              const response = await fetch(src);
-              const blob = await response.blob();
-              return new Promise((resolve, reject) => {
-                const reader = new FileReader();
-                reader.onloadend = () => {
-                  const base64 = reader.result.split(',')[1];
-                  resolve(base64);
-                };
-                reader.onerror = reject;
-                reader.readAsDataURL(blob);
-              });
+      for (let i = 0; i < allFrames.length; i++) {
+        const frame = allFrames[i];
+        const frameUrl = frame.url();
+
+        this.log(`  Frame ${i}: ${frameUrl.substring(0, 80)}...`);
+
+        // Check if frame URL is a PDF
+        if (frameUrl.includes('.pdf') || frameUrl.includes('GetFile') || frameUrl.includes('ViewImage')) {
+          this.log(`  ✓ Found PDF URL in frame: ${frameUrl}`);
+          pdfUrl = frameUrl;
+          break;
+        }
+
+        // Check if frame contains PDF content
+        try {
+          const hasPdf = await frame.evaluate(() => {
+            // Check for embed/object with PDF
+            const pdfEmbed = document.querySelector('embed[type="application/pdf"], object[type="application/pdf"]');
+            if (pdfEmbed) {
+              return { hasPdf: true, src: pdfEmbed.src || pdfEmbed.data };
             }
-          }
 
-          // Look for object/embed tags
-          const objects = Array.from(document.querySelectorAll('object, embed'));
-          for (const obj of objects) {
-            const src = obj.data || obj.src;
-            if (src && (src.includes('.pdf') || src.includes('pdf'))) {
-              const response = await fetch(src);
-              const blob = await response.blob();
-              return new Promise((resolve, reject) => {
-                const reader = new FileReader();
-                reader.onloadend = () => {
-                  const base64 = reader.result.split(',')[1];
-                  resolve(base64);
-                };
-                reader.onerror = reject;
-                reader.readAsDataURL(blob);
-              });
+            // Check if body starts with PDF signature
+            const bodyText = document.body?.textContent || '';
+            if (bodyText.startsWith('%PDF')) {
+              return { hasPdf: true, src: window.location.href };
             }
+
+            return { hasPdf: false };
+          });
+
+          if (hasPdf.hasPdf) {
+            this.log(`  ✓ Found PDF content in frame, URL: ${hasPdf.src}`);
+            pdfUrl = hasPdf.src || frameUrl;
+            break;
           }
-
-          throw new Error('Could not find PDF in page');
-        }).catch(async (evalError) => {
-          // If evaluate fails, try waiting for navigation to PDF URL
-          this.log(`  ⚠️ ${evalError.message}, waiting for navigation...`);
-          await this.page.waitForNavigation({ timeout: 10000 }).catch(() => {});
-
-          const newUrl = this.page.url();
-          if (newUrl !== currentUrl && (newUrl.toLowerCase().endsWith('.pdf') || newUrl.includes('pdf'))) {
-            return await this.downloadPdfFromUrl(newUrl);
-          }
-
-          throw new Error('Could not find or download PDF');
-        });
+        } catch (err) {
+          // Frame might not be accessible, skip it
+          this.log(`  ⚠️ Could not access frame ${i}: ${err.message}`);
+        }
       }
+
+      if (!pdfUrl) {
+        throw new Error('Could not find PDF URL in any frame');
+      }
+
+      // Download the PDF
+      this.log(`📥 Downloading PDF from: ${pdfUrl.substring(0, 100)}...`);
+      pdfBase64 = await this.downloadPdfFromUrl(pdfUrl);
 
       // Verify PDF
       const pdfBuffer = Buffer.from(pdfBase64, 'base64');
