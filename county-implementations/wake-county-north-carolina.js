@@ -431,9 +431,9 @@ class WakeCountyNorthCarolinaScraper extends DeedScraper {
             await this.page.solveRecaptchas();
             this.log('✅ reCAPTCHA solved successfully!');
 
-            // Wait for page to process the CAPTCHA solution and load PDF
-            this.log('⏳ Waiting for PDF to load...');
-            await new Promise(resolve => setTimeout(resolve, 10000));
+            // Wait for page to process the CAPTCHA solution
+            this.log('⏳ Waiting for page to load after CAPTCHA...');
+            await new Promise(resolve => setTimeout(resolve, 5000));
 
           } catch (captchaError) {
             this.log(`❌ Failed to solve reCAPTCHA: ${captchaError.message}`);
@@ -466,6 +466,35 @@ class WakeCountyNorthCarolinaScraper extends DeedScraper {
           if (captchaWaitTime >= maxWaitTime) {
             throw new Error('Captcha timeout - please solve captcha faster or configure TWOCAPTCHA_TOKEN');
           }
+        }
+      }
+
+      // Check if we're on disclaimer page
+      const currentUrl = this.page.url();
+      if (currentUrl.includes('/disclaimer')) {
+        this.log('📋 Disclaimer page detected, accepting...');
+
+        // Look for accept button (usually "I Accept" or "Continue")
+        const acceptClicked = await this.page.evaluate(() => {
+          const buttons = Array.from(document.querySelectorAll('button, input[type="button"], input[type="submit"], a'));
+
+          for (const btn of buttons) {
+            const text = btn.textContent.toLowerCase() || btn.value?.toLowerCase() || '';
+            if (text.includes('accept') || text.includes('agree') || text.includes('continue')) {
+              btn.click();
+              return true;
+            }
+          }
+
+          return false;
+        });
+
+        if (acceptClicked) {
+          this.log('✅ Clicked accept/continue button');
+          await new Promise(resolve => setTimeout(resolve, 5000));
+          this.log(`📍 New URL after disclaimer: ${this.page.url()}`);
+        } else {
+          this.log('⚠️ Could not find accept button on disclaimer page');
         }
       }
 
