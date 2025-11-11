@@ -344,7 +344,7 @@ class MecklenburgCountyNorthCarolinaScraper extends DeedScraper {
 
       // Setup new page listener BEFORE clicking the button
       const newPagePromise = new Promise(resolve =>
-        this.browser.once('targetcreated', target => resolve(target.page()))
+        this.browser.once('targetcreated', target => resolve(target))
       );
 
       // Click the "Image" button (either "This Image (Clean)" or "This Image (Unofficial)")
@@ -418,17 +418,17 @@ class MecklenburgCountyNorthCarolinaScraper extends DeedScraper {
       // Wait for page to fully load
       await new Promise(resolve => setTimeout(resolve, 3000));
 
-      // Find and click "Get image now" button
-      this.log('🔍 Looking for "Get image now" button...');
+      // Find and click "Get item(s) now" button
+      this.log('🔍 Looking for "Get item(s) now" button...');
       const getImageClicked = await this.page.evaluate(() => {
         const allElements = Array.from(document.querySelectorAll('a, button, input[type="button"], input[type="submit"]'));
 
         for (const el of allElements) {
           const text = (el.textContent || el.value || '').toLowerCase().trim();
-          if (text.includes('get image now') ||
+          if (text.includes('get item') ||
+              text.includes('get items') ||
               text.includes('get image') ||
-              text.includes('download image') ||
-              text.includes('export')) {
+              text.includes('download')) {
             el.click();
             return { success: true, text: el.textContent || el.value };
           }
@@ -438,7 +438,7 @@ class MecklenburgCountyNorthCarolinaScraper extends DeedScraper {
       });
 
       if (!getImageClicked.success) {
-        throw new Error('Could not find "Get image now" button');
+        throw new Error('Could not find "Get item(s) now" button');
       }
 
       this.log(`✅ Clicked: ${getImageClicked.text}`);
@@ -566,6 +566,9 @@ class MecklenburgCountyNorthCarolinaScraper extends DeedScraper {
     };
 
     try {
+      // Initialize browser
+      await this.createBrowser();
+
       // Step 1: Search for property
       this.log('\n📍 STEP 1: Searching for property...');
       const searchResult = await this.searchProperty(address);
@@ -608,6 +611,11 @@ class MecklenburgCountyNorthCarolinaScraper extends DeedScraper {
       this.log(`\n❌ ERROR: ${error.message}`);
       result.error = error.message;
       return result;
+    } finally {
+      // Close browser
+      if (this.browser) {
+        await this.close();
+      }
     }
   }
 
