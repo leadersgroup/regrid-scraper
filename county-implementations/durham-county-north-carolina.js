@@ -1066,29 +1066,39 @@ class DurhamCountyNorthCarolinaScraper extends DeedScraper {
         }
       }
 
-      // Use a new page to download the PDF without rendering
-      const pdfDownloadPage = await this.browser.newPage();
-
-      try {
-        // Navigate to the PDF URL
-        const response = await pdfDownloadPage.goto(pdfUrl, {
-          waitUntil: 'networkidle2',
-          timeout: 60000
-        });
-
-        if (!response || !response.ok()) {
-          throw new Error(`Failed to download PDF: ${response?.status()} ${response?.statusText()}`);
+      // Use fetch from within the page context to download the PDF with proper auth/cookies
+      const pdfBase64 = await this.page.evaluate(async (url) => {
+        const response = await fetch(url);
+        if (!response.ok) {
+          throw new Error(`Failed to fetch PDF: ${response.status} ${response.statusText}`);
         }
 
-        // Get the PDF buffer
-        const pdfBuffer = await response.buffer();
-        this.log(`✅ PDF downloaded: ${(pdfBuffer.length / 1024).toFixed(2)} KB`);
+        const blob = await response.blob();
 
-        return pdfBuffer.toString('base64');
+        // Convert blob to base64
+        return new Promise((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onloadend = () => {
+            // Remove the data:application/pdf;base64, prefix
+            const base64 = reader.result.split(',')[1];
+            resolve(base64);
+          };
+          reader.onerror = reject;
+          reader.readAsDataURL(blob);
+        });
+      }, pdfUrl);
 
-      } finally {
-        await pdfDownloadPage.close();
+      // Verify we got a valid PDF
+      const pdfBuffer = Buffer.from(pdfBase64, 'base64');
+      const pdfSignature = pdfBuffer.toString('utf8', 0, 4);
+
+      if (pdfSignature !== '%PDF') {
+        this.log(`⚠️ Downloaded content doesn't appear to be a PDF. First bytes: ${pdfBuffer.toString('utf8', 0, 50)}`);
+        // Don't throw - return it anyway as the caller might want to see what was downloaded
       }
+
+      this.log(`✅ PDF downloaded: ${(pdfBuffer.length / 1024).toFixed(2)} KB`);
+      return pdfBase64;
 
     } catch (error) {
       this.log(`❌ Error downloading PDF: ${error.message}`);
