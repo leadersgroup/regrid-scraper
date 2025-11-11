@@ -1066,21 +1066,29 @@ class DurhamCountyNorthCarolinaScraper extends DeedScraper {
         }
       }
 
-      // Use Puppeteer's page.goto to fetch the PDF with proper cookies/auth
-      const response = await this.page.goto(pdfUrl, {
-        waitUntil: 'networkidle2',
-        timeout: 60000
-      });
+      // Use a new page to download the PDF without rendering
+      const pdfDownloadPage = await this.browser.newPage();
 
-      if (!response || !response.ok()) {
-        throw new Error(`Failed to download PDF: ${response?.status()} ${response?.statusText()}`);
+      try {
+        // Navigate to the PDF URL
+        const response = await pdfDownloadPage.goto(pdfUrl, {
+          waitUntil: 'networkidle2',
+          timeout: 60000
+        });
+
+        if (!response || !response.ok()) {
+          throw new Error(`Failed to download PDF: ${response?.status()} ${response?.statusText()}`);
+        }
+
+        // Get the PDF buffer
+        const pdfBuffer = await response.buffer();
+        this.log(`✅ PDF downloaded: ${(pdfBuffer.length / 1024).toFixed(2)} KB`);
+
+        return pdfBuffer.toString('base64');
+
+      } finally {
+        await pdfDownloadPage.close();
       }
-
-      // Get the PDF buffer
-      const pdfBuffer = await response.buffer();
-      this.log(`✅ PDF downloaded: ${(pdfBuffer.length / 1024).toFixed(2)} KB`);
-
-      return pdfBuffer.toString('base64');
 
     } catch (error) {
       this.log(`❌ Error downloading PDF: ${error.message}`);
