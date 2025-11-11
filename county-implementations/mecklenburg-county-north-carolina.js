@@ -27,19 +27,26 @@ class MecklenburgCountyNorthCarolinaScraper extends DeedScraper {
   async createBrowser() {
     this.log('🚀 Initializing browser with stealth mode...');
 
+    const isRailway = process.env.RAILWAY_ENVIRONMENT_NAME || process.env.RAILWAY_PROJECT_NAME;
+    const isLinux = process.platform === 'linux';
+
+    const executablePath = isRailway || isLinux
+      ? (process.env.PUPPETEER_EXECUTABLE_PATH || '/usr/bin/google-chrome-stable')
+      : undefined;
+
     this.browser = await puppeteer.launch({
       headless: this.headless,
+      ...(executablePath && { executablePath }),
+      protocolTimeout: 300000,
       args: [
         '--no-sandbox',
         '--disable-setuid-sandbox',
         '--disable-dev-shm-usage',
         '--disable-blink-features=AutomationControlled',
-        '--window-size=1920,1080'
-      ],
-      defaultViewport: {
-        width: 1920,
-        height: 1080
-      }
+        '--window-size=1920,1080',
+        '--disable-web-security',
+        '--disable-features=IsolateOrigins,site-per-process'
+      ]
     });
 
     this.page = await this.browser.newPage();
@@ -48,6 +55,7 @@ class MecklenburgCountyNorthCarolinaScraper extends DeedScraper {
     await this.page.setUserAgent(
       'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
     );
+    await this.page.setViewport({ width: 1920, height: 1080 });
 
     this.log('✅ Browser initialized with stealth mode');
   }
