@@ -759,62 +759,52 @@ class DurhamCountyNorthCarolinaScraper extends DeedScraper {
       const currentUrlAfterClick = this.page.url();
       this.log(`Current URL after clicking View: ${currentUrlAfterClick}`);
 
-      // Wait for new window/tab to open after clicking View
-      this.log('⏳ Waiting for new window to open after clicking View...');
-      this.log(`Initial window count: ${(await this.browser.pages()).length}`);
-      await this.randomWait(8000, 10000); // Increase wait time to 8-10 seconds
+      // Check if the current page has the document (clicking View navigates the current page)
+      this.log('⏳ Waiting for document page to load...');
+      await this.randomWait(3000, 5000);
 
-      const allPages = await this.browser.pages();
-      this.log(`📄 Found ${allPages.length} total windows after wait`);
+      const finalUrl = this.page.url();
+      this.log(`Current URL after clicking View: ${finalUrl}`);
 
-      // Log all pages for debugging
-      for (const page of allPages) {
-        this.log(`  - Window: ${page.url()}`);
-      }
+      // Check if we're on a document page (URL contains /document/ or /DOC)
+      if (finalUrl.includes('/document/') || finalUrl.includes('/DOC')) {
+        this.log(`✅ On document page: ${finalUrl}`);
+        // We're already on the right page, no need to switch windows
+      } else {
+        // If not, check if a new window opened
+        this.log('⏳ Checking for new windows...');
+        const allPages = await this.browser.pages();
+        this.log(`📄 Found ${allPages.length} total windows`);
 
-      // Find the rodweb.dconc.gov page that's NOT the search page
-      let rodPage = null;
-      for (const page of allPages) {
-        const url = page.url();
-        // Look specifically for rodweb.dconc.gov pages that are NOT the search page
-        if (url.includes('rodweb.dconc.gov') && !url.includes('DOCSEARCH')) {
-          rodPage = page;
-          this.log(`  ✓ Found ROD document page: ${url}`);
-          break;
+        // Log all pages for debugging
+        for (const page of allPages) {
+          this.log(`  - Window: ${page.url()}`);
         }
-      }
 
-      // If we found a rodweb page, use it; otherwise look for any new page
-      let pdfPage = rodPage;
-
-      if (!pdfPage) {
-        this.log('⚠️ No rodweb.dconc.gov document page found, checking for other new windows...');
-        // Get the newest page that's not the current page
-        for (let i = allPages.length - 1; i >= 0; i--) {
-          const page = allPages[i];
+        // Find a rodweb.dconc.gov document page
+        let rodPage = null;
+        for (const page of allPages) {
           const url = page.url();
-          // Skip current page, about:blank, and property tax site
-          if (page !== this.page &&
-              url !== 'about:blank' &&
-              !url.includes('spatialest.com')) {
-            pdfPage = page;
-            this.log(`  ✓ Using page: ${url}`);
+          // Look for document pages
+          if (url.includes('rodweb.dconc.gov') && (url.includes('/document/') || url.includes('/DOC'))) {
+            rodPage = page;
+            this.log(`  ✓ Found ROD document page: ${url}`);
             break;
           }
         }
-      }
 
-      if (!pdfPage) {
-        return {
-          success: false,
-          error: 'Could not find new window after clicking View'
-        };
-      }
+        if (!rodPage) {
+          return {
+            success: false,
+            error: 'Could not find document page after clicking View'
+          };
+        }
 
-      // Switch to the document page
-      this.page = pdfPage;
-      await this.randomWait(2000, 3000);
-      this.log(`✅ Switched to document window: ${this.page.url()}`);
+        // Switch to the document page
+        this.page = rodPage;
+        await this.randomWait(2000, 3000);
+        this.log(`✅ Switched to document window: ${this.page.url()}`);
+      }
 
       // Look for "Primary Document" on the right side and click to download PDF
       this.log('📥 Looking for Primary Document link...');
