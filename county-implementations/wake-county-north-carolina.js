@@ -351,33 +351,22 @@ class WakeCountyNorthCarolinaScraper extends DeedScraper {
 
       // Get the URL of the page link first (it opens in a new tab)
       const pageLinkInfo = await this.page.evaluate(() => {
-        // Look for table with "Page" header
-        const tables = Array.from(document.querySelectorAll('table'));
+        // Look for all links with page number pattern (4 digits)
+        const allLinks = Array.from(document.querySelectorAll('a'));
 
-        for (const table of tables) {
-          // Find "Page" column header
-          const headers = Array.from(table.querySelectorAll('th'));
-          const pageHeaderIndex = headers.findIndex(h => h.textContent.trim().toLowerCase() === 'page');
+        for (const link of allLinks) {
+          const text = link.textContent.trim();
+          const href = link.href || '';
 
-          if (pageHeaderIndex !== -1) {
-            // Find first data row
-            const firstRow = table.querySelector('tbody tr');
-            if (firstRow) {
-              const cells = Array.from(firstRow.querySelectorAll('td'));
-              const pageCell = cells[pageHeaderIndex];
-
-              if (pageCell) {
-                // Look for link in the cell
-                const link = pageCell.querySelector('a');
-                if (link) {
-                  return {
-                    success: true,
-                    page: link.textContent.trim(),
-                    href: link.href
-                  };
-                }
-              }
-            }
+          // Look for links that go to rodrecords.wake.gov with Book/Page parameters
+          if (href.includes('rodrecords.wake.gov') &&
+              href.includes('BookPageID') &&
+              /^\d{4}$/.test(text)) {
+            return {
+              success: true,
+              page: text,
+              href: href
+            };
           }
         }
 
@@ -396,24 +385,12 @@ class WakeCountyNorthCarolinaScraper extends DeedScraper {
       );
 
       // Click the page link
-      await this.page.evaluate((href) => {
-        const tables = Array.from(document.querySelectorAll('table'));
-        for (const table of tables) {
-          const headers = Array.from(table.querySelectorAll('th'));
-          const pageHeaderIndex = headers.findIndex(h => h.textContent.trim().toLowerCase() === 'page');
-          if (pageHeaderIndex !== -1) {
-            const firstRow = table.querySelector('tbody tr');
-            if (firstRow) {
-              const cells = Array.from(firstRow.querySelectorAll('td'));
-              const pageCell = cells[pageHeaderIndex];
-              if (pageCell) {
-                const link = pageCell.querySelector('a');
-                if (link) {
-                  link.click();
-                  return;
-                }
-              }
-            }
+      await this.page.evaluate((targetHref) => {
+        const allLinks = Array.from(document.querySelectorAll('a'));
+        for (const link of allLinks) {
+          if (link.href === targetHref) {
+            link.click();
+            return;
           }
         }
       }, pageLinkInfo.href);
