@@ -40,6 +40,7 @@ const TarrantCountyTexasScraper = require('./county-implementations/tarrant-coun
 const DallasCountyTexasScraper = require('./county-implementations/dallas-county-texas');
 const BexarCountyTexasScraper = require('./county-implementations/bexar-county-texas');
 const DurhamCountyNorthCarolinaScraper = require('./county-implementations/durham-county-north-carolina');
+const WakeCountyNorthCarolinaScraper = require('./county-implementations/wake-county-north-carolina');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -269,6 +270,19 @@ app.get('/api/counties', (req, res) => {
           'Full PDF download'
         ],
         cost: 'Free (no CAPTCHA)'
+      },
+      {
+        name: 'Wake County',
+        state: 'NC',
+        stateCode: 'North Carolina',
+        features: [
+          'Property search by street number and name',
+          'Deeds tab integration',
+          'Page number extraction',
+          'Automatic CAPTCHA solving',
+          'Full PDF download'
+        ],
+        cost: '$0.001 per deed (with 2Captcha API)'
       }
     ]
   });
@@ -297,7 +311,8 @@ function normalizeCountyName(county) {
     'tarrant': 'Tarrant',
     'dallas': 'Dallas',
     'bexar': 'Bexar',
-    'durham': 'Durham'
+    'durham': 'Durham',
+    'wake': 'Wake'
   };
 
   return countyMap[normalized] || county;
@@ -353,6 +368,8 @@ async function processDeedDownload(address, county, state, options = {}) {
     scraper = new BexarCountyTexasScraper(scraperOptions);
   } else if (detectedCounty === 'Durham' && detectedState === 'NC') {
     scraper = new DurhamCountyNorthCarolinaScraper(scraperOptions);
+  } else if (detectedCounty === 'Wake' && detectedState === 'NC') {
+    scraper = new WakeCountyNorthCarolinaScraper(scraperOptions);
   } else {
     throw new Error(`County "${detectedCounty}, ${detectedState}" is not yet supported`);
   }
@@ -395,14 +412,14 @@ app.post('/api/getPriorDeed', async (req, res) => {
     const normalizedState = (state || 'FL').toUpperCase();
 
     // Check if 2Captcha API key is configured (required for some counties)
-    const countiesRequiringCaptcha = ['Orange', 'Bexar'];
+    const countiesRequiringCaptcha = ['Orange', 'Bexar', 'Wake'];
     if (countiesRequiringCaptcha.includes(normalizedCounty) && !process.env.TWOCAPTCHA_TOKEN) {
       return res.status(503).json({
         success: false,
         error: 'CAPTCHA solver not configured',
         message: `${normalizedCounty} County requires CAPTCHA solving. Set TWOCAPTCHA_TOKEN environment variable to enable deed downloads.`,
         documentation: 'See CAPTCHA_SOLVING_SETUP.md for setup instructions',
-        hint: 'Hillsborough and Miami-Dade counties do not require CAPTCHA'
+        hint: 'Durham, Hillsborough and Miami-Dade counties do not require CAPTCHA'
       });
     }
 
