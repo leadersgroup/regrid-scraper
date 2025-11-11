@@ -513,43 +513,33 @@ class MecklenburgCountyNorthCarolinaScraper extends DeedScraper {
       // Find and click "Get image now" button
       this.log('🔍 Looking for "Get image now" button...');
 
-      // First, check if there are iframes and log all content
-      const pageInfo = await this.page.evaluate(() => {
-        const mainButtons = Array.from(document.querySelectorAll('a, button, input[type="button"], input[type="submit"]')).map(el => ({
-          tag: el.tagName,
-          text: (el.textContent || el.value || '').trim(),
-          id: el.id
-        }));
+      // The button is inside the LTViewer iframe, not in the main page
+      // Find the iframe
+      const frames = this.page.frames();
+      this.log(`  Found ${frames.length} frames`);
 
-        const iframes = Array.from(document.querySelectorAll('iframe')).map(iframe => ({
-          src: iframe.src,
-          id: iframe.id,
-          name: iframe.name
-        }));
-
-        return { mainButtons, iframes, bodyText: document.body.innerText.substring(0, 300) };
-      });
-
-      this.log(`  Found ${pageInfo.mainButtons.length} buttons in main page`);
-      this.log(`  Found ${pageInfo.iframes.length} iframes`);
-      pageInfo.mainButtons.forEach((b, i) => {
-        if (b.text) {
-          this.log(`    [${i}] ${b.tag}: "${b.text.substring(0, 50)}"`);
+      let ltViewerFrame = null;
+      for (const frame of frames) {
+        if (frame.url().includes('LTViewer')) {
+          ltViewerFrame = frame;
+          this.log(`  ✓ Found LTViewer iframe: ${frame.url()}`);
+          break;
         }
-      });
+      }
 
-      // Try to click "Get image now" button in main page first
-      const getImageClicked = await this.page.evaluate(() => {
+      if (!ltViewerFrame) {
+        throw new Error('Could not find LTViewer iframe');
+      }
+
+      // Click the "Get Image Now" button inside the iframe
+      const getImageClicked = await ltViewerFrame.evaluate(() => {
         const allElements = Array.from(document.querySelectorAll('a, button, input[type="button"], input[type="submit"]'));
 
         for (const el of allElements) {
           const text = (el.textContent || el.value || '').toLowerCase().trim();
-          if (text.includes('get item') ||
-              text.includes('get items') ||
-              text.includes('get image') ||
-              text.includes('download')) {
+          if (text.includes('get image now') || text.includes('get item') || el.id === 'btnProcessNow') {
             el.click();
-            return { success: true, text: el.textContent || el.value };
+            return { success: true, text: el.textContent || el.value || 'Get Image Now' };
           }
         }
 
@@ -557,7 +547,7 @@ class MecklenburgCountyNorthCarolinaScraper extends DeedScraper {
       });
 
       if (!getImageClicked.success) {
-        throw new Error('Could not find "Get item(s) now" button');
+        throw new Error('Could not find "Get image now" button in iframe');
       }
 
       this.log(`✅ Clicked: ${getImageClicked.text}`);
