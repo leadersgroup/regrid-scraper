@@ -268,6 +268,17 @@ class MecklenburgCountyNorthCarolinaScraper extends DeedScraper {
       // Switch to the new tab (ROD page)
       this.page = rodPage;
 
+      // Set up image request capture BEFORE clicking disclaimer
+      this.imageRequests = [];
+      const requestHandler = (request) => {
+        const url = request.url();
+        if (url.includes('generator.leadgen')) {
+          this.imageRequests.push(url);
+        }
+      };
+
+      this.page.on('request', requestHandler);
+
       // Check if we're on disclaimer page
       const currentUrl = this.page.url();
       if (currentUrl.includes('disclaimer') || await this.page.evaluate(() => {
@@ -303,6 +314,10 @@ class MecklenburgCountyNorthCarolinaScraper extends DeedScraper {
         }
       }
 
+      // Stop listening for requests
+      this.page.off('request', requestHandler);
+      this.log(`📍 Captured ${this.imageRequests.length} image requests`);
+
       // Extract page count from the page
       this.log('🔍 Extracting page count...');
       const pageCount = await this.page.evaluate(() => {
@@ -334,94 +349,77 @@ class MecklenburgCountyNorthCarolinaScraper extends DeedScraper {
   }
 
   /**
-   * Download PDF using same method as Durham County
+   * Download PDF by fetching full-size images from LTViewer's generator.leadgen endpoint
    */
   async downloadDeedPdf(pageCount = 3) {
     const startTime = Date.now();
 
     try {
-      this.log(`🔍 Capturing ${pageCount} page(s) from LTViewer...`);
+      this.log(`🔍 Downloading ${pageCount} page(s) from LTViewer...`);
 
-      // Wait for viewer to fully load
-      await new Promise(resolve => setTimeout(resolve, 5000));
+      // Use the image requests captured during getDeedInfo
+      if (!this.imageRequests || this.imageRequests.length === 0) {
+        throw new Error('Could not find any generator.leadgen requests');
+      }
 
-      // Find the LTViewer iframe
-      const frames = this.page.frames();
-      let viewerFrame = null;
-      for (const frame of frames) {
-        if (frame.url().includes('LTViewer')) {
-          viewerFrame = frame;
-          break;
+      //Parse the captured URLs to find the unique page images (not tiles)
+      // Look for URLs with  WTV=true (Web Thumbnail Viewer) or large viewport sizes
+      const pageUrls = {};
+
+      for (const url of this.imageRequests) {
+        const pnMatch = url.match(/PN=(\d+)/);
+        if (pnMatch) {
+          const pageNum = parseInt(pnMatch[1], 10);
+
+          // Prefer URLs that look like full-page requests (larger dimensions)
+          const srwMatch = url.match(/SRW=(\d+)/);
+          const dtMatch = url.match(/DTW=(\d+)/);
+
+          // Skip thumbnail requests (WTV=true with small dimensions)
+          if (url.includes('WTV=true') && dtMatch && parseInt(dtMatch[1]) < 200) {
+            continue;
+          }
+
+          // Keep the URL with the largest dimensions for each page
+          if (!pageUrls[pageNum] || (srwMatch && parseInt(srwMatch[1]) > 500)) {
+            pageUrls[pageNum] = url;
+          }
         }
       }
 
-      if (!viewerFrame) {
-        throw new Error('Could not find LTViewer iframe');
-      }
+      this.log(`📍 Found image URLs for ${Object.keys(pageUrls).length} page(s)`);
 
-      this.log('✅ Found LTViewer iframe');
-
-      // Capture screenshots of each page
+      // Download images using the captured URLs
+      const axios = require('axios');
       const imageBuffers = [];
 
-      for (let pageNum = 0; pageNum < pageCount; pageNum++) {
-        this.log(`📸 Capturing page ${pageNum + 1}/${pageCount}...`);
+      for (let pageNum = 1; pageNum <= pageCount; pageNum++) {
+        this.log(`📥 Downloading page ${pageNum}/${pageCount}...`);
 
-        // If not the first page, navigate to next page
-        if (pageNum > 0) {
-          // Try to click "Next Page" button in the viewer
-          await viewerFrame.evaluate(() => {
-            // Look for next page button
-            const buttons = Array.from(document.querySelectorAll('img, a, button'));
-            for (const btn of buttons) {
-              const title = btn.title || btn.alt || '';
-              const onclick = btn.getAttribute('onclick') || '';
-              if (title.toLowerCase().includes('next') || onclick.includes('Next') || onclick.includes('nextPage')) {
-                btn.click();
-                return true;
-              }
-            }
-            return false;
-          }).catch(() => false);
-
-          // Wait for page to load
-          await new Promise(resolve => setTimeout(resolve, 2000));
+        if (!pageUrls[pageNum]) {
+          this.log(`  ⚠️ No URL found for page ${pageNum}`);
+          continue;
         }
 
-        // Take screenshot of the viewer iframe
-        const screenshot = await viewerFrame.evaluate(async () => {
-          // Find the image element in the viewer
-          const imgElement = document.querySelector('img[id*="WIV"], img[src*="ImageHandler"], img[src*="GetImage"]');
-          if (!imgElement) {
-            return null;
-          }
+        try {
+          const response = await axios.get(pageUrls[pageNum], {
+            responseType: 'arraybuffer',
+            timeout: 30000
+          });
 
-          // Get the image as base64
-          const canvas = document.createElement('canvas');
-          canvas.width = imgElement.naturalWidth || imgElement.width;
-          canvas.height = imgElement.naturalHeight || imgElement.height;
-          const ctx = canvas.getContext('2d');
-          ctx.drawImage(imgElement, 0, 0);
-          return canvas.toDataURL('image/png').split(',')[1];
-        });
-
-        if (screenshot) {
-          imageBuffers.push(Buffer.from(screenshot, 'base64'));
-          this.log(`  ✅ Captured: ${(imageBuffers[imageBuffers.length - 1].length / 1024).toFixed(2)} KB`);
-        } else {
-          this.log(`  ⚠️ Could not capture page ${pageNum + 1}, trying fallback...`);
-          // Fallback: screenshot the entire iframe
-          const element = await viewerFrame.frameElement();
-          if (element) {
-            const screenshotBuffer = await element.screenshot({ type: 'png' });
-            imageBuffers.push(screenshotBuffer);
-            this.log(`  ✅ Captured (fallback): ${(screenshotBuffer.length / 1024).toFixed(2)} KB`);
+          if (response.data && response.data.length > 1000) {
+            imageBuffers.push(Buffer.from(response.data));
+            this.log(`  ✅ Downloaded: ${(response.data.length / 1024).toFixed(2)} KB`);
+          } else {
+            this.log(`  ⚠️ Page ${pageNum} response too small (${response.data.length} bytes)`);
           }
+        } catch (error) {
+          this.log(`  ⚠️ Failed to download page ${pageNum}: ${error.message}`);
         }
       }
 
       if (imageBuffers.length === 0) {
-        throw new Error('Could not capture any pages');
+        throw new Error('Could not download any pages');
       }
 
       // Convert images to PDF using pdf-lib
@@ -431,14 +429,24 @@ class MecklenburgCountyNorthCarolinaScraper extends DeedScraper {
 
       for (let i = 0; i < imageBuffers.length; i++) {
         this.log(`  Adding page ${i + 1}/${imageBuffers.length}...`);
-        const image = await pdfDoc.embedPng(imageBuffers[i]);
-        const page = pdfDoc.addPage([image.width, image.height]);
-        page.drawImage(image, {
-          x: 0,
-          y: 0,
-          width: image.width,
-          height: image.height
-        });
+
+        try {
+          // Try to embed as PNG first
+          const image = await pdfDoc.embedPng(imageBuffers[i]).catch(async () => {
+            // If PNG fails, try JPEG
+            return await pdfDoc.embedJpg(imageBuffers[i]);
+          });
+
+          const page = pdfDoc.addPage([image.width, image.height]);
+          page.drawImage(image, {
+            x: 0,
+            y: 0,
+            width: image.width,
+            height: image.height
+          });
+        } catch (embedError) {
+          this.log(`  ⚠️ Could not embed page ${i + 1}: ${embedError.message}`);
+        }
       }
 
       const pdfBytes = await pdfDoc.save();
