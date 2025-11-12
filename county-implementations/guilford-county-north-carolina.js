@@ -727,11 +727,27 @@ class GuilfordCountyNorthCarolinaScraper extends DeedScraper {
         };
       }
 
-      // Strategy 5: Try to construct PDF URL from current page parameters
-      this.log('🔍 Attempting to construct PDF URL...');
+      // Strategy 5: Try to construct CustomAttachmentsResource URL from parcel PK
+      this.log('🔍 Attempting to construct CustomAttachmentsResource URL...');
       const constructedUrl = await this.page.evaluate(() => {
-        // Look for any URL patterns in the page that might lead to PDF
+        // First, look for existing CustomAttachmentsResource links
         const allLinks = Array.from(document.querySelectorAll('a'));
+        for (const link of allLinks) {
+          if (link.href.includes('CustomAttachmentsResource')) {
+            return link.href;
+          }
+        }
+
+        // If not found, try to construct it from the parcel PK in the URL
+        const currentUrl = window.location.href;
+        const parcelMatch = currentUrl.match(/PARCELPK=(\d+)/);
+        if (parcelMatch) {
+          const parcelPk = parcelMatch[1];
+          const baseUrl = window.location.origin;
+          return `${baseUrl}/Guilford/CustomAttachmentsResource.ashx?parcelPk=${parcelPk}`;
+        }
+
+        // Also look for other document URLs
         for (const link of allLinks) {
           if (link.href.includes('ShowDocument') ||
               link.href.includes('ViewDocument') ||
