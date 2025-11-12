@@ -686,16 +686,25 @@ class GuilfordCountyNorthCarolinaScraper extends DeedScraper {
         };
       }
 
-      // Strategy 4: Look for download button or link
+      // Strategy 4: Look for download button or link (especially CustomAttachmentsResource.ashx)
       this.log('🔍 Looking for download button/link...');
       const downloadUrl = await this.page.evaluate(() => {
         const allElements = Array.from(document.querySelectorAll('a, button'));
 
+        // First priority: Look for CustomAttachmentsResource.ashx (Guilford's deed download URL)
+        for (const el of allElements) {
+          const href = el.href || '';
+          if (href.includes('CustomAttachmentsResource.ashx')) {
+            return href;
+          }
+        }
+
+        // Second priority: Look for download/view links
         for (const el of allElements) {
           const text = el.textContent.toLowerCase();
           const href = el.href || '';
 
-          if ((text.includes('download') || text.includes('pdf') || text.includes('view') || href.includes('.pdf')) &&
+          if ((text.includes('download') || text.includes('pdf') || text.includes('view') || text.includes('deed') || href.includes('.pdf')) &&
               el.offsetParent !== null) {
             return el.href || null;
           }
@@ -846,15 +855,23 @@ class GuilfordCountyNorthCarolinaScraper extends DeedScraper {
       });
     }, pdfUrl);
 
-    // Verify it's actually a PDF
+    // Verify it's a valid document (PDF or TIFF image)
     const pdfBuffer = Buffer.from(pdfBase64, 'base64');
     const pdfSignature = pdfBuffer.toString('utf8', 0, 4);
+    const tiffSignature = pdfBuffer.toString('ascii', 0, 2);
 
-    if (pdfSignature !== '%PDF') {
-      this.log(`⚠️  Downloaded content doesn't appear to be a PDF (signature: ${pdfSignature})`);
-      this.log(`  First 100 chars: ${pdfBuffer.toString('utf8', 0, 100)}`);
-    } else {
+    // Check for PDF signature
+    if (pdfSignature === '%PDF') {
       this.log(`✅ PDF downloaded: ${(pdfBuffer.length / 1024).toFixed(2)} KB`);
+    }
+    // Check for TIFF signature (II* or MM*)
+    else if (tiffSignature === 'II' || tiffSignature === 'MM') {
+      this.log(`✅ TIFF image downloaded: ${(pdfBuffer.length / 1024).toFixed(2)} KB`);
+    }
+    // Unknown format but accept it anyway
+    else {
+      this.log(`⚠️  Downloaded content (signature: ${pdfSignature}): ${(pdfBuffer.length / 1024).toFixed(2)} KB`);
+      this.log(`  First 100 chars: ${pdfBuffer.toString('utf8', 0, 100)}`);
     }
 
     return pdfBase64;
