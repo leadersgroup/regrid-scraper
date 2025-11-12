@@ -4,7 +4,18 @@
 2025-11-11
 
 ## Problem Solved
-Guilford County (North Carolina) returns deed documents as TIFF images instead of PDFs. The frontend expects PDF format in base64 encoding.
+Guilford County (North Carolina) returns deed documents as TIFF images instead of PDFs via the `gis_viewimage.php` endpoint. The frontend expects PDF format in base64 encoding.
+
+### Root Cause Analysis
+The original implementation had two issues:
+1. **Wrong Image Source**: The code was downloading from `CustomAttachmentsResource.ashx?parcelPk=...` which returns property photos/parcel maps, NOT the deed document
+2. **Missing Navigation**: The code wasn't navigating to the actual deed document page (`gis_viewimage.php`) before attempting download
+
+### The Correct Flow
+1. Search for property → Find deeds table
+2. Click deed type link → Navigate to `gis_viewimage.php?bookcode=...&booknum=...&bookpage=...`
+3. Download image from `gis_viewimage.php` endpoint → Returns TIFF
+4. Convert TIFF to PDF → Return to frontend
 
 ## Solution
 Implemented automatic TIFF to PDF conversion in the `downloadPdfFromUrl` method:

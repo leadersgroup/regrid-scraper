@@ -573,7 +573,25 @@ class GuilfordCountyNorthCarolinaScraper extends DeedScraper {
       const currentUrl = this.page.url();
       this.log(`Current URL: ${currentUrl}`);
 
-      // Strategy 1: Check if current page has PDF
+      // Strategy 1: Check if current page IS the deed image page (gis_viewimage.php)
+      if (currentUrl.includes('gis_viewimage.php')) {
+        this.log('✅ Current page is gis_viewimage.php (deed image page)');
+        this.log('📥 Downloading deed image from current page...');
+
+        // The current page URL itself is the image URL
+        const pdfBase64 = await this.downloadPdfFromUrl(currentUrl);
+
+        return {
+          success: true,
+          duration: Date.now() - startTime,
+          pdfBase64,
+          filename: `guilford_deed_${Date.now()}.pdf`,
+          fileSize: Buffer.from(pdfBase64, 'base64').length,
+          downloadPath: ''
+        };
+      }
+
+      // Strategy 2: Check if current page has PDF
       if (currentUrl.toLowerCase().includes('.pdf')) {
         this.log('✅ Current page is PDF');
         const pdfBase64 = await this.downloadPdfFromUrl(currentUrl);
