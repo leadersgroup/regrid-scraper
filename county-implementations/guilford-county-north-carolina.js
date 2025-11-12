@@ -470,38 +470,28 @@ class GuilfordCountyNorthCarolinaScraper extends DeedScraper {
       this.log(`✅ Found deed type: ${deedTypeInfo.deedType}`);
       this.log(`📄 Deed page URL: ${deedTypeInfo.href}`);
 
-      // Handle new tab opening (deed links use target="_blank")
-      this.log('🌐 Clicking deed link (opens in new tab)...');
+      // Handle new tab opening with proper session preservation
+      this.log('🌐 Opening deed document page with session...');
 
-      // Set up listener for new tab
-      const newPagePromise = new Promise(resolve =>
-        this.browser.once('targetcreated', target => resolve(target.page()))
-      );
+      // CRITICAL: Get cookies from current page to preserve PHP session
+      const cookies = await this.page.cookies();
+      this.log(`🍪 Captured ${cookies.length} cookies from current session`);
 
-      // Click the deed link in the current page
-      await this.page.evaluate((href) => {
-        const link = Array.from(document.querySelectorAll('a')).find(a => a.href === href);
-        if (link) {
-          link.click();
-        } else {
-          // Fallback: create and click a link
-          const tempLink = document.createElement('a');
-          tempLink.href = href;
-          tempLink.target = '_blank';
-          document.body.appendChild(tempLink);
-          tempLink.click();
-          document.body.removeChild(tempLink);
-        }
-      }, deedTypeInfo.href);
+      // Instead of clicking link (which loses session), open new tab manually with cookies
+      const deedPage = await this.browser.newPage();
 
-      // Wait for and switch to the new tab
-      const deedPage = await newPagePromise;
-      try {
-        await deedPage.waitForNavigation({ waitUntil: 'networkidle0', timeout: 30000 });
-      } catch (e) {
-        // Fallback if navigation event doesn't fire (page might already be loaded)
-        await deedPage.waitForSelector('body', { timeout: 10000 });
+      // Set cookies BEFORE navigating to preserve session variables (like tiffInfo)
+      if (cookies.length > 0) {
+        this.log('🍪 Setting session cookies in new tab...');
+        await deedPage.setCookie(...cookies);
       }
+
+      // Now navigate to the deed URL with session intact
+      this.log(`📄 Navigating to deed URL: ${deedTypeInfo.href}`);
+      await deedPage.goto(deedTypeInfo.href, {
+        waitUntil: 'networkidle0',
+        timeout: 60000
+      });
 
       // Switch context to the new page
       this.page = deedPage;
