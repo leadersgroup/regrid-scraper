@@ -701,6 +701,42 @@ class GuilfordCountyNorthCarolinaScraper extends DeedScraper {
         };
       }
 
+      // Strategy 6: Look for image (gis_viewimage.php displays deed as image)
+      this.log('🔍 Checking for deed image...');
+      const imageInfo = await this.page.evaluate(() => {
+        // Look for large images (deed documents are typically large)
+        const images = Array.from(document.querySelectorAll('img'));
+        for (const img of images) {
+          // Check if image is large enough to be a document (width > 500px)
+          if (img.width > 500 && img.src) {
+            return { found: true, src: img.src, width: img.width, height: img.height };
+          }
+        }
+        // Also check for any image
+        if (images.length > 0 && images[0].src) {
+          return { found: true, src: images[0].src, width: images[0].width, height: images[0].height };
+        }
+        return { found: false };
+      });
+
+      if (imageInfo.found) {
+        this.log(`✅ Found deed image: ${imageInfo.src} (${imageInfo.width}x${imageInfo.height})`);
+        // Try to download as if it were a PDF URL
+        try {
+          const pdfBase64 = await this.downloadPdfFromUrl(imageInfo.src);
+          return {
+            success: true,
+            duration: Date.now() - startTime,
+            pdfBase64,
+            filename: `guilford_deed_${Date.now()}.pdf`,
+            fileSize: Buffer.from(pdfBase64, 'base64').length,
+            downloadPath: ''
+          };
+        } catch (imgError) {
+          this.log(`⚠️  Image found but failed to download: ${imgError.message}`);
+        }
+      }
+
       throw new Error('Could not find PDF to download. PDF may require manual CAPTCHA solution or additional navigation.');
 
     } catch (error) {
