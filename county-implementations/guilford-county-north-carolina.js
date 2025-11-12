@@ -11,6 +11,8 @@ const DeedScraper = require('../deed-scraper');
 const puppeteer = require('puppeteer-extra');
 const StealthPlugin = require('puppeteer-extra-plugin-stealth');
 const RecaptchaPlugin = require('puppeteer-extra-plugin-recaptcha');
+const sharp = require('sharp');
+const { PDFDocument } = require('pdf-lib');
 
 // Use stealth plugin to avoid bot detection
 puppeteer.use(StealthPlugin());
@@ -879,18 +881,74 @@ class GuilfordCountyNorthCarolinaScraper extends DeedScraper {
     // Check for PDF signature
     if (pdfSignature === '%PDF') {
       this.log(`✅ PDF downloaded: ${(pdfBuffer.length / 1024).toFixed(2)} KB`);
+      return pdfBase64;
     }
-    // Check for TIFF signature (II* or MM*)
+    // Check for TIFF signature (II* or MM*) and convert to PDF
     else if (tiffSignature === 'II' || tiffSignature === 'MM') {
       this.log(`✅ TIFF image downloaded: ${(pdfBuffer.length / 1024).toFixed(2)} KB`);
+      this.log(`🔄 Converting TIFF to PDF...`);
+
+      try {
+        // Convert TIFF to PNG using sharp (pdf-lib doesn't support TIFF directly)
+        const pngBuffer = await sharp(pdfBuffer)
+          .png()
+          .toBuffer();
+
+        this.log(`✅ Converted to PNG: ${(pngBuffer.length / 1024).toFixed(2)} KB`);
+
+        // Get image dimensions
+        const metadata = await sharp(pdfBuffer).metadata();
+        const width = metadata.width || 612;
+        const height = metadata.height || 792;
+
+        // Create a new PDF document
+        const pdfDoc = await PDFDocument.create();
+
+        // Embed the PNG image
+        const pngImage = await pdfDoc.embedPng(pngBuffer);
+
+        // Calculate page size to fit image (maintain aspect ratio)
+        const maxWidth = 612; // 8.5 inches at 72 DPI
+        const maxHeight = 792; // 11 inches at 72 DPI
+        let pageWidth = width;
+        let pageHeight = height;
+
+        // Scale down if image is too large
+        if (pageWidth > maxWidth || pageHeight > maxHeight) {
+          const scale = Math.min(maxWidth / pageWidth, maxHeight / pageHeight);
+          pageWidth = pageWidth * scale;
+          pageHeight = pageHeight * scale;
+        }
+
+        // Add a page with the image dimensions
+        const page = pdfDoc.addPage([pageWidth, pageHeight]);
+
+        // Draw the image on the page
+        page.drawImage(pngImage, {
+          x: 0,
+          y: 0,
+          width: pageWidth,
+          height: pageHeight,
+        });
+
+        // Save the PDF
+        const pdfBytes = await pdfDoc.save();
+        const convertedPdfBase64 = Buffer.from(pdfBytes).toString('base64');
+
+        this.log(`✅ PDF created: ${(pdfBytes.length / 1024).toFixed(2)} KB`);
+        return convertedPdfBase64;
+      } catch (conversionError) {
+        this.log(`⚠️  Failed to convert TIFF to PDF: ${conversionError.message}`);
+        this.log(`  Returning original TIFF as base64`);
+        return pdfBase64;
+      }
     }
     // Unknown format but accept it anyway
     else {
       this.log(`⚠️  Downloaded content (signature: ${pdfSignature}): ${(pdfBuffer.length / 1024).toFixed(2)} KB`);
       this.log(`  First 100 chars: ${pdfBuffer.toString('utf8', 0, 100)}`);
+      return pdfBase64;
     }
-
-    return pdfBase64;
   }
 }
 
