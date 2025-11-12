@@ -470,11 +470,43 @@ class GuilfordCountyNorthCarolinaScraper extends DeedScraper {
       this.log(`✅ Found deed type: ${deedTypeInfo.deedType}`);
       this.log(`📄 Deed page URL: ${deedTypeInfo.href}`);
 
-      // Navigate to the deed document page
-      this.log('🌐 Navigating to deed document page...');
-      await this.page.goto(deedTypeInfo.href, { waitUntil: 'networkidle0', timeout: 30000 });
+      // Handle new tab opening (deed links use target="_blank")
+      this.log('🌐 Clicking deed link (opens in new tab)...');
 
-      // Wait for page to load
+      // Set up listener for new tab
+      const newPagePromise = new Promise(resolve =>
+        this.browser.once('targetcreated', target => resolve(target.page()))
+      );
+
+      // Click the deed link in the current page
+      await this.page.evaluate((href) => {
+        const link = Array.from(document.querySelectorAll('a')).find(a => a.href === href);
+        if (link) {
+          link.click();
+        } else {
+          // Fallback: create and click a link
+          const tempLink = document.createElement('a');
+          tempLink.href = href;
+          tempLink.target = '_blank';
+          document.body.appendChild(tempLink);
+          tempLink.click();
+          document.body.removeChild(tempLink);
+        }
+      }, deedTypeInfo.href);
+
+      // Wait for and switch to the new tab
+      const deedPage = await newPagePromise;
+      try {
+        await deedPage.waitForNavigation({ waitUntil: 'networkidle0', timeout: 30000 });
+      } catch (e) {
+        // Fallback if navigation event doesn't fire (page might already be loaded)
+        await deedPage.waitForSelector('body', { timeout: 10000 });
+      }
+
+      // Switch context to the new page
+      this.page = deedPage;
+
+      // Wait a moment for any dynamic content
       await new Promise(resolve => setTimeout(resolve, 3000));
 
       this.log('✅ On deed document page');
@@ -566,8 +598,50 @@ class GuilfordCountyNorthCarolinaScraper extends DeedScraper {
     try {
       this.log('🔍 Looking for deed document on current page...');
 
+      // Set up network monitoring to capture dynamically loaded images
+      const capturedImageUrls = [];
+      const responseHandler = async (response) => {
+        const url = response.url();
+        const contentType = response.headers()['content-type'] || '';
+
+        // Capture image URLs (TIFF, PDF, or large images)
+        if (contentType.includes('image') || contentType.includes('pdf') ||
+            url.includes('.tif') || url.includes('.pdf') ||
+            url.includes('viewimage') || url.includes('getimage')) {
+          capturedImageUrls.push(url);
+          this.log(`📸 Captured resource URL: ${url}`);
+        }
+      };
+      this.page.on('response', responseHandler);
+
       // Wait for page to fully load
       await new Promise(resolve => setTimeout(resolve, 3000));
+
+      // Check for frames (deed content might be in an iframe)
+      const frames = this.page.frames();
+      if (frames.length > 1) {
+        this.log(`🖼️  Found ${frames.length} frames on page`);
+
+        // Check each frame for deed content
+        for (const frame of frames) {
+          try {
+            const frameUrl = frame.url();
+            if (frameUrl && frameUrl !== 'about:blank') {
+              this.log(`  Checking frame: ${frameUrl}`);
+
+              // Check if frame contains deed viewer
+              if (frameUrl.includes('viewimage') || frameUrl.includes('gis_viewimage')) {
+                this.log('✅ Found deed viewer in frame!');
+                // Switch context to frame
+                this.page = frame;
+                break;
+              }
+            }
+          } catch (e) {
+            // Frame might be detached
+          }
+        }
+      }
 
       // Check current URL
       const currentUrl = this.page.url();
@@ -764,6 +838,43 @@ class GuilfordCountyNorthCarolinaScraper extends DeedScraper {
           }
         }
       }
+
+      // Strategy 4: Try captured image URLs from network monitoring
+      if (capturedImageUrls.length > 0) {
+        this.log(`🌐 Trying ${capturedImageUrls.length} captured resource URLs...`);
+
+        for (const imageUrl of capturedImageUrls) {
+          try {
+            this.log(`  Attempting: ${imageUrl}`);
+            const pdfBase64 = await this.downloadPdfFromUrl(imageUrl);
+
+            // Verify the content
+            const pdfBuffer = Buffer.from(pdfBase64, 'base64');
+            const isBlank = await this.isImageBlank(pdfBuffer);
+
+            if (!isBlank && pdfBuffer.length > 1000) {
+              this.log('✅ Successfully downloaded deed from captured URL');
+
+              // Clean up event listener
+              this.page.off('response', responseHandler);
+
+              return {
+                success: true,
+                duration: Date.now() - startTime,
+                pdfBase64,
+                filename: `guilford_deed_${Date.now()}.pdf`,
+                fileSize: pdfBuffer.length,
+                downloadPath: ''
+              };
+            }
+          } catch (captureErr) {
+            this.log(`    Failed: ${captureErr.message}`);
+          }
+        }
+      }
+
+      // Clean up event listener before throwing error
+      this.page.off('response', responseHandler);
 
       // If all strategies fail, provide a meaningful error
       throw new Error(
