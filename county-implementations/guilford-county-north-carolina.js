@@ -558,32 +558,43 @@ class GuilfordCountyNorthCarolinaScraper extends DeedScraper {
     try {
       this.log('🔍 Looking for PDF...');
 
-      // Strategy 0: Download PDF using CDP (Chrome DevTools Protocol)
+      // Strategy 0: Download PDF using fetch (maintains cookies/session)
       if (this.deedImageUrl) {
         this.log(`📥 Downloading PDF from deed URL...`);
         this.log(`   URL: ${this.deedImageUrl}`);
+
         try {
-          // Use CDP to fetch the PDF directly
-          const client = await this.page.target().createCDPSession();
-          const { data } = await client.send('Network.loadNetworkResource', {
-            url: this.deedImageUrl,
-            frameId: this.page.mainFrame()._id,
-          });
+          // Use fetch from within page context to maintain cookies and session
+          // This is the same approach as Wake County
+          const pdfBase64 = await this.page.evaluate(async (url) => {
+            const response = await fetch(url);
+            if (!response.ok) {
+              throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+            }
 
-          if (data.success && data.stream) {
-            // Read the stream
-            const { data: resourceData } = await client.send('IO.read', {
-              handle: data.stream
+            const blob = await response.blob();
+
+            return new Promise((resolve, reject) => {
+              const reader = new FileReader();
+              reader.onloadend = () => {
+                const base64 = reader.result.split(',')[1];
+                resolve(base64);
+              };
+              reader.onerror = reject;
+              reader.readAsDataURL(blob);
             });
+          }, this.deedImageUrl);
 
-            // Close the stream
-            await client.send('IO.close', { handle: data.stream });
+          // Verify it's actually a PDF
+          const pdfBuffer = Buffer.from(pdfBase64, 'base64');
+          const pdfSignature = pdfBuffer.toString('utf8', 0, 4);
 
-            // Convert to buffer
-            const pdfBuffer = Buffer.from(resourceData, 'base64');
-            const pdfBase64 = pdfBuffer.toString('base64');
-
-            this.log(`✅ Downloaded PDF via CDP: ${(pdfBuffer.length / 1024).toFixed(2)} KB`);
+          if (pdfSignature !== '%PDF') {
+            this.log(`⚠️  Downloaded content doesn't appear to be a PDF (signature: ${pdfSignature})`);
+            this.log(`  First 100 chars: ${pdfBuffer.toString('utf8', 0, 100)}`);
+            this.log('   Trying other strategies...');
+          } else {
+            this.log(`✅ PDF downloaded: ${(pdfBuffer.length / 1024).toFixed(2)} KB`);
 
             return {
               success: true,
@@ -594,33 +605,8 @@ class GuilfordCountyNorthCarolinaScraper extends DeedScraper {
               downloadPath: ''
             };
           }
-        } catch (cdpError) {
-          this.log(`⚠️  CDP download failed: ${cdpError.message}`);
-          this.log('   Trying navigation approach...');
-        }
-
-        // Fallback: Try navigating and getting response buffer
-        try {
-          const response = await this.page.goto(this.deedImageUrl, {
-            waitUntil: 'networkidle0',
-            timeout: 30000
-          });
-
-          const pdfBuffer = await response.buffer();
-          const pdfBase64 = pdfBuffer.toString('base64');
-
-          this.log(`✅ Downloaded PDF via navigation: ${(pdfBuffer.length / 1024).toFixed(2)} KB`);
-
-          return {
-            success: true,
-            duration: Date.now() - startTime,
-            pdfBase64,
-            filename: `guilford_deed_${Date.now()}.pdf`,
-            fileSize: pdfBuffer.length,
-            downloadPath: ''
-          };
-        } catch (navError) {
-          this.log(`⚠️  Navigation download failed: ${navError.message}`);
+        } catch (fetchError) {
+          this.log(`⚠️  Fetch download failed: ${fetchError.message}`);
           this.log('   Trying other strategies...');
         }
       }
