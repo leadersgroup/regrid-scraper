@@ -334,13 +334,14 @@ class GuilfordCountyNorthCarolinaScraper extends DeedScraper {
           }
         }
 
-        // Alternative: look for any link that looks like a parcel number
+        // Alternative: look for any link that looks like a parcel number (simplified)
         const allLinks = Array.from(document.querySelectorAll('a'));
         for (const link of allLinks) {
           const text = link.textContent.trim();
           const href = link.href;
-          // Parcel numbers often contain numbers and may have dashes
-          if (/^\d+(-\d+)*$/.test(text) || /^\d{5,}$/.test(text)) {
+          // Look for any link that is purely numeric (like "60312")
+          if (/^\d+$/.test(text) && text.length >= 3 && link.offsetParent !== null) {
+            console.log(`Found parcel link: ${text} -> ${href}`);
             return { success: true, parcelNumber: text, href };
           }
         }

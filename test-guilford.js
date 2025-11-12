@@ -11,10 +11,14 @@ async function testGuilfordCounty() {
 
   const scraper = new GuilfordCountyNorthCarolinaScraper({
     headless: false, // Set to false to see browser
-    outputDir: './downloads'
+    outputDir: './downloads',
+    verbose: true // Enable detailed logging
   });
 
   try {
+    // Initialize the scraper
+    await scraper.initialize();
+
     // Test address from user
     const address = '1205 Glendale Dr';
 
