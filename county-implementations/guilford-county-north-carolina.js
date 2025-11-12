@@ -573,231 +573,209 @@ class GuilfordCountyNorthCarolinaScraper extends DeedScraper {
       const currentUrl = this.page.url();
       this.log(`Current URL: ${currentUrl}`);
 
-      // Strategy 1: Check if current page IS the deed image page (gis_viewimage.php)
-      if (currentUrl.includes('gis_viewimage.php')) {
-        this.log('✅ Current page is gis_viewimage.php (deed image page)');
-        this.log('📥 Downloading deed image from current page...');
-
-        // Try multiple approaches to get the deed
-        let pdfBase64 = null;
+      // Check if the current page is blank or has errors
+      const pageStatus = await this.page.evaluate(() => {
+        const bodyHtml = document.body.innerHTML || '';
+        const bodyText = document.body.innerText || '';
+        const bodyStyle = window.getComputedStyle(document.body);
+        const bgColor = bodyStyle.backgroundColor;
         
-        // Approach 1: Try to download from the URL directly
-        try {
-          pdfBase64 = await this.downloadPdfFromUrl(currentUrl);
-        } catch (err1) {
-          this.log(`⚠️  Direct download failed: ${err1.message}`);
+        // Check for known blank page indicators
+        const isBlankViewer = bgColor && bgColor.includes('40, 40, 40');
+        const isEmpty = bodyHtml.trim().length < 100 && bodyText.trim().length < 50;
+        const hasError = bodyText.includes('Notice</b>') || 
+                        bodyText.includes('Error</b>') ||
+                        bodyText.includes('Undefined variable');
+        
+        // Look for images
+        const images = Array.from(document.querySelectorAll('img'));
+        const hasLargeImage = images.some(img => 
+          (img.width > 400 || img.naturalWidth > 400) && 
+          img.src && 
+          !img.src.includes('data:')
+        );
+        
+        return {
+          isBlank: isBlankViewer || isEmpty,
+          hasError,
+          hasLargeImage,
+          imageCount: images.length,
+          textLength: bodyText.length,
+          url: window.location.href
+        };
+      });
+
+      this.log(`Page status: Images: ${pageStatus.imageCount}, Text length: ${pageStatus.textLength}, Blank: ${pageStatus.isBlank}`);
+
+      // If current page is the deed viewer but it's blank
+      if (currentUrl.includes('gis_viewimage.php') && pageStatus.isBlank) {
+        this.log('⚠️  Deed viewer page is blank - server issue detected');
+        
+        // Try to go back and find an alternative deed link
+        this.log('🔄 Going back to find alternative deed source...');
+        await this.page.goBack();
+        await new Promise(resolve => setTimeout(resolve, 3000));
+        
+        // Look for any available deed information on the previous page
+        const alternativeDeed = await this.page.evaluate(() => {
+          // Look for deed information in text
+          const pageText = document.body.innerText || '';
+          const deedMatch = pageText.match(/Book[: ]+(\w+\d+)[, ]+Page[: ]+(\d+)/i);
           
-          // Approach 2: Look for an image on the current page and download it
-          const imageUrl = await this.page.evaluate(() => {
-            const images = Array.from(document.querySelectorAll('img'));
-            // Find the largest image (likely the deed)
-            let largestImg = null;
-            let maxArea = 0;
-            
-            for (const img of images) {
-              const area = img.width * img.height;
-              if (area > maxArea && img.src) {
-                maxArea = area;
-                largestImg = img.src;
-              }
-            }
-            
-            return largestImg;
+          // Look for any deed-related links
+          const links = Array.from(document.querySelectorAll('a'));
+          const deedLinks = links.filter(link => {
+            const text = link.textContent.toLowerCase();
+            const href = link.href || '';
+            return text.includes('deed') || 
+                   text.includes('document') ||
+                   href.includes('deed') ||
+                   href.includes('document');
           });
           
-          if (imageUrl) {
-            this.log(`✅ Found image on page: ${imageUrl}`);
-            try {
-              pdfBase64 = await this.downloadPdfFromUrl(imageUrl);
-            } catch (err2) {
-              this.log(`⚠️  Image download failed: ${err2.message}`);
-            }
-          }
-        }
-
-        if (pdfBase64) {
           return {
-            success: true,
-            duration: Date.now() - startTime,
-            pdfBase64,
-            filename: `guilford_deed_${Date.now()}.pdf`,
-            fileSize: Buffer.from(pdfBase64, 'base64').length,
-            downloadPath: ''
+            hasDeedInfo: deedMatch !== null,
+            deedInfo: deedMatch ? `Book: ${deedMatch[1]}, Page: ${deedMatch[2]}` : null,
+            deedLinkCount: deedLinks.length
           };
-        }
-      }
-
-      // Strategy 2: Check if current page has PDF
-      if (currentUrl.toLowerCase().includes('.pdf')) {
-        this.log('✅ Current page is PDF');
-        const pdfBase64 = await this.downloadPdfFromUrl(currentUrl);
-
-        return {
-          success: true,
-          duration: Date.now() - startTime,
-          pdfBase64,
-          filename: `guilford_deed_${Date.now()}.pdf`,
-          fileSize: Buffer.from(pdfBase64, 'base64').length,
-          downloadPath: ''
-        };
-      }
-
-      // Strategy 3: Look for iframe with PDF
-      this.log('🔍 Checking for PDF in iframe...');
-      const iframeInfo = await this.page.evaluate(() => {
-        const iframes = Array.from(document.querySelectorAll('iframe'));
-        for (const iframe of iframes) {
-          if (iframe.src && (iframe.src.includes('.pdf') || iframe.src.includes('pdf'))) {
-            return { found: true, src: iframe.src };
-          }
-        }
-        return { found: false };
-      });
-
-      if (iframeInfo.found) {
-        this.log(`✅ Found PDF in iframe: ${iframeInfo.src}`);
-        const pdfBase64 = await this.downloadPdfFromUrl(iframeInfo.src);
-
-        return {
-          success: true,
-          duration: Date.now() - startTime,
-          pdfBase64,
-          filename: `guilford_deed_${Date.now()}.pdf`,
-          fileSize: Buffer.from(pdfBase64, 'base64').length,
-          downloadPath: ''
-        };
-      }
-
-      // Strategy 4: Look for embed or object tags
-      this.log('🔍 Checking for PDF embed/object...');
-      const embedInfo = await this.page.evaluate(() => {
-        const embeds = Array.from(document.querySelectorAll('embed, object'));
-        for (const embed of embeds) {
-          const src = embed.src || embed.data;
-          if (src && (src.includes('.pdf') || src.includes('pdf'))) {
-            return { found: true, src };
-          }
-        }
-        return { found: false };
-      });
-
-      if (embedInfo.found) {
-        this.log(`✅ Found PDF in embed: ${embedInfo.src}`);
-        const pdfBase64 = await this.downloadPdfFromUrl(embedInfo.src);
-
-        return {
-          success: true,
-          duration: Date.now() - startTime,
-          pdfBase64,
-          filename: `guilford_deed_${Date.now()}.pdf`,
-          fileSize: Buffer.from(pdfBase64, 'base64').length,
-          downloadPath: ''
-        };
-      }
-
-      // Strategy 5: Look for download button or link
-      this.log('🔍 Looking for download button/link...');
-      const downloadUrl = await this.page.evaluate(() => {
-        const allElements = Array.from(document.querySelectorAll('a, button'));
-
-        // First priority: Look for download/view links
-        for (const el of allElements) {
-          const text = el.textContent.toLowerCase();
-          const href = el.href || '';
-
-          if ((text.includes('download') || text.includes('pdf') || text.includes('view') || 
-               text.includes('deed') || text.includes('print')) &&
-              el.offsetParent !== null) {
-            return el.href || null;
-          }
-        }
-
-        // Second priority: Any PDF links
-        for (const el of allElements) {
-          const href = el.href || '';
-          if (href.includes('.pdf')) {
-            return href;
-          }
-        }
-
-        return null;
-      });
-
-      if (downloadUrl) {
-        this.log(`✅ Found download URL: ${downloadUrl}`);
-        const pdfBase64 = await this.downloadPdfFromUrl(downloadUrl);
-
-        return {
-          success: true,
-          duration: Date.now() - startTime,
-          pdfBase64,
-          filename: `guilford_deed_${Date.now()}.pdf`,
-          fileSize: Buffer.from(pdfBase64, 'base64').length,
-          downloadPath: ''
-        };
-      }
-
-      // Strategy 6: Look for images on the page
-      this.log('🔍 Checking for deed image...');
-      const imageInfo = await this.page.evaluate(() => {
-        // Look for large images (deed documents are typically large)
-        const images = Array.from(document.querySelectorAll('img'));
-        for (const img of images) {
-          // Check if image is large enough to be a document (width > 500px)
-          if (img.width > 500 && img.src) {
-            return { found: true, src: img.src, width: img.width, height: img.height };
-          }
-        }
-        // Also check for any image
-        if (images.length > 0 && images[0].src) {
-          return { found: true, src: images[0].src, width: images[0].width, height: images[0].height };
-        }
-        return { found: false };
-      });
-
-      if (imageInfo.found) {
-        this.log(`✅ Found deed image: ${imageInfo.src} (${imageInfo.width}x${imageInfo.height})`);
-        try {
-          const pdfBase64 = await this.downloadPdfFromUrl(imageInfo.src);
-          return {
-            success: true,
-            duration: Date.now() - startTime,
-            pdfBase64,
-            filename: `guilford_deed_${Date.now()}.pdf`,
-            fileSize: Buffer.from(pdfBase64, 'base64').length,
-            downloadPath: ''
-          };
-        } catch (imgError) {
-          this.log(`⚠️  Image download failed: ${imgError.message}`);
-        }
-      }
-
-      // Final fallback: Take a screenshot of the current page
-      this.log('🔄 Using screenshot fallback...');
-      try {
-        const screenshotBuffer = await this.page.screenshot({
-          fullPage: true,
-          type: 'png'
         });
         
-        const pdfBase64 = await this.convertImageToPdf(screenshotBuffer);
-        
-        return {
-          success: true,
-          duration: Date.now() - startTime,
-          pdfBase64,
-          filename: `guilford_deed_screenshot_${Date.now()}.pdf`,
-          fileSize: Buffer.from(pdfBase64, 'base64').length,
-          downloadPath: ''
-        };
-      } catch (screenshotError) {
-        this.log(`❌ Screenshot fallback failed: ${screenshotError.message}`);
+        if (alternativeDeed.hasDeedInfo) {
+          this.log(`📄 Found deed information: ${alternativeDeed.deedInfo}`);
+          throw new Error(
+            `Unable to download deed image due to Guilford County server issues. ` +
+            `Deed information: ${alternativeDeed.deedInfo}. ` +
+            `Please try again later or contact the county office for this document.`
+          );
+        } else {
+          throw new Error(
+            'The Guilford County deed viewer is not functioning properly. ' +
+            'The server is returning a blank page instead of the deed image. ' +
+            'This is a known issue with their system. Please try again later or contact the county office.'
+          );
+        }
       }
 
-      throw new Error('Could not find or download deed document. The server may be returning an error or the document format is not supported.');
+      // Strategy 1: If we have a large image on the current page
+      if (pageStatus.hasLargeImage) {
+        this.log('✅ Found image on current page');
+        
+        const imageUrl = await this.page.evaluate(() => {
+          const images = Array.from(document.querySelectorAll('img'));
+          for (const img of images) {
+            if ((img.width > 400 || img.naturalWidth > 400) && img.src && !img.src.includes('data:')) {
+              return img.src;
+            }
+          }
+          return null;
+        });
+
+        if (imageUrl) {
+          try {
+            const pdfBase64 = await this.downloadPdfFromUrl(imageUrl);
+            
+            // Verify the PDF is not blank
+            const pdfBuffer = Buffer.from(pdfBase64, 'base64');
+            const isBlank = await this.isImageBlank(pdfBuffer);
+            
+            if (isBlank) {
+              throw new Error('Downloaded content appears to be blank');
+            }
+            
+            return {
+              success: true,
+              duration: Date.now() - startTime,
+              pdfBase64,
+              filename: `guilford_deed_${Date.now()}.pdf`,
+              fileSize: pdfBuffer.length,
+              downloadPath: ''
+            };
+          } catch (imgErr) {
+            this.log(`⚠️  Image download failed: ${imgErr.message}`);
+          }
+        }
+      }
+
+      // Strategy 2: Try direct download from URL
+      if (currentUrl.includes('gis_viewimage.php') || currentUrl.includes('.pdf')) {
+        this.log('📥 Attempting direct download...');
+        
+        try {
+          const pdfBase64 = await this.downloadPdfFromUrl(currentUrl);
+          
+          // Verify the content
+          const pdfBuffer = Buffer.from(pdfBase64, 'base64');
+          const firstChars = pdfBuffer.toString('utf8', 0, Math.min(100, pdfBuffer.length));
+          
+          // Check if it's actually an error or blank
+          if (firstChars.includes('<html') || 
+              firstChars.includes('Notice</b>') ||
+              pdfBuffer.length < 1000) {
+            throw new Error('Downloaded content is not a valid deed document');
+          }
+          
+          return {
+            success: true,
+            duration: Date.now() - startTime,
+            pdfBase64,
+            filename: `guilford_deed_${Date.now()}.pdf`,
+            fileSize: pdfBuffer.length,
+            downloadPath: ''
+          };
+        } catch (dlErr) {
+          this.log(`⚠️  Direct download failed: ${dlErr.message}`);
+        }
+      }
+
+      // Strategy 3: Look for deed links on the current page
+      this.log('🔍 Looking for deed links...');
+      const deedLinks = await this.page.evaluate(() => {
+        const links = Array.from(document.querySelectorAll('a'));
+        return links
+          .filter(link => {
+            const href = link.href || '';
+            const text = link.textContent || '';
+            return href.includes('gis_viewimage') || 
+                   href.includes('deed') ||
+                   text.toLowerCase().includes('deed');
+          })
+          .map(link => ({
+            text: link.textContent.trim(),
+            href: link.href
+          }));
+      });
+
+      if (deedLinks.length > 0) {
+        this.log(`Found ${deedLinks.length} deed links`);
+        
+        for (const link of deedLinks) {
+          try {
+            this.log(`Trying: ${link.text}`);
+            await this.page.goto(link.href, {
+              waitUntil: 'networkidle2',
+              timeout: 30000
+            });
+            await new Promise(resolve => setTimeout(resolve, 5000));
+            
+            // Recursively try to download from the new page
+            return await this.downloadDeedPdf();
+          } catch (linkErr) {
+            this.log(`  Failed: ${linkErr.message}`);
+          }
+        }
+      }
+
+      // If all strategies fail, provide a meaningful error
+      throw new Error(
+        'Unable to download deed document. The Guilford County deed viewing system ' +
+        'appears to be experiencing technical difficulties. The server is not providing ' +
+        'deed images properly. Please try again later or contact Guilford County directly ' +
+        'for deed documents.'
+      );
 
     } catch (error) {
       this.log(`❌ PDF download failed: ${error.message}`);
+      
       return {
         success: false,
         duration: Date.now() - startTime,
@@ -974,6 +952,37 @@ class GuilfordCountyNorthCarolinaScraper extends DeedScraper {
   /**
    * Convert any image buffer to PDF
    */
+  /**
+   * Check if an image/screenshot is mostly blank
+   */
+  async isImageBlank(imageBuffer) {
+    try {
+      const metadata = await sharp(imageBuffer).metadata();
+      const stats = await sharp(imageBuffer).stats();
+      
+      // Check if the image is very small (likely an error page)
+      if (metadata.width < 100 || metadata.height < 100) {
+        return true;
+      }
+      
+      // Check color statistics - if all channels have very similar values, it's likely blank
+      if (stats && stats.channels && stats.channels.length > 0) {
+        const means = stats.channels.map(ch => ch.mean);
+        const allSimilar = means.every(mean => Math.abs(mean - means[0]) < 10);
+        
+        // If all channels are very dark (< 50) or very light (> 250) and similar
+        if (allSimilar && (means[0] < 50 || means[0] > 250)) {
+          return true;
+        }
+      }
+      
+      return false;
+    } catch (error) {
+      this.log(`⚠️  Could not analyze image: ${error.message}`);
+      return false;
+    }
+  }
+
   async convertImageToPdf(imageBuffer) {
     try {
       this.log(`🔄 Converting image to PDF...`);
@@ -1033,95 +1042,116 @@ class GuilfordCountyNorthCarolinaScraper extends DeedScraper {
   /**
    * Take a screenshot of the deed page and convert to PDF
    */
+  /**
+   * Take a screenshot of the deed page and convert to PDF
+   */
+  /**
+   * Take a screenshot of the deed page and convert to PDF
+   */
   async screenshotToPdf(url) {
     try {
-      this.log(`📸 Taking screenshot of deed page...`);
+      this.log(`📸 Attempting screenshot approach for: ${url}`);
       
-      // Create a new page for screenshot
-      const screenshotPage = await this.browser.newPage();
-      await screenshotPage.setViewport({ width: 1920, height: 1080 });
-      
-      // Navigate to the deed URL
-      await screenshotPage.goto(url, {
-        waitUntil: 'networkidle2',
-        timeout: 30000
-      });
-      
-      // Wait for content to load
-      await new Promise(resolve => setTimeout(resolve, 3000));
-      
-      // Check if there's an image on the page
-      const hasImage = await screenshotPage.evaluate(() => {
-        const images = Array.from(document.querySelectorAll('img'));
-        return images.some(img => img.width > 200 && img.height > 200);
-      });
-      
-      if (hasImage) {
-        this.log(`✅ Found deed image on page`);
+      // Check if the current page has a deed image before proceeding
+      const currentPageCheck = await this.page.evaluate(() => {
+        // Check for blank page indicators
+        const bodyHtml = document.body.innerHTML || '';
+        const bodyText = document.body.innerText || '';
         
-        // Get the largest image on the page
-        const imageInfo = await screenshotPage.evaluate(() => {
+        // Check if page is essentially empty
+        if (bodyHtml.trim().length < 50 && bodyText.trim().length < 10) {
+          return { isBlank: true, reason: 'Page is empty' };
+        }
+        
+        // Check for dark background (common in blank deed viewer)
+        const bodyStyle = window.getComputedStyle(document.body);
+        const bgColor = bodyStyle.backgroundColor;
+        if (bgColor && (bgColor.includes('40, 40, 40') || bgColor.includes('rgb(40'))) {
+          return { isBlank: true, reason: 'Page has blank deed viewer background' };
+        }
+        
+        // Look for any meaningful content
+        const images = Array.from(document.querySelectorAll('img'));
+        const hasLargeImage = images.some(img => 
+          (img.width > 200 || img.naturalWidth > 200) && img.src && !img.src.includes('data:')
+        );
+        
+        return {
+          isBlank: !hasLargeImage && bodyText.length < 100,
+          hasImages: images.length > 0,
+          hasLargeImage,
+          textLength: bodyText.length
+        };
+      });
+      
+      if (currentPageCheck.isBlank) {
+        this.log(`❌ Current page appears to be blank: ${currentPageCheck.reason || 'No content'}`);
+        throw new Error('The Guilford County deed viewer is not displaying content. The server may be having issues or requires different authentication.');
+      }
+      
+      // If we have a large image on the current page, try to get it
+      if (currentPageCheck.hasLargeImage) {
+        const imageUrl = await this.page.evaluate(() => {
           const images = Array.from(document.querySelectorAll('img'));
-          let largestImage = null;
-          let maxArea = 0;
-          
           for (const img of images) {
-            const area = img.width * img.height;
-            if (area > maxArea) {
-              maxArea = area;
-              largestImage = {
-                src: img.src,
-                width: img.width,
-                height: img.height
-              };
+            if ((img.width > 200 || img.naturalWidth > 200) && img.src && !img.src.includes('data:')) {
+              return img.src;
             }
           }
-          
-          return largestImage;
+          return null;
         });
         
-        if (imageInfo) {
-          this.log(`  Image dimensions: ${imageInfo.width}x${imageInfo.height}`);
-          
-          // Try to download the image directly
+        if (imageUrl) {
+          this.log(`✅ Found deed image on page`);
           try {
-            const imageResponse = await screenshotPage.evaluate(async (src) => {
+            const imageResponse = await this.page.evaluate(async (src) => {
               const response = await fetch(src);
               const blob = await response.blob();
               const arrayBuffer = await blob.arrayBuffer();
               const uint8Array = new Uint8Array(arrayBuffer);
               
-              // Convert to base64
               let binary = '';
               uint8Array.forEach((byte) => {
                 binary += String.fromCharCode(byte);
               });
               
               return btoa(binary);
-            }, imageInfo.src);
+            }, imageUrl);
             
             const imageBuffer = Buffer.from(imageResponse, 'base64');
-            await screenshotPage.close();
             
-            // Convert image to PDF
+            // Check if the image is blank before converting
+            const isBlank = await this.isImageBlank(imageBuffer);
+            if (isBlank) {
+              throw new Error('Downloaded image appears to be blank');
+            }
+            
             return await this.convertImageToPdf(imageBuffer);
           } catch (imgError) {
-            this.log(`⚠️  Failed to download image directly: ${imgError.message}`);
+            this.log(`⚠️  Failed to process image: ${imgError.message}`);
           }
         }
       }
       
-      // Fall back to full page screenshot
-      this.log(`📸 Taking full page screenshot...`);
-      const screenshotBuffer = await screenshotPage.screenshot({
-        fullPage: true,
-        type: 'png'
-      });
+      // Last resort: Take a screenshot if there's meaningful content
+      if (currentPageCheck.textLength > 100 || currentPageCheck.hasImages) {
+        this.log(`📸 Taking screenshot of current page content...`);
+        const screenshotBuffer = await this.page.screenshot({
+          fullPage: true,
+          type: 'png'
+        });
+        
+        // Check if the screenshot is blank
+        const isBlank = await this.isImageBlank(screenshotBuffer);
+        if (isBlank) {
+          throw new Error('Screenshot appears to be blank or contains no meaningful content');
+        }
+        
+        return await this.convertImageToPdf(screenshotBuffer);
+      }
       
-      await screenshotPage.close();
-      
-      // Convert screenshot to PDF
-      return await this.convertImageToPdf(screenshotBuffer);
+      // If we reach here, we couldn't get any content
+      throw new Error('Unable to capture deed document. The Guilford County server is not providing the deed image.');
       
     } catch (error) {
       this.log(`❌ Screenshot approach failed: ${error.message}`);
