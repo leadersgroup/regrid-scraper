@@ -466,19 +466,13 @@ class GuilfordCountyNorthCarolinaScraper extends DeedScraper {
       }
 
       this.log(`✅ Found deed type: ${deedTypeInfo.deedType}`);
-      this.log(`📄 Navigating to deed PDF: ${deedTypeInfo.href}`);
+      this.log(`📄 Deed image URL: ${deedTypeInfo.href}`);
 
-      // Navigate to the deed PDF URL (don't click the link since it has target="_blank")
-      await this.page.goto(deedTypeInfo.href, {
-        waitUntil: 'networkidle2',
-        timeout: 60000
-      });
+      // Store the viewer URL - we'll download it directly instead of navigating
+      this.deedImageUrl = deedTypeInfo.href;
 
-      // Wait for PDF page to load
-      await new Promise(resolve => setTimeout(resolve, 5000));
-
-      // Check for captcha
-      this.log('🔍 Checking for captcha...');
+      // Check for captcha (check current page before download)
+      this.log('🔍 Checking for captcha on deeds page...');
       const captchaInfo = await this.page.evaluate(() => {
         const bodyText = document.body.innerText.toLowerCase();
         const hasCaptcha = bodyText.includes('captcha') ||
@@ -563,6 +557,45 @@ class GuilfordCountyNorthCarolinaScraper extends DeedScraper {
 
     try {
       this.log('🔍 Looking for PDF...');
+
+      // Strategy 0: Try downloading deed image URL directly if we have it
+      if (this.deedImageUrl) {
+        this.log(`🔍 Navigating to deed image URL...`);
+        this.log(`   URL: ${this.deedImageUrl}`);
+        try {
+          // Navigate to the PHP page
+          await this.page.goto(this.deedImageUrl, {
+            waitUntil: 'networkidle0',
+            timeout: 30000
+          });
+
+          // Wait longer for JavaScript to render the image
+          await new Promise(resolve => setTimeout(resolve, 8000));
+
+          // Take a screenshot of the rendered page (the deed image)
+          this.log('📸 Taking screenshot of deed...');
+          const screenshotBuffer = await this.page.screenshot({
+            fullPage: true,
+            type: 'png'
+          });
+
+          // Convert screenshot to base64
+          const pdfBase64 = screenshotBuffer.toString('base64');
+          this.log(`✅ Captured deed screenshot: ${(screenshotBuffer.length / 1024).toFixed(2)} KB`);
+
+          return {
+            success: true,
+            duration: Date.now() - startTime,
+            pdfBase64,
+            filename: `guilford_deed_${Date.now()}.pdf`,
+            fileSize: screenshotBuffer.length,
+            downloadPath: ''
+          };
+        } catch (directError) {
+          this.log(`⚠️  Navigation to deed URL failed: ${directError.message}`);
+          this.log('   Trying other strategies...');
+        }
+      }
 
       // Wait longer for PDF to load after CAPTCHA
       await new Promise(resolve => setTimeout(resolve, 5000));
