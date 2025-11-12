@@ -447,12 +447,13 @@ class GuilfordCountyNorthCarolinaScraper extends DeedScraper {
 
                 if (link) {
                   const deedType = link.textContent.trim();
-                  // Only return href if the deed type text contains "deed" (like "CORR DEED")
+                  // Only return if the deed type text contains "deed" (like "CORR DEED")
                   // This filters out navigation links
                   if (deedType.length > 0 && deedType.toLowerCase().includes('deed')) {
                     const href = link.href;
-                    // Don't click - just return the href so we can navigate to it in the current tab
-                    return { success: true, deedType, href };
+                    // CLICK the link to trigger any JavaScript that sets up session
+                    link.click();
+                    return { success: true, deedType, href, clicked: true };
                   }
                 }
               }
@@ -467,22 +468,44 @@ class GuilfordCountyNorthCarolinaScraper extends DeedScraper {
         throw new Error('Could not find or click Deed Type entry');
       }
 
-      this.log(`✅ Found deed type: ${deedTypeInfo.deedType}`);
+      this.log(`✅ Found and clicked deed type: ${deedTypeInfo.deedType}`);
       this.log(`📄 Deed page URL: ${deedTypeInfo.href}`);
 
-      // Navigate to deed URL in SAME tab to preserve PHP session
-      this.log('🌐 Navigating to deed document (same tab for session)...');
-      this.log(`📄 Deed URL: ${deedTypeInfo.href}`);
+      // The link was already clicked in the evaluate function
+      // Now we need to handle the navigation or new tab that opens
 
-      // CRITICAL: Navigate in the SAME tab to keep PHP session intact
-      // Opening new tabs loses the PHP session variables (like tiffInfo)
-      // Even with cookie transfer, the server-side session data gets lost
-      await this.page.goto(deedTypeInfo.href, {
-        waitUntil: 'networkidle0',
-        timeout: 60000
-      });
+      // Check if link opens in same tab or new tab
+      this.log('⏳ Waiting for navigation after clicking deed link...');
 
-      // No tab switching needed - session is automatically preserved!
+      try {
+        // First try to wait for navigation in same tab
+        await this.page.waitForNavigation({
+          waitUntil: 'networkidle0',
+          timeout: 5000
+        });
+        this.log('✅ Navigated in same tab with session intact');
+      } catch (e) {
+        // If no navigation in same tab, check for new tab
+        this.log('🔍 Checking for new tab...');
+
+        // Get all pages/tabs
+        const pages = await this.browser.pages();
+
+        // Find the new tab (last one opened)
+        if (pages.length > 1) {
+          const newPage = pages[pages.length - 1];
+          this.log('✅ Found new tab, switching context...');
+
+          // Wait for the new page to load
+          await newPage.waitForSelector('body', { timeout: 10000 });
+
+          // Switch to the new tab
+          this.page = newPage;
+          this.log('✅ Switched to deed document tab');
+        } else {
+          this.log('⚠️ No new tab opened, page may have loaded via JavaScript');
+        }
+      }
 
       // Wait a moment for any dynamic content
       await new Promise(resolve => setTimeout(resolve, 3000));
