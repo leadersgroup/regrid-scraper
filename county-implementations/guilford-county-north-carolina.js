@@ -470,31 +470,19 @@ class GuilfordCountyNorthCarolinaScraper extends DeedScraper {
       this.log(`✅ Found deed type: ${deedTypeInfo.deedType}`);
       this.log(`📄 Deed page URL: ${deedTypeInfo.href}`);
 
-      // Handle new tab opening with proper session preservation
-      this.log('🌐 Opening deed document page with session...');
+      // Navigate to deed URL in SAME tab to preserve PHP session
+      this.log('🌐 Navigating to deed document (same tab for session)...');
+      this.log(`📄 Deed URL: ${deedTypeInfo.href}`);
 
-      // CRITICAL: Get cookies from current page to preserve PHP session
-      const cookies = await this.page.cookies();
-      this.log(`🍪 Captured ${cookies.length} cookies from current session`);
-
-      // Instead of clicking link (which loses session), open new tab manually with cookies
-      const deedPage = await this.browser.newPage();
-
-      // Set cookies BEFORE navigating to preserve session variables (like tiffInfo)
-      if (cookies.length > 0) {
-        this.log('🍪 Setting session cookies in new tab...');
-        await deedPage.setCookie(...cookies);
-      }
-
-      // Now navigate to the deed URL with session intact
-      this.log(`📄 Navigating to deed URL: ${deedTypeInfo.href}`);
-      await deedPage.goto(deedTypeInfo.href, {
+      // CRITICAL: Navigate in the SAME tab to keep PHP session intact
+      // Opening new tabs loses the PHP session variables (like tiffInfo)
+      // Even with cookie transfer, the server-side session data gets lost
+      await this.page.goto(deedTypeInfo.href, {
         waitUntil: 'networkidle0',
         timeout: 60000
       });
 
-      // Switch context to the new page
-      this.page = deedPage;
+      // No tab switching needed - session is automatically preserved!
 
       // Wait a moment for any dynamic content
       await new Promise(resolve => setTimeout(resolve, 3000));
