@@ -294,7 +294,9 @@ class GuilfordCountyNorthCarolinaScraper extends DeedScraper {
 
       // Click on first available entry under "parcel" column
       this.log('🔍 Looking for first parcel entry...');
-      const parcelClicked = await this.page.evaluate(() => {
+
+      // First, get the parcel link info
+      const parcelLinkInfo = await this.page.evaluate(() => {
         // Look for table with results
         const tables = Array.from(document.querySelectorAll('table'));
 
@@ -324,8 +326,8 @@ class GuilfordCountyNorthCarolinaScraper extends DeedScraper {
 
                 if (link) {
                   const parcelNumber = link.textContent.trim();
-                  link.click();
-                  return { success: true, parcelNumber };
+                  const href = link.href;
+                  return { success: true, parcelNumber, href };
                 }
               }
             }
@@ -336,29 +338,39 @@ class GuilfordCountyNorthCarolinaScraper extends DeedScraper {
         const allLinks = Array.from(document.querySelectorAll('a'));
         for (const link of allLinks) {
           const text = link.textContent.trim();
+          const href = link.href;
           // Parcel numbers often contain numbers and may have dashes
           if (/^\d+(-\d+)*$/.test(text) || /^\d{5,}$/.test(text)) {
-            link.click();
-            return { success: true, parcelNumber: text };
+            return { success: true, parcelNumber: text, href };
           }
         }
 
         return { success: false };
       });
 
-      if (!parcelClicked.success) {
-        throw new Error('Could not find or click parcel entry');
+      if (!parcelLinkInfo.success) {
+        throw new Error('Could not find parcel entry');
       }
 
-      this.log(`✅ Clicked parcel: ${parcelClicked.parcelNumber}`);
+      this.log(`✅ Found parcel: ${parcelLinkInfo.parcelNumber} -> ${parcelLinkInfo.href}`);
 
-      // Wait for navigation to parcel page
-      await new Promise(resolve => setTimeout(resolve, 5000));
+      // Click and wait for navigation
+      this.log('🖱️  Clicking parcel link...');
+      await Promise.all([
+        this.page.waitForNavigation({ waitUntil: 'networkidle2', timeout: 30000 }),
+        this.page.evaluate((href) => {
+          const link = Array.from(document.querySelectorAll('a')).find(a => a.href === href);
+          if (link) link.click();
+        }, parcelLinkInfo.href)
+      ]);
+
+      this.log(`✅ Navigated to parcel page: ${this.page.url()}`);
+      await new Promise(resolve => setTimeout(resolve, 3000));
 
       return {
         success: true,
         duration: Date.now() - startTime,
-        parcelNumber: parcelClicked.parcelNumber
+        parcelNumber: parcelLinkInfo.parcelNumber
       };
 
     } catch (error) {
