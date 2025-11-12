@@ -468,10 +468,16 @@ class GuilfordCountyNorthCarolinaScraper extends DeedScraper {
       }
 
       this.log(`✅ Found deed type: ${deedTypeInfo.deedType}`);
-      this.log(`📄 Deed image URL: ${deedTypeInfo.href}`);
+      this.log(`📄 Deed page URL: ${deedTypeInfo.href}`);
 
-      // Store the viewer URL - we'll download it directly instead of navigating
-      this.deedImageUrl = deedTypeInfo.href;
+      // Navigate to the deed document page
+      this.log('🌐 Navigating to deed document page...');
+      await this.page.goto(deedTypeInfo.href, { waitUntil: 'networkidle0', timeout: 30000 });
+
+      // Wait for page to load
+      await new Promise(resolve => setTimeout(resolve, 3000));
+
+      this.log('✅ On deed document page');
 
       // Check for captcha (check current page before download)
       this.log('🔍 Checking for captcha on deeds page...');
@@ -558,63 +564,10 @@ class GuilfordCountyNorthCarolinaScraper extends DeedScraper {
     const startTime = Date.now();
 
     try {
-      this.log('🔍 Looking for PDF...');
+      this.log('🔍 Looking for deed document on current page...');
 
-      // Strategy 0: Download PDF using fetch (maintains cookies/session)
-      if (this.deedImageUrl) {
-        this.log(`📥 Downloading PDF from deed URL...`);
-        this.log(`   URL: ${this.deedImageUrl}`);
-
-        try {
-          // Use fetch from within page context to maintain cookies and session
-          // This is the same approach as Wake County
-          const pdfBase64 = await this.page.evaluate(async (url) => {
-            const response = await fetch(url);
-            if (!response.ok) {
-              throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-            }
-
-            const blob = await response.blob();
-
-            return new Promise((resolve, reject) => {
-              const reader = new FileReader();
-              reader.onloadend = () => {
-                const base64 = reader.result.split(',')[1];
-                resolve(base64);
-              };
-              reader.onerror = reject;
-              reader.readAsDataURL(blob);
-            });
-          }, this.deedImageUrl);
-
-          // Verify it's actually a PDF
-          const pdfBuffer = Buffer.from(pdfBase64, 'base64');
-          const pdfSignature = pdfBuffer.toString('utf8', 0, 4);
-
-          if (pdfSignature !== '%PDF') {
-            this.log(`⚠️  Downloaded content doesn't appear to be a PDF (signature: ${pdfSignature})`);
-            this.log(`  First 100 chars: ${pdfBuffer.toString('utf8', 0, 100)}`);
-            this.log('   Trying other strategies...');
-          } else {
-            this.log(`✅ PDF downloaded: ${(pdfBuffer.length / 1024).toFixed(2)} KB`);
-
-            return {
-              success: true,
-              duration: Date.now() - startTime,
-              pdfBase64,
-              filename: `guilford_deed_${Date.now()}.pdf`,
-              fileSize: pdfBuffer.length,
-              downloadPath: ''
-            };
-          }
-        } catch (fetchError) {
-          this.log(`⚠️  Fetch download failed: ${fetchError.message}`);
-          this.log('   Trying other strategies...');
-        }
-      }
-
-      // Wait longer for PDF to load after CAPTCHA
-      await new Promise(resolve => setTimeout(resolve, 5000));
+      // Wait for page to fully load
+      await new Promise(resolve => setTimeout(resolve, 3000));
 
       // Check current URL
       const currentUrl = this.page.url();
@@ -729,41 +682,45 @@ class GuilfordCountyNorthCarolinaScraper extends DeedScraper {
         };
       }
 
-      // Strategy 5: Try to construct CustomAttachmentsResource URL from parcel PK
-      this.log('🔍 Attempting to construct CustomAttachmentsResource URL...');
-      const constructedUrl = await this.page.evaluate(() => {
-        // First, look for existing CustomAttachmentsResource links
+      // Strategy 5: Look for deed document links on the current deed page
+      this.log('🔍 Searching for deed document links...');
+      const documentUrl = await this.page.evaluate(() => {
         const allLinks = Array.from(document.querySelectorAll('a'));
+
+        // Priority 1: Look for ShowDocument, ViewDocument, GetDocument links
         for (const link of allLinks) {
-          if (link.href.includes('CustomAttachmentsResource')) {
-            return link.href;
+          const href = link.href || '';
+          const text = link.textContent.toLowerCase();
+
+          if (href.includes('ShowDocument') ||
+              href.includes('ViewDocument') ||
+              href.includes('GetDocument') ||
+              href.includes('gis_viewimage') ||
+              (href.includes('.pdf') && !href.includes('viewer'))) {
+            return { url: href, type: 'document_link', text: link.textContent.trim() };
           }
         }
 
-        // If not found, try to construct it from the parcel PK in the URL
-        const currentUrl = window.location.href;
-        const parcelMatch = currentUrl.match(/PARCELPK=(\d+)/);
-        if (parcelMatch) {
-          const parcelPk = parcelMatch[1];
-          const baseUrl = window.location.origin;
-          return `${baseUrl}/Guilford/CustomAttachmentsResource.ashx?parcelPk=${parcelPk}`;
-        }
-
-        // Also look for other document URLs
+        // Priority 2: Look for download/view buttons or links
         for (const link of allLinks) {
-          if (link.href.includes('ShowDocument') ||
-              link.href.includes('ViewDocument') ||
-              link.href.includes('GetDocument') ||
-              link.href.includes('.pdf')) {
-            return link.href;
+          const href = link.href || '';
+          const text = link.textContent.toLowerCase();
+
+          if ((text.includes('view') || text.includes('download') || text.includes('open')) &&
+              (text.includes('deed') || text.includes('document') || text.includes('image'))) {
+            return { url: href, type: 'action_link', text: link.textContent.trim() };
           }
         }
+
         return null;
       });
 
-      if (constructedUrl) {
-        this.log(`✅ Found document URL: ${constructedUrl}`);
-        const pdfBase64 = await this.downloadPdfFromUrl(constructedUrl);
+      if (documentUrl) {
+        this.log(`✅ Found deed document link: ${documentUrl.text}`);
+        this.log(`   Type: ${documentUrl.type}`);
+        this.log(`   URL: ${documentUrl.url}`);
+
+        const pdfBase64 = await this.downloadPdfFromUrl(documentUrl.url);
 
         return {
           success: true,
