@@ -614,8 +614,25 @@ class GuilfordCountyNorthCarolinaScraper extends DeedScraper {
       };
       this.page.on('response', responseHandler);  // Attach to main page before any frame switching
 
-      // Wait for page to fully load
-      await new Promise(resolve => setTimeout(resolve, 3000));
+      // Wait for page to fully load (deed images may take time)
+      this.log('⏳ Waiting for deed content to load...');
+
+      // If we're on the deed viewer page, try to wait for specific elements
+      if (this.page.url().includes('gis_viewimage.php')) {
+        try {
+          // Try to wait for an image, canvas, or embed to appear
+          await this.page.waitForSelector('img[src*=".tif"], img[src*=".jpg"], img[src*=".png"], canvas, embed, object', {
+            timeout: 10000
+          });
+          this.log('✅ Deed viewer element detected');
+        } catch (e) {
+          // Element might not exist or might load differently
+          this.log('⏳ Standard wait for content...');
+          await new Promise(resolve => setTimeout(resolve, 8000));
+        }
+      } else {
+        await new Promise(resolve => setTimeout(resolve, 8000));  // Standard wait for frames
+      }
 
       // Keep reference to main page for navigation
       const mainPage = this.page;
@@ -651,87 +668,92 @@ class GuilfordCountyNorthCarolinaScraper extends DeedScraper {
       const currentUrl = currentContext.url();
       this.log(`Current URL: ${currentUrl}`);
 
-      // Check if the current context (page or frame) is blank or has errors
+      // Check if the current context (page or frame) has deed content
       const pageStatus = await currentContext.evaluate(() => {
         const bodyHtml = document.body.innerHTML || '';
         const bodyText = document.body.innerText || '';
-        const bodyStyle = window.getComputedStyle(document.body);
-        const bgColor = bodyStyle.backgroundColor;
-        
-        // Check for known blank page indicators
-        const isBlankViewer = bgColor && bgColor.includes('40, 40, 40');
-        const isEmpty = bodyHtml.trim().length < 100 && bodyText.trim().length < 50;
-        const hasError = bodyText.includes('Notice</b>') || 
+
+        // Check for PHP/server errors
+        const hasError = bodyText.includes('Notice</b>') ||
                         bodyText.includes('Error</b>') ||
                         bodyText.includes('Undefined variable');
-        
+
         // Look for images
         const images = Array.from(document.querySelectorAll('img'));
-        const hasLargeImage = images.some(img => 
-          (img.width > 400 || img.naturalWidth > 400) && 
-          img.src && 
+        const hasLargeImage = images.some(img =>
+          (img.width > 400 || img.naturalWidth > 400) &&
+          img.src &&
           !img.src.includes('data:')
         );
-        
+
+        // Check for canvas elements (some viewers render to canvas)
+        const canvases = Array.from(document.querySelectorAll('canvas'));
+        const hasCanvas = canvases.some(canvas =>
+          canvas.width > 400 || canvas.height > 400
+        );
+
+        // Check for embed/object elements (for PDFs or TIFF viewers)
+        const embeds = Array.from(document.querySelectorAll('embed, object'));
+        const hasEmbed = embeds.some(embed => {
+          const src = embed.src || embed.data || '';
+          return src.includes('.pdf') || src.includes('.tif') ||
+                 src.includes('viewimage') || embed.type?.includes('pdf');
+        });
+
+        // Check if content is still loading
+        const isLoading = bodyText.toLowerCase().includes('loading') ||
+                         bodyHtml.includes('spinner') ||
+                         bodyHtml.includes('loader');
+
         return {
-          isBlank: isBlankViewer || isEmpty,
           hasError,
           hasLargeImage,
+          hasCanvas,
+          hasEmbed,
+          isLoading,
           imageCount: images.length,
+          canvasCount: canvases.length,
+          embedCount: embeds.length,
           textLength: bodyText.length,
           url: window.location.href
         };
       });
 
-      this.log(`Page status: Images: ${pageStatus.imageCount}, Text length: ${pageStatus.textLength}, Blank: ${pageStatus.isBlank}`);
+      this.log(`Page status: Images: ${pageStatus.imageCount}, Canvas: ${pageStatus.canvasCount}, Embeds: ${pageStatus.embedCount}, Loading: ${pageStatus.isLoading}`);
 
-      // If current page is the deed viewer but it's blank
-      if (currentUrl.includes('gis_viewimage.php') && pageStatus.isBlank) {
-        this.log('⚠️  Deed viewer page is blank - server issue detected');
-        
-        // Try to go back and find an alternative deed link
-        this.log('🔄 Going back to find alternative deed source...');
-        await mainPage.goBack();
-        await new Promise(resolve => setTimeout(resolve, 3000));
+      // If content is still loading, wait more
+      if (pageStatus.isLoading) {
+        this.log('⏳ Content still loading, waiting longer...');
+        await new Promise(resolve => setTimeout(resolve, 5000));
 
-        // Look for any available deed information on the previous page
-        const alternativeDeed = await mainPage.evaluate(() => {
-          // Look for deed information in text
-          const pageText = document.body.innerText || '';
-          const deedMatch = pageText.match(/Book[: ]+(\w+\d+)[, ]+Page[: ]+(\d+)/i);
-          
-          // Look for any deed-related links
-          const links = Array.from(document.querySelectorAll('a'));
-          const deedLinks = links.filter(link => {
-            const text = link.textContent.toLowerCase();
-            const href = link.href || '';
-            return text.includes('deed') || 
-                   text.includes('document') ||
-                   href.includes('deed') ||
-                   href.includes('document');
-          });
-          
+        // Re-check status after additional wait
+        pageStatus = await currentContext.evaluate(() => {
+          const images = Array.from(document.querySelectorAll('img'));
+          const hasLargeImage = images.some(img =>
+            (img.width > 400 || img.naturalWidth > 400) &&
+            img.src && !img.src.includes('data:')
+          );
+          const canvases = Array.from(document.querySelectorAll('canvas'));
+          const hasCanvas = canvases.some(canvas => canvas.width > 400);
+          const embeds = Array.from(document.querySelectorAll('embed, object'));
+          const hasEmbed = embeds.length > 0;
+
           return {
-            hasDeedInfo: deedMatch !== null,
-            deedInfo: deedMatch ? `Book: ${deedMatch[1]}, Page: ${deedMatch[2]}` : null,
-            deedLinkCount: deedLinks.length
+            hasLargeImage,
+            hasCanvas,
+            hasEmbed,
+            imageCount: images.length,
+            canvasCount: canvases.length,
+            embedCount: embeds.length
           };
         });
-        
-        if (alternativeDeed.hasDeedInfo) {
-          this.log(`📄 Found deed information: ${alternativeDeed.deedInfo}`);
-          throw new Error(
-            `Unable to download deed image due to Guilford County server issues. ` +
-            `Deed information: ${alternativeDeed.deedInfo}. ` +
-            `Please try again later or contact the county office for this document.`
-          );
-        } else {
-          throw new Error(
-            'The Guilford County deed viewer is not functioning properly. ' +
-            'The server is returning a blank page instead of the deed image. ' +
-            'This is a known issue with their system. Please try again later or contact the county office.'
-          );
-        }
+        this.log(`Updated status: Images: ${pageStatus.imageCount}, Canvas: ${pageStatus.canvasCount}, Embeds: ${pageStatus.embedCount}`);
+      }
+
+      // Check for actual PHP/server errors (not just missing content)
+      if (pageStatus.hasError) {
+        this.log('⚠️  Server returned an error');
+        throw new Error('Guilford County server returned an error. Please try again later.');
       }
 
       // Strategy 1: If we have a large image on the current page
@@ -774,7 +796,71 @@ class GuilfordCountyNorthCarolinaScraper extends DeedScraper {
         }
       }
 
-      // Strategy 2: Try direct download from URL
+      // Strategy 2: If we have a canvas element (some viewers render to canvas)
+      if (pageStatus.hasCanvas) {
+        this.log('📊 Found canvas element - attempting screenshot...');
+        try {
+          // Take a screenshot of the viewer area
+          const screenshotBuffer = await currentContext.screenshot({
+            type: 'png',
+            fullPage: false
+          });
+
+          // Convert screenshot to PDF
+          const pdfBase64 = await this.screenshotToPdf(screenshotBuffer);
+
+          if (pdfBase64) {
+            return {
+              success: true,
+              duration: Date.now() - startTime,
+              pdfBase64,
+              filename: `guilford_deed_${Date.now()}.pdf`,
+              fileSize: Buffer.from(pdfBase64, 'base64').length,
+              downloadPath: ''
+            };
+          }
+        } catch (canvasErr) {
+          this.log(`⚠️  Canvas capture failed: ${canvasErr.message}`);
+        }
+      }
+
+      // Strategy 3: If we have embed/object elements
+      if (pageStatus.hasEmbed) {
+        this.log('📋 Found embed/object element...');
+        const embedUrl = await currentContext.evaluate(() => {
+          const embeds = Array.from(document.querySelectorAll('embed, object'));
+          for (const embed of embeds) {
+            const src = embed.src || embed.data;
+            if (src && (src.includes('.pdf') || src.includes('.tif') || src.includes('viewimage'))) {
+              return src;
+            }
+          }
+          return null;
+        });
+
+        if (embedUrl) {
+          try {
+            this.log(`  Downloading from embed: ${embedUrl}`);
+            const pdfBase64 = await this.downloadPdfFromUrl(embedUrl);
+            const pdfBuffer = Buffer.from(pdfBase64, 'base64');
+
+            if (pdfBuffer.length > 1000) {
+              return {
+                success: true,
+                duration: Date.now() - startTime,
+                pdfBase64,
+                filename: `guilford_deed_${Date.now()}.pdf`,
+                fileSize: pdfBuffer.length,
+                downloadPath: ''
+              };
+            }
+          } catch (embedErr) {
+            this.log(`⚠️  Embed download failed: ${embedErr.message}`);
+          }
+        }
+      }
+
+      // Strategy 4: Try direct download from URL
       if (currentUrl.includes('gis_viewimage.php') || currentUrl.includes('.pdf')) {
         this.log('📥 Attempting direct download...');
         
@@ -805,7 +891,7 @@ class GuilfordCountyNorthCarolinaScraper extends DeedScraper {
         }
       }
 
-      // Strategy 3: Look for deed links on the current page
+      // Strategy 5: Look for deed links on the current page
       this.log('🔍 Looking for deed links...');
       const deedLinks = await currentContext.evaluate(() => {
         const links = Array.from(document.querySelectorAll('a'));
@@ -843,7 +929,7 @@ class GuilfordCountyNorthCarolinaScraper extends DeedScraper {
         }
       }
 
-      // Strategy 4: Try captured image URLs from network monitoring
+      // Strategy 6: Try captured image URLs from network monitoring
       if (capturedImageUrls.length > 0) {
         this.log(`🌐 Trying ${capturedImageUrls.length} captured resource URLs...`);
 
@@ -882,10 +968,9 @@ class GuilfordCountyNorthCarolinaScraper extends DeedScraper {
 
       // If all strategies fail, provide a meaningful error
       throw new Error(
-        'Unable to download deed document. The Guilford County deed viewing system ' +
-        'appears to be experiencing technical difficulties. The server is not providing ' +
-        'deed images properly. Please try again later or contact Guilford County directly ' +
-        'for deed documents.'
+        'Unable to capture deed document. Tried multiple strategies including image capture, ' +
+        'canvas screenshot, embed detection, and network monitoring. The deed may be displayed ' +
+        'in an unsupported format or require additional interaction to load.'
       );
 
     } catch (error) {
