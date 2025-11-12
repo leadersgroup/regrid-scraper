@@ -380,6 +380,10 @@ class LeeCountyFloridaScraper extends DeedScraper {
       const fullAddress = this.currentAddress || '';
       let streetAddress = fullAddress.split(',')[0].trim();
 
+      // Handle unit numbers: convert "#156" to "156" (remove # symbol)
+      // Example: "16381 Kelly Woods Dr #156" becomes "16381 Kelly Woods Dr 156"
+      streetAddress = streetAddress.replace(/#\s*/g, '');
+
       this.log(`🏠 Processing address:`);
       this.log(`   Full address: ${fullAddress}`);
       this.log(`   Street only: ${streetAddress}`);
