@@ -624,18 +624,27 @@ class GuilfordCountyNorthCarolinaScraper extends DeedScraper {
       // Wait for page to fully load (deed images may take time)
       this.log('⏳ Waiting for deed content to load...');
 
-      // If we're on the deed viewer page, try to wait for specific elements
+      // If we're on the deed viewer page, wait for dynamic content
       if (this.page.url().includes('gis_viewimage.php')) {
-        try {
-          // Try to wait for an image, canvas, or embed to appear
-          await this.page.waitForSelector('img[src*=".tif"], img[src*=".jpg"], img[src*=".png"], canvas, embed, object', {
-            timeout: 10000
-          });
-          this.log('✅ Deed viewer element detected');
-        } catch (e) {
-          // Element might not exist or might load differently
-          this.log('⏳ Standard wait for content...');
-          await new Promise(resolve => setTimeout(resolve, 8000));
+        this.log('📄 On deed viewer page - waiting for dynamic content...');
+        
+        // Wait longer for JavaScript to render the deed
+        await new Promise(resolve => setTimeout(resolve, 15000));
+        
+        // Check if deed content has been rendered
+        const hasRenderedContent = await this.page.evaluate(() => {
+          const bodyText = document.body.innerText || '';
+          // Look for typical deed content
+          return bodyText.includes('GUILFORD COUNTY') ||
+                 bodyText.includes('REGISTER OF DEEDS') ||
+                 bodyText.includes('Book') ||
+                 bodyText.includes('Page') ||
+                 bodyText.includes('DEED') ||
+                 bodyText.includes('CONSIDERATION');
+        });
+        
+        if (hasRenderedContent) {
+          this.log('✅ Deed content detected after waiting');
         }
       } else {
         await new Promise(resolve => setTimeout(resolve, 8000));  // Standard wait for frames
@@ -685,6 +694,14 @@ class GuilfordCountyNorthCarolinaScraper extends DeedScraper {
                         bodyText.includes('Error</b>') ||
                         bodyText.includes('Undefined variable');
 
+        // Check for deed text content (Guilford renders as text overlays)
+        const hasDeedText = bodyText.includes('GUILFORD COUNTY') ||
+                           bodyText.includes('REGISTER OF DEEDS') ||
+                           bodyText.includes('Book') ||
+                           bodyText.includes('Page') ||
+                           bodyText.includes('DEED') ||
+                           bodyText.includes('CONSIDERATION');
+
         // Look for images
         const images = Array.from(document.querySelectorAll('img'));
         const hasLargeImage = images.some(img =>
@@ -707,6 +724,13 @@ class GuilfordCountyNorthCarolinaScraper extends DeedScraper {
                  src.includes('viewimage') || embed.type?.includes('pdf');
         });
 
+        // Check for divs with background images (some viewers use CSS backgrounds)
+        const divsWithBg = Array.from(document.querySelectorAll('div')).filter(div => {
+          const bgImage = window.getComputedStyle(div).backgroundImage;
+          return bgImage && bgImage !== 'none' && bgImage.includes('url');
+        });
+        const hasBackgroundImage = divsWithBg.length > 0;
+
         // Check if content is still loading
         const isLoading = bodyText.toLowerCase().includes('loading') ||
                          bodyHtml.includes('spinner') ||
@@ -714,19 +738,22 @@ class GuilfordCountyNorthCarolinaScraper extends DeedScraper {
 
         return {
           hasError,
+          hasDeedText,
           hasLargeImage,
           hasCanvas,
           hasEmbed,
+          hasBackgroundImage,
           isLoading,
           imageCount: images.length,
           canvasCount: canvases.length,
           embedCount: embeds.length,
+          divsWithBgCount: divsWithBg.length,
           textLength: bodyText.length,
           url: window.location.href
         };
       });
 
-      this.log(`Page status: Images: ${pageStatus.imageCount}, Canvas: ${pageStatus.canvasCount}, Embeds: ${pageStatus.embedCount}, Loading: ${pageStatus.isLoading}`);
+      this.log(`Page status: DeedText: ${pageStatus.hasDeedText}, Images: ${pageStatus.imageCount}, Canvas: ${pageStatus.canvasCount}, Embeds: ${pageStatus.embedCount}, BgImages: ${pageStatus.divsWithBgCount}, Loading: ${pageStatus.isLoading}`);
 
       // If content is still loading, wait more
       if (pageStatus.isLoading) {
@@ -734,7 +761,12 @@ class GuilfordCountyNorthCarolinaScraper extends DeedScraper {
         await new Promise(resolve => setTimeout(resolve, 5000));
 
         // Re-check status after additional wait
-        pageStatus = await currentContext.evaluate(() => {
+        const newStatus = await currentContext.evaluate(() => {
+          const bodyText = document.body.innerText || '';
+          const hasDeedText = bodyText.includes('GUILFORD COUNTY') ||
+                             bodyText.includes('REGISTER OF DEEDS') ||
+                             bodyText.includes('Book') ||
+                             bodyText.includes('Page');
           const images = Array.from(document.querySelectorAll('img'));
           const hasLargeImage = images.some(img =>
             (img.width > 400 || img.naturalWidth > 400) &&
@@ -746,6 +778,7 @@ class GuilfordCountyNorthCarolinaScraper extends DeedScraper {
           const hasEmbed = embeds.length > 0;
 
           return {
+            hasDeedText,
             hasLargeImage,
             hasCanvas,
             hasEmbed,
@@ -754,7 +787,9 @@ class GuilfordCountyNorthCarolinaScraper extends DeedScraper {
             embedCount: embeds.length
           };
         });
-        this.log(`Updated status: Images: ${pageStatus.imageCount}, Canvas: ${pageStatus.canvasCount}, Embeds: ${pageStatus.embedCount}`);
+        
+        Object.assign(pageStatus, newStatus);
+        this.log(`Updated status: DeedText: ${pageStatus.hasDeedText}, Images: ${pageStatus.imageCount}, Canvas: ${pageStatus.canvasCount}, Embeds: ${pageStatus.embedCount}`);
       }
 
       // Check for actual PHP/server errors (not just missing content)
@@ -763,7 +798,40 @@ class GuilfordCountyNorthCarolinaScraper extends DeedScraper {
         throw new Error('Guilford County server returned an error. Please try again later.');
       }
 
-      // Strategy 1: If we have a large image on the current page
+      // Strategy 1: If deed text is rendered (take screenshot of the whole viewer)
+      if (pageStatus.hasDeedText || pageStatus.hasBackgroundImage) {
+        this.log('📸 Deed content detected - taking full page screenshot...');
+        try {
+          // Take a full page screenshot
+          const screenshotBuffer = await currentContext.screenshot({
+            type: 'png',
+            fullPage: true
+          });
+
+          // Convert screenshot to PDF
+          const pdfBase64 = await this.convertImageToPdf(screenshotBuffer);
+
+          if (pdfBase64) {
+            this.log('✅ Successfully captured deed as screenshot');
+            
+            // Clean up event listener
+            mainPage.off('response', responseHandler);
+            
+            return {
+              success: true,
+              duration: Date.now() - startTime,
+              pdfBase64,
+              filename: `guilford_deed_${Date.now()}.pdf`,
+              fileSize: Buffer.from(pdfBase64, 'base64').length,
+              downloadPath: ''
+            };
+          }
+        } catch (screenshotErr) {
+          this.log(`⚠️  Screenshot capture failed: ${screenshotErr.message}`);
+        }
+      }
+
+      // Strategy 2: If we have a large image on the current page
       if (pageStatus.hasLargeImage) {
         this.log('✅ Found image on current page');
 
@@ -789,6 +857,9 @@ class GuilfordCountyNorthCarolinaScraper extends DeedScraper {
               throw new Error('Downloaded content appears to be blank');
             }
             
+            // Clean up event listener
+            mainPage.off('response', responseHandler);
+            
             return {
               success: true,
               duration: Date.now() - startTime,
@@ -803,7 +874,7 @@ class GuilfordCountyNorthCarolinaScraper extends DeedScraper {
         }
       }
 
-      // Strategy 2: If we have a canvas element (some viewers render to canvas)
+      // Strategy 3: If we have a canvas element (some viewers render to canvas)
       if (pageStatus.hasCanvas) {
         this.log('📊 Found canvas element - attempting screenshot...');
         try {
@@ -814,9 +885,12 @@ class GuilfordCountyNorthCarolinaScraper extends DeedScraper {
           });
 
           // Convert screenshot to PDF
-          const pdfBase64 = await this.screenshotToPdf(screenshotBuffer);
+          const pdfBase64 = await this.convertImageToPdf(screenshotBuffer);
 
           if (pdfBase64) {
+            // Clean up event listener
+            mainPage.off('response', responseHandler);
+            
             return {
               success: true,
               duration: Date.now() - startTime,
@@ -831,7 +905,7 @@ class GuilfordCountyNorthCarolinaScraper extends DeedScraper {
         }
       }
 
-      // Strategy 3: If we have embed/object elements
+      // Strategy 4: If we have embed/object elements
       if (pageStatus.hasEmbed) {
         this.log('📋 Found embed/object element...');
         const embedUrl = await currentContext.evaluate(() => {
@@ -852,6 +926,9 @@ class GuilfordCountyNorthCarolinaScraper extends DeedScraper {
             const pdfBuffer = Buffer.from(pdfBase64, 'base64');
 
             if (pdfBuffer.length > 1000) {
+              // Clean up event listener
+              mainPage.off('response', responseHandler);
+              
               return {
                 success: true,
                 duration: Date.now() - startTime,
@@ -867,72 +944,35 @@ class GuilfordCountyNorthCarolinaScraper extends DeedScraper {
         }
       }
 
-      // Strategy 4: Try direct download from URL
+      // Strategy 5: Try direct download from URL (if all else fails)
       if (currentUrl.includes('gis_viewimage.php') || currentUrl.includes('.pdf')) {
         this.log('📥 Attempting direct download...');
         
         try {
-          const pdfBase64 = await this.downloadPdfFromUrl(currentUrl);
-          
-          // Verify the content
-          const pdfBuffer = Buffer.from(pdfBase64, 'base64');
-          const firstChars = pdfBuffer.toString('utf8', 0, Math.min(100, pdfBuffer.length));
-          
-          // Check if it's actually an error or blank
-          if (firstChars.includes('<html') || 
-              firstChars.includes('Notice</b>') ||
-              pdfBuffer.length < 1000) {
-            throw new Error('Downloaded content is not a valid deed document');
+          // Take a screenshot as last resort
+          const screenshotBuffer = await currentContext.screenshot({
+            type: 'png',
+            fullPage: true
+          });
+
+          // Convert screenshot to PDF
+          const pdfBase64 = await this.convertImageToPdf(screenshotBuffer);
+
+          if (pdfBase64) {
+            // Clean up event listener
+            mainPage.off('response', responseHandler);
+            
+            return {
+              success: true,
+              duration: Date.now() - startTime,
+              pdfBase64,
+              filename: `guilford_deed_${Date.now()}.pdf`,
+              fileSize: Buffer.from(pdfBase64, 'base64').length,
+              downloadPath: ''
+            };
           }
-          
-          return {
-            success: true,
-            duration: Date.now() - startTime,
-            pdfBase64,
-            filename: `guilford_deed_${Date.now()}.pdf`,
-            fileSize: pdfBuffer.length,
-            downloadPath: ''
-          };
         } catch (dlErr) {
           this.log(`⚠️  Direct download failed: ${dlErr.message}`);
-        }
-      }
-
-      // Strategy 5: Look for deed links on the current page
-      this.log('🔍 Looking for deed links...');
-      const deedLinks = await currentContext.evaluate(() => {
-        const links = Array.from(document.querySelectorAll('a'));
-        return links
-          .filter(link => {
-            const href = link.href || '';
-            const text = link.textContent || '';
-            return href.includes('gis_viewimage') || 
-                   href.includes('deed') ||
-                   text.toLowerCase().includes('deed');
-          })
-          .map(link => ({
-            text: link.textContent.trim(),
-            href: link.href
-          }));
-      });
-
-      if (deedLinks.length > 0) {
-        this.log(`Found ${deedLinks.length} deed links`);
-        
-        for (const link of deedLinks) {
-          try {
-            this.log(`Trying: ${link.text}`);
-            await mainPage.goto(link.href, {
-              waitUntil: 'networkidle2',
-              timeout: 30000
-            });
-            await new Promise(resolve => setTimeout(resolve, 5000));
-            
-            // Recursively try to download from the new page
-            return await this.downloadDeedPdf();
-          } catch (linkErr) {
-            this.log(`  Failed: ${linkErr.message}`);
-          }
         }
       }
 
@@ -975,9 +1015,8 @@ class GuilfordCountyNorthCarolinaScraper extends DeedScraper {
 
       // If all strategies fail, provide a meaningful error
       throw new Error(
-        'Unable to capture deed document. Tried multiple strategies including image capture, ' +
-        'canvas screenshot, embed detection, and network monitoring. The deed may be displayed ' +
-        'in an unsupported format or require additional interaction to load.'
+        'Unable to capture deed document. The deed viewer may require additional time to render. ' +
+        'Please ensure the deed is fully displayed before attempting download.'
       );
 
     } catch (error) {
