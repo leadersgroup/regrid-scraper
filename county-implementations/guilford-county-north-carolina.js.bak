@@ -284,35 +284,64 @@ class GuilfordCountyNorthCarolinaScraper extends DeedScraper {
 
       await new Promise(resolve => setTimeout(resolve, 1000));
 
-      // Press Enter to submit the search and wait for navigation
+      // Press Enter to submit the search
       this.log('⏎ Pressing Enter to search...');
-      await Promise.all([
-        this.page.waitForNavigation({ waitUntil: 'networkidle2', timeout: 30000 }),
-        this.page.keyboard.press('Enter')
-      ]);
+      await this.page.keyboard.press('Enter');
 
-      // Wait a bit more for page to fully render
-      this.log('⏳ Waiting for results to render...');
-      await new Promise(resolve => setTimeout(resolve, 2000));
+      // Wait for results page to appear
+      this.log('⏳ Waiting for results...');
+      await new Promise(resolve => setTimeout(resolve, 5000));
 
       // Click on first available entry under "parcel" column
       this.log('🔍 Looking for first parcel entry...');
 
-      // Log current URL to debug
-      const currentUrl = this.page.url();
-      this.log(`Current URL: ${currentUrl}`);
-
-      // First, get the parcel link info - look for numeric link like "60312"
+      // First, get the parcel link info
       const parcelLinkInfo = await this.page.evaluate(() => {
-        const allLinks = Array.from(document.querySelectorAll('a'));
+        // Look for table with results
+        const tables = Array.from(document.querySelectorAll('table'));
 
-        // Look for any link that is purely numeric (like "60312")
+        for (const table of tables) {
+          const rows = Array.from(table.querySelectorAll('tr'));
+
+          // Find header row to identify parcel column
+          let parcelColumnIndex = -1;
+          for (const row of rows) {
+            const headers = Array.from(row.querySelectorAll('th'));
+            for (let i = 0; i < headers.length; i++) {
+              if (headers[i].textContent.toLowerCase().includes('parcel')) {
+                parcelColumnIndex = i;
+                break;
+              }
+            }
+            if (parcelColumnIndex !== -1) break;
+          }
+
+          // Find first data row with a clickable parcel
+          if (parcelColumnIndex !== -1) {
+            for (const row of rows) {
+              const cells = Array.from(row.querySelectorAll('td'));
+              if (cells.length > parcelColumnIndex) {
+                const parcelCell = cells[parcelColumnIndex];
+                const link = parcelCell.querySelector('a');
+
+                if (link) {
+                  const parcelNumber = link.textContent.trim();
+                  const href = link.href;
+                  return { success: true, parcelNumber, href };
+                }
+              }
+            }
+          }
+        }
+
+        // Alternative: look for any link that looks like a parcel number (simplified)
+        const allLinks = Array.from(document.querySelectorAll('a'));
         for (const link of allLinks) {
           const text = link.textContent.trim();
           const href = link.href;
-
-          // Look for any link that is purely numeric
-          if (/^\d+$/.test(text) && text.length >= 3) {
+          // Look for any link that is purely numeric (like "60312")
+          if (/^\d+$/.test(text) && text.length >= 3 && link.offsetParent !== null) {
+            console.log(`Found parcel link: ${text} -> ${href}`);
             return { success: true, parcelNumber: text, href };
           }
         }
@@ -416,42 +445,31 @@ class GuilfordCountyNorthCarolinaScraper extends DeedScraper {
 
           // Find header row to identify Deed Type column
           let deedTypeColumnIndex = -1;
-          let headerRowIndex = -1;
-
-          for (let i = 0; i < rows.length; i++) {
-            const headers = Array.from(rows[i].querySelectorAll('th'));
-            for (let j = 0; j < headers.length; j++) {
-              const headerText = headers[j].textContent.toLowerCase().trim();
-              // Look for exact "deed type" header
-              if (headerText === 'deed type') {
-                deedTypeColumnIndex = j;
-                headerRowIndex = i;
+          for (const row of rows) {
+            const headers = Array.from(row.querySelectorAll('th'));
+            for (let i = 0; i < headers.length; i++) {
+              const headerText = headers[i].textContent.toLowerCase();
+              if (headerText.includes('deed') && headerText.includes('type')) {
+                deedTypeColumnIndex = i;
                 break;
               }
             }
             if (deedTypeColumnIndex !== -1) break;
           }
 
-          // Find first data row AFTER header row with a clickable deed type
-          if (deedTypeColumnIndex !== -1 && headerRowIndex !== -1) {
-            // Start from row after header
-            for (let i = headerRowIndex + 1; i < rows.length; i++) {
-              const row = rows[i];
+          // Find first data row with a clickable deed type
+          if (deedTypeColumnIndex !== -1) {
+            for (const row of rows) {
               const cells = Array.from(row.querySelectorAll('td'));
-
               if (cells.length > deedTypeColumnIndex) {
                 const deedTypeCell = cells[deedTypeColumnIndex];
                 const link = deedTypeCell.querySelector('a');
 
-                if (link) {
+                if (link && link.offsetParent !== null) {
                   const deedType = link.textContent.trim();
-                  // Only return href if the deed type text contains "deed" (like "CORR DEED")
-                  // This filters out navigation links
-                  if (deedType.length > 0 && deedType.toLowerCase().includes('deed')) {
-                    const href = link.href;
-                    // Don't click - just return the href so we can navigate to it in the current tab
-                    return { success: true, deedType, href };
-                  }
+                  const href = link.href;
+                  link.click();
+                  return { success: true, deedType, href };
                 }
               }
             }
@@ -465,17 +483,10 @@ class GuilfordCountyNorthCarolinaScraper extends DeedScraper {
         throw new Error('Could not find or click Deed Type entry');
       }
 
-      this.log(`✅ Found deed type: ${deedTypeInfo.deedType}`);
-      this.log(`📄 Navigating to deed PDF: ${deedTypeInfo.href}`);
+      this.log(`✅ Clicked deed type: ${deedTypeInfo.deedType}`);
 
-      // Navigate to the deed PDF URL (don't click the link since it has target="_blank")
-      await this.page.goto(deedTypeInfo.href, {
-        waitUntil: 'networkidle2',
-        timeout: 60000
-      });
-
-      // Wait for PDF page to load
-      await new Promise(resolve => setTimeout(resolve, 5000));
+      // Wait for page to load
+      await new Promise(resolve => setTimeout(resolve, 3000));
 
       // Check for captcha
       this.log('🔍 Checking for captcha...');
