@@ -558,41 +558,69 @@ class GuilfordCountyNorthCarolinaScraper extends DeedScraper {
     try {
       this.log('🔍 Looking for PDF...');
 
-      // Strategy 0: Try downloading deed image URL directly if we have it
+      // Strategy 0: Download PDF using CDP (Chrome DevTools Protocol)
       if (this.deedImageUrl) {
-        this.log(`🔍 Navigating to deed image URL...`);
+        this.log(`📥 Downloading PDF from deed URL...`);
         this.log(`   URL: ${this.deedImageUrl}`);
         try {
-          // Navigate to the PHP page
-          await this.page.goto(this.deedImageUrl, {
+          // Use CDP to fetch the PDF directly
+          const client = await this.page.target().createCDPSession();
+          const { data } = await client.send('Network.loadNetworkResource', {
+            url: this.deedImageUrl,
+            frameId: this.page.mainFrame()._id,
+          });
+
+          if (data.success && data.stream) {
+            // Read the stream
+            const { data: resourceData } = await client.send('IO.read', {
+              handle: data.stream
+            });
+
+            // Close the stream
+            await client.send('IO.close', { handle: data.stream });
+
+            // Convert to buffer
+            const pdfBuffer = Buffer.from(resourceData, 'base64');
+            const pdfBase64 = pdfBuffer.toString('base64');
+
+            this.log(`✅ Downloaded PDF via CDP: ${(pdfBuffer.length / 1024).toFixed(2)} KB`);
+
+            return {
+              success: true,
+              duration: Date.now() - startTime,
+              pdfBase64,
+              filename: `guilford_deed_${Date.now()}.pdf`,
+              fileSize: pdfBuffer.length,
+              downloadPath: ''
+            };
+          }
+        } catch (cdpError) {
+          this.log(`⚠️  CDP download failed: ${cdpError.message}`);
+          this.log('   Trying navigation approach...');
+        }
+
+        // Fallback: Try navigating and getting response buffer
+        try {
+          const response = await this.page.goto(this.deedImageUrl, {
             waitUntil: 'networkidle0',
             timeout: 30000
           });
 
-          // Wait longer for JavaScript to render the image
-          await new Promise(resolve => setTimeout(resolve, 8000));
+          const pdfBuffer = await response.buffer();
+          const pdfBase64 = pdfBuffer.toString('base64');
 
-          // Take a screenshot of the rendered page (the deed image)
-          this.log('📸 Taking screenshot of deed...');
-          const screenshotBuffer = await this.page.screenshot({
-            fullPage: true,
-            type: 'png'
-          });
-
-          // Convert screenshot to base64
-          const pdfBase64 = screenshotBuffer.toString('base64');
-          this.log(`✅ Captured deed screenshot: ${(screenshotBuffer.length / 1024).toFixed(2)} KB`);
+          this.log(`✅ Downloaded PDF via navigation: ${(pdfBuffer.length / 1024).toFixed(2)} KB`);
 
           return {
             success: true,
             duration: Date.now() - startTime,
             pdfBase64,
             filename: `guilford_deed_${Date.now()}.pdf`,
-            fileSize: screenshotBuffer.length,
+            fileSize: pdfBuffer.length,
             downloadPath: ''
           };
-        } catch (directError) {
-          this.log(`⚠️  Navigation to deed URL failed: ${directError.message}`);
+        } catch (navError) {
+          this.log(`⚠️  Navigation download failed: ${navError.message}`);
           this.log('   Trying other strategies...');
         }
       }
