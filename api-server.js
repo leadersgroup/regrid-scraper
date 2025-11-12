@@ -42,6 +42,7 @@ const BexarCountyTexasScraper = require('./county-implementations/bexar-county-t
 const DurhamCountyNorthCarolinaScraper = require('./county-implementations/durham-county-north-carolina');
 const WakeCountyNorthCarolinaScraper = require('./county-implementations/wake-county-north-carolina');
 const MecklenburgCountyNorthCarolinaScraper = require('./county-implementations/mecklenburg-county-north-carolina');
+const GuilfordCountyNorthCarolinaScraper = require('./county-implementations/guilford-county-north-carolina');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -297,6 +298,20 @@ app.get('/api/counties', (req, res) => {
           'Full PDF download'
         ],
         cost: 'Free (no CAPTCHA)'
+      },
+      {
+        name: 'Guilford County',
+        state: 'NC',
+        stateCode: 'North Carolina',
+        features: [
+          'Property search by street number and name',
+          'Location address search integration',
+          'Parcel number extraction',
+          'Deeds tab integration',
+          'Automatic CAPTCHA solving',
+          'Full PDF download'
+        ],
+        cost: '$0.001 per deed (with 2Captcha API)'
       }
     ]
   });
@@ -327,7 +342,8 @@ function normalizeCountyName(county) {
     'bexar': 'Bexar',
     'durham': 'Durham',
     'wake': 'Wake',
-    'mecklenburg': 'Mecklenburg'
+    'mecklenburg': 'Mecklenburg',
+    'guilford': 'Guilford'
   };
 
   return countyMap[normalized] || county;
@@ -387,6 +403,8 @@ async function processDeedDownload(address, county, state, options = {}) {
     scraper = new WakeCountyNorthCarolinaScraper(scraperOptions);
   } else if (detectedCounty === 'Mecklenburg' && detectedState === 'NC') {
     scraper = new MecklenburgCountyNorthCarolinaScraper(scraperOptions);
+  } else if (detectedCounty === 'Guilford' && detectedState === 'NC') {
+    scraper = new GuilfordCountyNorthCarolinaScraper(scraperOptions);
   } else {
     throw new Error(`County "${detectedCounty}, ${detectedState}" is not yet supported`);
   }
@@ -429,7 +447,7 @@ app.post('/api/getPriorDeed', async (req, res) => {
     const normalizedState = (state || 'FL').toUpperCase();
 
     // Check if 2Captcha API key is configured (required for some counties)
-    const countiesRequiringCaptcha = ['Orange', 'Bexar', 'Wake'];
+    const countiesRequiringCaptcha = ['Orange', 'Bexar', 'Wake', 'Guilford'];
     if (countiesRequiringCaptcha.includes(normalizedCounty) && !process.env.TWOCAPTCHA_TOKEN) {
       return res.status(503).json({
         success: false,
