@@ -10,7 +10,7 @@ async function testGuilfordCounty() {
   console.log('🧪 Testing Guilford County, North Carolina Scraper\n');
 
   const scraper = new GuilfordCountyNorthCarolinaScraper({
-    headless: false, // Set to true for production
+    headless: false, // Set to false to see browser
     outputDir: './downloads'
   });
 
@@ -61,7 +61,7 @@ async function testGuilfordCounty() {
   } catch (error) {
     console.error('\n❌ Test failed with error:', error);
   } finally {
-    await scraper.cleanup();
+    await scraper.close();
     console.log('\n✅ Browser closed');
   }
 }

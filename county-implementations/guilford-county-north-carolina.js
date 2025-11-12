@@ -224,34 +224,16 @@ class GuilfordCountyNorthCarolinaScraper extends DeedScraper {
 
       await new Promise(resolve => setTimeout(resolve, 2000));
 
-      // Click on "Location address" tab/button
-      this.log('🔍 Looking for Location address option...');
+      // Click on "Location Address" tab
+      this.log('🔍 Looking for Location Address tab...');
       const locationAddressClicked = await this.page.evaluate(() => {
-        // Look for various possible selectors for "Location address"
-        const allElements = Array.from(document.querySelectorAll('a, button, span, div, label'));
+        // Look for the Location Address tab link (Bootstrap tab)
+        const links = Array.from(document.querySelectorAll('a[data-toggle="tab"]'));
 
-        for (const el of allElements) {
-          const text = el.textContent.trim();
-          if (text.toLowerCase().includes('location') && text.toLowerCase().includes('address')) {
-            // Try to click the element or its parent if it's a label
-            if (el.tagName === 'LABEL' && el.htmlFor) {
-              const input = document.getElementById(el.htmlFor);
-              if (input) {
-                input.click();
-                return true;
-              }
-            }
-            el.click();
-            return true;
-          }
-        }
-
-        // Also check for radio buttons or tabs
-        const inputs = Array.from(document.querySelectorAll('input[type="radio"]'));
-        for (const input of inputs) {
-          const label = document.querySelector(`label[for="${input.id}"]`);
-          if (label && label.textContent.toLowerCase().includes('location')) {
-            input.click();
+        for (const link of links) {
+          const text = link.textContent.trim();
+          if (text.includes('Location Address')) {
+            link.click();
             return true;
           }
         }
@@ -260,77 +242,45 @@ class GuilfordCountyNorthCarolinaScraper extends DeedScraper {
       });
 
       if (!locationAddressClicked) {
-        this.log('⚠️ Could not find Location address option, trying to proceed anyway...');
-      } else {
-        this.log('✅ Clicked Location address option');
-        await new Promise(resolve => setTimeout(resolve, 1000));
+        throw new Error('Could not find Location Address tab');
       }
 
-      // Find and fill street number field
+      this.log('✅ Clicked Location Address tab');
+
+      // Wait for tab content to be visible
+      await new Promise(resolve => setTimeout(resolve, 1000));
+
+      // Wait for the tab pane to become active
+      await this.page.waitForSelector('#locationaddress.active', { timeout: 5000 }).catch(() => {
+        this.log('⚠️ Tab pane did not become active, continuing anyway...');
+      });
+
+      // Find and fill street number field using specific ID
       this.log(`📝 Filling street number: ${streetNumber}`);
-      const streetNumFilled = await this.page.evaluate((num) => {
-        // Look for street number input field
-        const inputs = Array.from(document.querySelectorAll('input[type="text"]'));
 
-        for (const input of inputs) {
-          const label = input.labels?.[0]?.textContent?.toLowerCase() || '';
-          const placeholder = input.placeholder?.toLowerCase() || '';
-          const name = input.name?.toLowerCase() || '';
-          const id = input.id?.toLowerCase() || '';
+      // Wait for field to be visible
+      await this.page.waitForSelector('#ctl00_ContentPlaceHolder1_StreetNumberTextBox', {
+        visible: true,
+        timeout: 10000
+      });
 
-          if (label.includes('street number') ||
-              placeholder.includes('street number') ||
-              name.includes('streetnum') ||
-              id.includes('streetnum')) {
-            input.value = '';
-            input.focus();
-            input.value = num;
-            input.dispatchEvent(new Event('input', { bubbles: true }));
-            input.dispatchEvent(new Event('change', { bubbles: true }));
-            return true;
-          }
-        }
-
-        return false;
-      }, streetNumber);
-
-      if (!streetNumFilled) {
-        throw new Error('Could not find or fill street number input field');
-      }
-
+      await this.page.focus('#ctl00_ContentPlaceHolder1_StreetNumberTextBox');
+      await this.page.click('#ctl00_ContentPlaceHolder1_StreetNumberTextBox', { clickCount: 3 });
+      await this.page.type('#ctl00_ContentPlaceHolder1_StreetNumberTextBox', streetNumber);
       await new Promise(resolve => setTimeout(resolve, 500));
 
-      // Find and fill street name field
+      // Find and fill street name field using specific ID
       this.log(`📝 Filling street name: ${streetName}`);
-      const streetNameFilled = await this.page.evaluate((name) => {
-        // Look for street name input field
-        const inputs = Array.from(document.querySelectorAll('input[type="text"]'));
 
-        for (const input of inputs) {
-          const label = input.labels?.[0]?.textContent?.toLowerCase() || '';
-          const placeholder = input.placeholder?.toLowerCase() || '';
-          const inputName = input.name?.toLowerCase() || '';
-          const id = input.id?.toLowerCase() || '';
+      // Wait for field to be visible
+      await this.page.waitForSelector('#ctl00_ContentPlaceHolder1_StreetNameTextBox', {
+        visible: true,
+        timeout: 10000
+      });
 
-          if (label.includes('street name') ||
-              placeholder.includes('street name') ||
-              inputName.includes('streetname') ||
-              id.includes('streetname')) {
-            input.value = '';
-            input.focus();
-            input.value = name;
-            input.dispatchEvent(new Event('input', { bubbles: true }));
-            input.dispatchEvent(new Event('change', { bubbles: true }));
-            return true;
-          }
-        }
-
-        return false;
-      }, streetName);
-
-      if (!streetNameFilled) {
-        throw new Error('Could not find or fill street name input field');
-      }
+      await this.page.focus('#ctl00_ContentPlaceHolder1_StreetNameTextBox');
+      await this.page.click('#ctl00_ContentPlaceHolder1_StreetNameTextBox', { clickCount: 3 });
+      await this.page.type('#ctl00_ContentPlaceHolder1_StreetNameTextBox', streetName);
 
       await new Promise(resolve => setTimeout(resolve, 1000));
 
