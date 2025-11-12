@@ -450,7 +450,13 @@ class GuilfordCountyNorthCarolinaScraper extends DeedScraper {
                   // Only return if the deed type text contains "deed" (like "CORR DEED")
                   // This filters out navigation links
                   if (deedType.length > 0 && deedType.toLowerCase().includes('deed')) {
-                    const href = link.href;
+                    let href = link.href;
+                    // IMPORTANT: Guilford uses http:// not https://
+                    // The browser might auto-upgrade to https, but the server needs http
+                    if (href.includes('https://rdlxweb')) {
+                      href = href.replace('https://', 'http://');
+                      console.log('Fixed protocol: ' + href);
+                    }
                     // CLICK the link to trigger any JavaScript that sets up session
                     link.click();
                     return { success: true, deedType, href, clicked: true };
