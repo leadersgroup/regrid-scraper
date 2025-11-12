@@ -578,17 +578,53 @@ class GuilfordCountyNorthCarolinaScraper extends DeedScraper {
         this.log('✅ Current page is gis_viewimage.php (deed image page)');
         this.log('📥 Downloading deed image from current page...');
 
-        // The current page URL itself is the image URL
-        const pdfBase64 = await this.downloadPdfFromUrl(currentUrl);
+        // Try multiple approaches to get the deed
+        let pdfBase64 = null;
+        
+        // Approach 1: Try to download from the URL directly
+        try {
+          pdfBase64 = await this.downloadPdfFromUrl(currentUrl);
+        } catch (err1) {
+          this.log(`⚠️  Direct download failed: ${err1.message}`);
+          
+          // Approach 2: Look for an image on the current page and download it
+          const imageUrl = await this.page.evaluate(() => {
+            const images = Array.from(document.querySelectorAll('img'));
+            // Find the largest image (likely the deed)
+            let largestImg = null;
+            let maxArea = 0;
+            
+            for (const img of images) {
+              const area = img.width * img.height;
+              if (area > maxArea && img.src) {
+                maxArea = area;
+                largestImg = img.src;
+              }
+            }
+            
+            return largestImg;
+          });
+          
+          if (imageUrl) {
+            this.log(`✅ Found image on page: ${imageUrl}`);
+            try {
+              pdfBase64 = await this.downloadPdfFromUrl(imageUrl);
+            } catch (err2) {
+              this.log(`⚠️  Image download failed: ${err2.message}`);
+            }
+          }
+        }
 
-        return {
-          success: true,
-          duration: Date.now() - startTime,
-          pdfBase64,
-          filename: `guilford_deed_${Date.now()}.pdf`,
-          fileSize: Buffer.from(pdfBase64, 'base64').length,
-          downloadPath: ''
-        };
+        if (pdfBase64) {
+          return {
+            success: true,
+            duration: Date.now() - startTime,
+            pdfBase64,
+            filename: `guilford_deed_${Date.now()}.pdf`,
+            fileSize: Buffer.from(pdfBase64, 'base64').length,
+            downloadPath: ''
+          };
+        }
       }
 
       // Strategy 2: Check if current page has PDF
@@ -606,7 +642,7 @@ class GuilfordCountyNorthCarolinaScraper extends DeedScraper {
         };
       }
 
-      // Strategy 2: Look for iframe with PDF
+      // Strategy 3: Look for iframe with PDF
       this.log('🔍 Checking for PDF in iframe...');
       const iframeInfo = await this.page.evaluate(() => {
         const iframes = Array.from(document.querySelectorAll('iframe'));
@@ -632,7 +668,7 @@ class GuilfordCountyNorthCarolinaScraper extends DeedScraper {
         };
       }
 
-      // Strategy 3: Look for embed or object tags
+      // Strategy 4: Look for embed or object tags
       this.log('🔍 Checking for PDF embed/object...');
       const embedInfo = await this.page.evaluate(() => {
         const embeds = Array.from(document.querySelectorAll('embed, object'));
@@ -659,27 +695,28 @@ class GuilfordCountyNorthCarolinaScraper extends DeedScraper {
         };
       }
 
-      // Strategy 4: Look for download button or link (especially CustomAttachmentsResource.ashx)
+      // Strategy 5: Look for download button or link
       this.log('🔍 Looking for download button/link...');
       const downloadUrl = await this.page.evaluate(() => {
         const allElements = Array.from(document.querySelectorAll('a, button'));
 
-        // First priority: Look for CustomAttachmentsResource.ashx (Guilford's deed download URL)
-        for (const el of allElements) {
-          const href = el.href || '';
-          if (href.includes('CustomAttachmentsResource.ashx')) {
-            return href;
-          }
-        }
-
-        // Second priority: Look for download/view links
+        // First priority: Look for download/view links
         for (const el of allElements) {
           const text = el.textContent.toLowerCase();
           const href = el.href || '';
 
-          if ((text.includes('download') || text.includes('pdf') || text.includes('view') || text.includes('deed') || href.includes('.pdf')) &&
+          if ((text.includes('download') || text.includes('pdf') || text.includes('view') || 
+               text.includes('deed') || text.includes('print')) &&
               el.offsetParent !== null) {
             return el.href || null;
+          }
+        }
+
+        // Second priority: Any PDF links
+        for (const el of allElements) {
+          const href = el.href || '';
+          if (href.includes('.pdf')) {
+            return href;
           }
         }
 
@@ -700,57 +737,7 @@ class GuilfordCountyNorthCarolinaScraper extends DeedScraper {
         };
       }
 
-      // Strategy 5: Look for deed document links on the current deed page
-      this.log('🔍 Searching for deed document links...');
-      const documentUrl = await this.page.evaluate(() => {
-        const allLinks = Array.from(document.querySelectorAll('a'));
-
-        // Priority 1: Look for ShowDocument, ViewDocument, GetDocument links
-        for (const link of allLinks) {
-          const href = link.href || '';
-          const text = link.textContent.toLowerCase();
-
-          if (href.includes('ShowDocument') ||
-              href.includes('ViewDocument') ||
-              href.includes('GetDocument') ||
-              href.includes('gis_viewimage') ||
-              (href.includes('.pdf') && !href.includes('viewer'))) {
-            return { url: href, type: 'document_link', text: link.textContent.trim() };
-          }
-        }
-
-        // Priority 2: Look for download/view buttons or links
-        for (const link of allLinks) {
-          const href = link.href || '';
-          const text = link.textContent.toLowerCase();
-
-          if ((text.includes('view') || text.includes('download') || text.includes('open')) &&
-              (text.includes('deed') || text.includes('document') || text.includes('image'))) {
-            return { url: href, type: 'action_link', text: link.textContent.trim() };
-          }
-        }
-
-        return null;
-      });
-
-      if (documentUrl) {
-        this.log(`✅ Found deed document link: ${documentUrl.text}`);
-        this.log(`   Type: ${documentUrl.type}`);
-        this.log(`   URL: ${documentUrl.url}`);
-
-        const pdfBase64 = await this.downloadPdfFromUrl(documentUrl.url);
-
-        return {
-          success: true,
-          duration: Date.now() - startTime,
-          pdfBase64,
-          filename: `guilford_deed_${Date.now()}.pdf`,
-          fileSize: Buffer.from(pdfBase64, 'base64').length,
-          downloadPath: ''
-        };
-      }
-
-      // Strategy 6: Look for image (gis_viewimage.php displays deed as image)
+      // Strategy 6: Look for images on the page
       this.log('🔍 Checking for deed image...');
       const imageInfo = await this.page.evaluate(() => {
         // Look for large images (deed documents are typically large)
@@ -770,7 +757,6 @@ class GuilfordCountyNorthCarolinaScraper extends DeedScraper {
 
       if (imageInfo.found) {
         this.log(`✅ Found deed image: ${imageInfo.src} (${imageInfo.width}x${imageInfo.height})`);
-        // Try to download as if it were a PDF URL
         try {
           const pdfBase64 = await this.downloadPdfFromUrl(imageInfo.src);
           return {
@@ -782,11 +768,33 @@ class GuilfordCountyNorthCarolinaScraper extends DeedScraper {
             downloadPath: ''
           };
         } catch (imgError) {
-          this.log(`⚠️  Image found but failed to download: ${imgError.message}`);
+          this.log(`⚠️  Image download failed: ${imgError.message}`);
         }
       }
 
-      throw new Error('Could not find PDF to download. PDF may require manual CAPTCHA solution or additional navigation.');
+      // Final fallback: Take a screenshot of the current page
+      this.log('🔄 Using screenshot fallback...');
+      try {
+        const screenshotBuffer = await this.page.screenshot({
+          fullPage: true,
+          type: 'png'
+        });
+        
+        const pdfBase64 = await this.convertImageToPdf(screenshotBuffer);
+        
+        return {
+          success: true,
+          duration: Date.now() - startTime,
+          pdfBase64,
+          filename: `guilford_deed_screenshot_${Date.now()}.pdf`,
+          fileSize: Buffer.from(pdfBase64, 'base64').length,
+          downloadPath: ''
+        };
+      } catch (screenshotError) {
+        this.log(`❌ Screenshot fallback failed: ${screenshotError.message}`);
+      }
+
+      throw new Error('Could not find or download deed document. The server may be returning an error or the document format is not supported.');
 
     } catch (error) {
       this.log(`❌ PDF download failed: ${error.message}`);
@@ -828,101 +836,296 @@ class GuilfordCountyNorthCarolinaScraper extends DeedScraper {
       }
     }
 
-    // Use fetch from within page context to maintain cookies and session
-    const pdfBase64 = await this.page.evaluate(async (url) => {
-      const response = await fetch(url);
-      if (!response.ok) {
-        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-      }
-
-      const blob = await response.blob();
-
-      return new Promise((resolve, reject) => {
-        const reader = new FileReader();
-        reader.onloadend = () => {
-          const base64 = reader.result.split(',')[1];
-          resolve(base64);
-        };
-        reader.onerror = reject;
-        reader.readAsDataURL(blob);
-      });
-    }, pdfUrl);
-
-    // Verify it's a valid document (PDF or TIFF image)
-    const pdfBuffer = Buffer.from(pdfBase64, 'base64');
-    const pdfSignature = pdfBuffer.toString('utf8', 0, 4);
-    const tiffSignature = pdfBuffer.toString('ascii', 0, 2);
-
-    // Check for PDF signature
-    if (pdfSignature === '%PDF') {
-      this.log(`✅ PDF downloaded: ${(pdfBuffer.length / 1024).toFixed(2)} KB`);
-      return pdfBase64;
-    }
-    // Check for TIFF signature (II* or MM*) and convert to PDF
-    else if (tiffSignature === 'II' || tiffSignature === 'MM') {
-      this.log(`✅ TIFF image downloaded: ${(pdfBuffer.length / 1024).toFixed(2)} KB`);
-      this.log(`🔄 Converting TIFF to PDF...`);
-
-      try {
-        // Convert TIFF to PNG using sharp (pdf-lib doesn't support TIFF directly)
-        const pngBuffer = await sharp(pdfBuffer)
-          .png()
-          .toBuffer();
-
-        this.log(`✅ Converted to PNG: ${(pngBuffer.length / 1024).toFixed(2)} KB`);
-
-        // Get image dimensions
-        const metadata = await sharp(pdfBuffer).metadata();
-        const width = metadata.width || 612;
-        const height = metadata.height || 792;
-
-        // Create a new PDF document
-        const pdfDoc = await PDFDocument.create();
-
-        // Embed the PNG image
-        const pngImage = await pdfDoc.embedPng(pngBuffer);
-
-        // Calculate page size to fit image (maintain aspect ratio)
-        const maxWidth = 612; // 8.5 inches at 72 DPI
-        const maxHeight = 792; // 11 inches at 72 DPI
-        let pageWidth = width;
-        let pageHeight = height;
-
-        // Scale down if image is too large
-        if (pageWidth > maxWidth || pageHeight > maxHeight) {
-          const scale = Math.min(maxWidth / pageWidth, maxHeight / pageHeight);
-          pageWidth = pageWidth * scale;
-          pageHeight = pageHeight * scale;
+    // Try direct fetch first
+    try {
+      // Use fetch from within page context to maintain cookies and session
+      const result = await this.page.evaluate(async (url) => {
+        const response = await fetch(url);
+        if (!response.ok) {
+          throw new Error(`HTTP ${response.status}: ${response.statusText}`);
         }
 
-        // Add a page with the image dimensions
-        const page = pdfDoc.addPage([pageWidth, pageHeight]);
-
-        // Draw the image on the page
-        page.drawImage(pngImage, {
-          x: 0,
-          y: 0,
-          width: pageWidth,
-          height: pageHeight,
+        const blob = await response.blob();
+        const arrayBuffer = await blob.arrayBuffer();
+        const uint8Array = new Uint8Array(arrayBuffer);
+        
+        // Convert to base64
+        let binary = '';
+        uint8Array.forEach((byte) => {
+          binary += String.fromCharCode(byte);
         });
+        
+        return {
+          base64: btoa(binary),
+          contentType: response.headers.get('content-type') || ''
+        };
+      }, pdfUrl);
 
-        // Save the PDF
-        const pdfBytes = await pdfDoc.save();
-        const convertedPdfBase64 = Buffer.from(pdfBytes).toString('base64');
+      const pdfBase64 = result.base64;
+      const contentType = result.contentType.toLowerCase();
 
-        this.log(`✅ PDF created: ${(pdfBytes.length / 1024).toFixed(2)} KB`);
-        return convertedPdfBase64;
-      } catch (conversionError) {
-        this.log(`⚠️  Failed to convert TIFF to PDF: ${conversionError.message}`);
-        this.log(`  Returning original TIFF as base64`);
+      // Verify it's a valid document (not HTML error page)
+      const pdfBuffer = Buffer.from(pdfBase64, 'base64');
+      const firstChars = pdfBuffer.toString('utf8', 0, Math.min(100, pdfBuffer.length));
+      
+      // Check if it's an HTML error page
+      if (contentType.includes('text/html') || 
+          firstChars.includes('<html') || 
+          firstChars.includes('<!DOCTYPE') ||
+          firstChars.includes('<br') ||
+          firstChars.includes('Notice</b>') ||
+          firstChars.includes('Error</b>') ||
+          firstChars.includes('Warning</b>')) {
+        this.log(`⚠️  Received HTML error page instead of document`);
+        this.log(`  Content type: ${contentType}`);
+        this.log(`  First 100 chars: ${firstChars}`);
+        
+        // Try alternative approach: navigate to the URL directly and screenshot
+        this.log(`🔄 Attempting alternative approach: direct navigation and screenshot`);
+        return await this.screenshotToPdf(pdfUrl);
+      }
+
+      const pdfSignature = pdfBuffer.toString('utf8', 0, 4);
+      const tiffSignature = pdfBuffer.toString('ascii', 0, 2);
+
+      // Check for PDF signature
+      if (pdfSignature === '%PDF') {
+        this.log(`✅ PDF downloaded: ${(pdfBuffer.length / 1024).toFixed(2)} KB`);
         return pdfBase64;
       }
+      // Check for TIFF signature (II* or MM*) and convert to PDF
+      else if (tiffSignature === 'II' || tiffSignature === 'MM') {
+        this.log(`✅ TIFF image downloaded: ${(pdfBuffer.length / 1024).toFixed(2)} KB`);
+        this.log(`🔄 Converting TIFF to PDF...`);
+
+        try {
+          // Convert TIFF to PNG using sharp (pdf-lib doesn't support TIFF directly)
+          const pngBuffer = await sharp(pdfBuffer)
+            .png()
+            .toBuffer();
+
+          this.log(`✅ Converted to PNG: ${(pngBuffer.length / 1024).toFixed(2)} KB`);
+
+          // Get image dimensions
+          const metadata = await sharp(pdfBuffer).metadata();
+          const width = metadata.width || 612;
+          const height = metadata.height || 792;
+
+          // Create a new PDF document
+          const pdfDoc = await PDFDocument.create();
+
+          // Embed the PNG image
+          const pngImage = await pdfDoc.embedPng(pngBuffer);
+
+          // Calculate page size to fit image (maintain aspect ratio)
+          const maxWidth = 612; // 8.5 inches at 72 DPI
+          const maxHeight = 792; // 11 inches at 72 DPI
+          let pageWidth = width;
+          let pageHeight = height;
+
+          // Scale down if image is too large
+          if (pageWidth > maxWidth || pageHeight > maxHeight) {
+            const scale = Math.min(maxWidth / pageWidth, maxHeight / pageHeight);
+            pageWidth = pageWidth * scale;
+            pageHeight = pageHeight * scale;
+          }
+
+          // Add a page with the image dimensions
+          const page = pdfDoc.addPage([pageWidth, pageHeight]);
+
+          // Draw the image on the page
+          page.drawImage(pngImage, {
+            x: 0,
+            y: 0,
+            width: pageWidth,
+            height: pageHeight,
+          });
+
+          // Save the PDF
+          const pdfBytes = await pdfDoc.save();
+          const convertedPdfBase64 = Buffer.from(pdfBytes).toString('base64');
+
+          this.log(`✅ PDF created: ${(pdfBytes.length / 1024).toFixed(2)} KB`);
+          return convertedPdfBase64;
+        } catch (conversionError) {
+          this.log(`⚠️  Failed to convert TIFF to PDF: ${conversionError.message}`);
+          this.log(`  Returning original TIFF as base64`);
+          return pdfBase64;
+        }
+      }
+      // Check for other image formats (PNG, JPG, etc.)
+      else if (contentType.includes('image/')) {
+        this.log(`✅ Image downloaded (${contentType}): ${(pdfBuffer.length / 1024).toFixed(2)} KB`);
+        return await this.convertImageToPdf(pdfBuffer);
+      }
+      // Unknown format but accept it anyway
+      else {
+        this.log(`⚠️  Downloaded content (signature: ${pdfSignature}): ${(pdfBuffer.length / 1024).toFixed(2)} KB`);
+        this.log(`  Content type: ${contentType}`);
+        return pdfBase64;
+      }
+    } catch (error) {
+      this.log(`⚠️  Direct download failed: ${error.message}`);
+      this.log(`🔄 Attempting screenshot approach...`);
+      return await this.screenshotToPdf(pdfUrl);
     }
-    // Unknown format but accept it anyway
-    else {
-      this.log(`⚠️  Downloaded content (signature: ${pdfSignature}): ${(pdfBuffer.length / 1024).toFixed(2)} KB`);
-      this.log(`  First 100 chars: ${pdfBuffer.toString('utf8', 0, 100)}`);
-      return pdfBase64;
+  }
+
+  /**
+   * Convert any image buffer to PDF
+   */
+  async convertImageToPdf(imageBuffer) {
+    try {
+      this.log(`🔄 Converting image to PDF...`);
+      
+      // Convert any image format to PNG using sharp
+      const pngBuffer = await sharp(imageBuffer)
+        .png()
+        .toBuffer();
+
+      // Get image dimensions
+      const metadata = await sharp(imageBuffer).metadata();
+      const width = metadata.width || 612;
+      const height = metadata.height || 792;
+
+      // Create a new PDF document
+      const pdfDoc = await PDFDocument.create();
+
+      // Embed the PNG image
+      const pngImage = await pdfDoc.embedPng(pngBuffer);
+
+      // Calculate page size to fit image (maintain aspect ratio)
+      const maxWidth = 612; // 8.5 inches at 72 DPI
+      const maxHeight = 792; // 11 inches at 72 DPI
+      let pageWidth = width;
+      let pageHeight = height;
+
+      // Scale down if image is too large
+      if (pageWidth > maxWidth || pageHeight > maxHeight) {
+        const scale = Math.min(maxWidth / pageWidth, maxHeight / pageHeight);
+        pageWidth = pageWidth * scale;
+        pageHeight = pageHeight * scale;
+      }
+
+      // Add a page with the image dimensions
+      const page = pdfDoc.addPage([pageWidth, pageHeight]);
+
+      // Draw the image on the page
+      page.drawImage(pngImage, {
+        x: 0,
+        y: 0,
+        width: pageWidth,
+        height: pageHeight,
+      });
+
+      // Save the PDF
+      const pdfBytes = await pdfDoc.save();
+      const convertedPdfBase64 = Buffer.from(pdfBytes).toString('base64');
+
+      this.log(`✅ PDF created from image: ${(pdfBytes.length / 1024).toFixed(2)} KB`);
+      return convertedPdfBase64;
+    } catch (error) {
+      this.log(`❌ Failed to convert image to PDF: ${error.message}`);
+      throw error;
+    }
+  }
+
+  /**
+   * Take a screenshot of the deed page and convert to PDF
+   */
+  async screenshotToPdf(url) {
+    try {
+      this.log(`📸 Taking screenshot of deed page...`);
+      
+      // Create a new page for screenshot
+      const screenshotPage = await this.browser.newPage();
+      await screenshotPage.setViewport({ width: 1920, height: 1080 });
+      
+      // Navigate to the deed URL
+      await screenshotPage.goto(url, {
+        waitUntil: 'networkidle2',
+        timeout: 30000
+      });
+      
+      // Wait for content to load
+      await new Promise(resolve => setTimeout(resolve, 3000));
+      
+      // Check if there's an image on the page
+      const hasImage = await screenshotPage.evaluate(() => {
+        const images = Array.from(document.querySelectorAll('img'));
+        return images.some(img => img.width > 200 && img.height > 200);
+      });
+      
+      if (hasImage) {
+        this.log(`✅ Found deed image on page`);
+        
+        // Get the largest image on the page
+        const imageInfo = await screenshotPage.evaluate(() => {
+          const images = Array.from(document.querySelectorAll('img'));
+          let largestImage = null;
+          let maxArea = 0;
+          
+          for (const img of images) {
+            const area = img.width * img.height;
+            if (area > maxArea) {
+              maxArea = area;
+              largestImage = {
+                src: img.src,
+                width: img.width,
+                height: img.height
+              };
+            }
+          }
+          
+          return largestImage;
+        });
+        
+        if (imageInfo) {
+          this.log(`  Image dimensions: ${imageInfo.width}x${imageInfo.height}`);
+          
+          // Try to download the image directly
+          try {
+            const imageResponse = await screenshotPage.evaluate(async (src) => {
+              const response = await fetch(src);
+              const blob = await response.blob();
+              const arrayBuffer = await blob.arrayBuffer();
+              const uint8Array = new Uint8Array(arrayBuffer);
+              
+              // Convert to base64
+              let binary = '';
+              uint8Array.forEach((byte) => {
+                binary += String.fromCharCode(byte);
+              });
+              
+              return btoa(binary);
+            }, imageInfo.src);
+            
+            const imageBuffer = Buffer.from(imageResponse, 'base64');
+            await screenshotPage.close();
+            
+            // Convert image to PDF
+            return await this.convertImageToPdf(imageBuffer);
+          } catch (imgError) {
+            this.log(`⚠️  Failed to download image directly: ${imgError.message}`);
+          }
+        }
+      }
+      
+      // Fall back to full page screenshot
+      this.log(`📸 Taking full page screenshot...`);
+      const screenshotBuffer = await screenshotPage.screenshot({
+        fullPage: true,
+        type: 'png'
+      });
+      
+      await screenshotPage.close();
+      
+      // Convert screenshot to PDF
+      return await this.convertImageToPdf(screenshotBuffer);
+      
+    } catch (error) {
+      this.log(`❌ Screenshot approach failed: ${error.message}`);
+      throw error;
     }
   }
 }
