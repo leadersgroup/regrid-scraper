@@ -306,8 +306,10 @@ class PierceCountyWashingtonScraper extends DeedScraper {
               const text = cells[j].textContent.trim();
               if (text.match(/^(STATUTORY\s+)?WARRANTY\s+DEED$/i) ||
                   text.match(/^QUIT\s*CLAIM\s+DEED$/i) ||
+                  text.match(/^TRUSTEE\s+DEED$/i) ||
                   text.match(/^DEED$/i) ||
-                  text.match(/^EXCISE\s+TAX\s+AFFIDAVIT$/i)) {
+                  text.match(/^EXCISE\s+TAX\s+AFFIDAVIT$/i) ||
+                  text.match(/^DEED\s+OF\s+TRUST$/i)) {
                 documentType = text;
                 break;
               }
@@ -315,8 +317,10 @@ class PierceCountyWashingtonScraper extends DeedScraper {
 
             // If we found both instrument number and document type
             if (instrumentNumber && documentType) {
-              // Skip excise tax affidavits
-              if (documentType.toUpperCase().includes('EXCISE TAX AFFIDAVIT')) {
+              // Skip excise tax affidavits and deeds of trust (mortgage docs)
+              const typeUpper = documentType.toUpperCase();
+              if (typeUpper.includes('EXCISE TAX AFFIDAVIT') ||
+                  typeUpper.includes('DEED OF TRUST')) {
                 continue;
               }
 
