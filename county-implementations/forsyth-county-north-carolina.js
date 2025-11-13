@@ -407,11 +407,19 @@ class ForsythCountyNorthCarolinaScraper extends DeedScraper {
 
       await new Promise(resolve => setTimeout(resolve, 3000));
 
-      // Find and click first entry under "Deed Type" column
+      // Find and click first ACTUAL Deed Type entry (not building details)
       this.log('🔍 Looking for first Deed Type entry...');
       const deedTypeInfo = await this.page.evaluate(() => {
         // Look for table with deed information
         const tables = Array.from(document.querySelectorAll('table'));
+
+        // List of actual deed types to look for (excluding building/improvement details)
+        const validDeedTypes = [
+          'DEED', 'WARRANTY DEED', 'CORR DEED', 'QUITCLAIM DEED', 
+          'SPECIAL WARRANTY DEED', 'DEED OF TRUST', 'TRUSTEES DEED',
+          'GRANT DEED', 'GENERAL WARRANTY DEED', 'LIMITED WARRANTY DEED',
+          'QUIT CLAIM', 'WD', 'QCD', 'TD', 'DOT' // Common abbreviations
+        ];
 
         for (const table of tables) {
           const rows = Array.from(table.querySelectorAll('tr'));
@@ -425,7 +433,7 @@ class ForsythCountyNorthCarolinaScraper extends DeedScraper {
             for (let j = 0; j < headers.length; j++) {
               const headerText = headers[j].textContent.toLowerCase().trim();
               // Look for exact "deed type" header
-              if (headerText === 'deed type') {
+              if (headerText === 'deed type' || headerText.includes('deed type')) {
                 deedTypeColumnIndex = j;
                 headerRowIndex = i;
                 break;
@@ -434,7 +442,7 @@ class ForsythCountyNorthCarolinaScraper extends DeedScraper {
             if (deedTypeColumnIndex !== -1) break;
           }
 
-          // Find first data row AFTER header row with a clickable deed type
+          // Find first data row AFTER header row with an ACTUAL deed (not building details)
           if (deedTypeColumnIndex !== -1 && headerRowIndex !== -1) {
             // Start from row after header
             for (let i = headerRowIndex + 1; i < rows.length; i++) {
@@ -447,9 +455,28 @@ class ForsythCountyNorthCarolinaScraper extends DeedScraper {
 
                 if (link) {
                   const deedType = link.textContent.trim();
-                  // Only return if the deed type text is meaningful
-                  if (deedType.length > 0) {
-                    let href = link.href;
+                  const deedTypeUpper = deedType.toUpperCase();
+                  const href = link.href;
+
+                  // Check if this is an actual deed type
+                  const isValidDeed = validDeedTypes.some(valid => 
+                    deedTypeUpper.includes(valid) || valid.includes(deedTypeUpper)
+                  );
+
+                  // Also check if the URL is for deed documents (not building details)
+                  const isDeedUrl = !href.includes('OutbuildingDetails') && 
+                                   !href.includes('BuildingDetails') &&
+                                   !href.includes('ImprovementDetails') &&
+                                   !href.includes('PropertyDetails');
+
+                  // Skip if it's building/improvement details
+                  const isBuildingDetail = deedTypeUpper.includes('IMPROVEMENT') ||
+                                          deedTypeUpper.includes('IMPROVEMENTS') ||
+                                          deedTypeUpper.includes('BUILDING') ||
+                                          deedTypeUpper.includes('MISC');
+
+                  // Only click if it's an actual deed and not building details
+                  if ((isValidDeed || isDeedUrl) && !isBuildingDetail && deedType.length > 0) {
                     // CLICK the link to trigger any JavaScript that sets up session
                     link.click();
                     return { success: true, deedType, href, clicked: true };
@@ -460,11 +487,30 @@ class ForsythCountyNorthCarolinaScraper extends DeedScraper {
           }
         }
 
+        // If no valid deed found, look for any link that might be a deed document
+        const allLinks = Array.from(document.querySelectorAll('a'));
+        for (const link of allLinks) {
+          const href = link.href;
+          const text = link.textContent.trim().toUpperCase();
+
+          // Check if this link is likely a deed document
+          if ((text.includes('DEED') && !text.includes('BUILDING') && !text.includes('IMPROVEMENT') && !text.includes('IMPROVEMENTS')) ||
+              (href.includes('deed') && !href.includes('Building') && !href.includes('Improvement'))) {
+            link.click();
+            return {
+              success: true,
+              deedType: link.textContent.trim() || 'DEED',
+              href: href,
+              clicked: true
+            };
+          }
+        }
+
         return { success: false };
       });
 
       if (!deedTypeInfo.success) {
-        throw new Error('Could not find or click Deed Type entry');
+        throw new Error('Could not find any deed document links (only found building/improvement details)');
       }
 
       this.log(`✅ Found and clicked deed type: ${deedTypeInfo.deedType}`);
@@ -605,19 +651,63 @@ class ForsythCountyNorthCarolinaScraper extends DeedScraper {
       const currentUrl = this.page.url();
       this.log(`Current URL: ${currentUrl}`);
 
-      // Strategy 1: Check if current page is PDF
-      if (currentUrl.toLowerCase().includes('.pdf')) {
-        this.log('✅ Current page is PDF');
-        const pdfBase64 = await this.downloadPdfFromUrl(currentUrl);
+      // Strategy 1: Check if current page is PDF or serves PDF
+      if (currentUrl.toLowerCase().includes('.pdf') ||
+          currentUrl.includes('type=pdf') ||
+          currentUrl.includes('export=pdf')) {
+        this.log('✅ Current page serves PDF directly');
 
-        return {
-          success: true,
-          duration: Date.now() - startTime,
-          pdfBase64,
-          filename: `forsyth_deed_${Date.now()}.pdf`,
-          fileSize: Buffer.from(pdfBase64, 'base64').length,
-          downloadPath: ''
-        };
+        // Use fetch with session credentials to download PDF
+        const pdfData = await this.page.evaluate(async (url) => {
+          try {
+            const response = await fetch(url, {
+              credentials: 'include',
+              headers: {
+                'Accept': 'application/pdf,*/*'
+              }
+            });
+
+            if (!response.ok) {
+              throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+            }
+
+            const blob = await response.blob();
+            const arrayBuffer = await blob.arrayBuffer();
+            const uint8Array = new Uint8Array(arrayBuffer);
+
+            // Convert to base64
+            let binary = '';
+            for (let i = 0; i < uint8Array.length; i++) {
+              binary += String.fromCharCode(uint8Array[i]);
+            }
+
+            return {
+              success: true,
+              base64: btoa(binary),
+              size: uint8Array.length
+            };
+          } catch (err) {
+            return {
+              success: false,
+              error: err.message
+            };
+          }
+        }, currentUrl);
+
+        if (pdfData.success) {
+          this.log(`✅ PDF downloaded successfully: ${(pdfData.size / 1024).toFixed(2)} KB`);
+
+          return {
+            success: true,
+            duration: Date.now() - startTime,
+            pdfBase64: pdfData.base64,
+            filename: `forsyth_deed_${Date.now()}.pdf`,
+            fileSize: pdfData.size,
+            downloadPath: ''
+          };
+        } else {
+          this.log(`⚠️ Fetch method failed: ${pdfData.error}, trying alternative methods...`);
+        }
       }
 
       // Strategy 2: Look for iframe with PDF

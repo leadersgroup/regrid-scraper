@@ -69,6 +69,45 @@ When the deed viewer fails, the system now:
 ## Technical Details
 The fix maintains backward compatibility while adding robust error handling for when the Guilford County server has issues or returns unexpected content. The scraper correctly identifies when the server is not functioning and provides appropriate feedback rather than creating blank PDFs.
 
+## Enhanced PDF Export Method (2025-11-13)
+
+### Discovery
+User provided a more direct approach to download deed PDFs using the `&export=pdf` parameter on the Guilford County deed viewer.
+
+### Method
+1. Navigate to `DeedDetails.aspx?PARCELPK={parcelPk}` to get all deeds for a parcel
+2. Extract `bookcode`, `booknum`, and `bookpage` parameters from deed links
+3. Construct direct PDF URL: `gis_viewimage.php?bookcode={code}&booknum={num}&bookpage={page}&export=pdf`
+4. Download PDF using fetch with credentials
+5. **Critical**: Strip PHP errors prepended to PDF data by finding `%PDF` signature
+
+### PHP Error Handling
+The server prepends PHP notices to the PDF:
+```
+<br />
+<b>Notice</b>:  Undefined variable: tiffInfo in <b>C:\wamp64\www\gis\gis_viewimage.php</b> on line <b>47</b><br />
+%PDF-1.2...
+```
+
+**Solution**: Search for `%PDF` signature in first 5000 bytes and slice buffer from that position.
+
+### Implementation
+- **Test Script**: [test-guilford-qc-deed.js](test-guilford-qc-deed.js:1) - Standalone test of direct PDF download
+- **Main Scraper**: [guilford-county-north-carolina.js:556-646](guilford-county-north-carolina.js:556) - Integrated into getDeedInfo method
+- **Success Rate**: 100% in tests (downloaded 432 KB and 562 KB PDFs successfully)
+
+### Advantages
+- More reliable than screenshot approach
+- Faster download (direct PDF vs rendering/screenshotting)
+- Handles multi-page deeds correctly (server generates complete PDF)
+- Smaller file sizes for multi-page documents
+
+### Test Results
+```
+Parcel 60314 (QC DEED): ✅ 431.97 KB - Successful download after stripping 122 bytes of PHP errors
+Parcel 60312 (CORR DEED): ✅ 561.98 KB - Successful download after stripping 122 bytes of PHP errors
+```
+
 ## Implementation Status (2025-11-13)
 ✅ **Session Cookie Fix Implemented**: The getDeedInfo method now captures cookies from the current page and transfers them to new tabs before navigation, preserving PHP session state.
 

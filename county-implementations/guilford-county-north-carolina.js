@@ -553,17 +553,22 @@ class GuilfordCountyNorthCarolinaScraper extends DeedScraper {
         timeout: 60000
       });
 
-      // Check if the response is a PDF
-      const contentType = response.headers()['content-type'] || '';
-      if (contentType.includes('application/pdf')) {
-        this.log('📄 Deed viewer is serving a PDF directly!');
-        // Store the URL to download the PDF directly
-        this.directPdfUrl = deedTypeInfo.href;
+      // Try to download PDF using direct export parameter
+      this.log('📥 Attempting to download PDF with export parameter...');
 
-        // Try to download the PDF immediately using fetch in page context
+      // Parse the deed URL to extract book/page parameters
+      const deedUrl = new URL(deedTypeInfo.href);
+      const bookCode = deedUrl.searchParams.get('bookcode') || 'r';
+      const bookNum = deedUrl.searchParams.get('booknum');
+      const bookPage = deedUrl.searchParams.get('bookpage');
+
+      if (bookNum && bookPage) {
+        // Construct direct PDF export URL
+        const pdfExportUrl = `${deedUrl.origin}${deedUrl.pathname}?bookcode=${bookCode}&booknum=${bookNum}&bookpage=${bookPage}&export=pdf`;
+        this.log(`📄 PDF export URL: ${pdfExportUrl}`);
+
         try {
-          this.log('📥 Downloading PDF from deed viewer...');
-          const pdfBase64 = await deedPage.evaluate(async (url) => {
+          const pdfData = await deedPage.evaluate(async (url) => {
             try {
               const response = await fetch(url, {
                 credentials: 'include',
@@ -577,29 +582,67 @@ class GuilfordCountyNorthCarolinaScraper extends DeedScraper {
               }
 
               const blob = await response.blob();
-              const reader = new FileReader();
+              const arrayBuffer = await blob.arrayBuffer();
+              const uint8Array = new Uint8Array(arrayBuffer);
 
-              return new Promise((resolve, reject) => {
-                reader.onloadend = () => {
-                  const base64 = reader.result.split(',')[1];
-                  resolve(base64);
-                };
-                reader.onerror = reject;
-                reader.readAsDataURL(blob);
-              });
+              // Convert to base64
+              let binary = '';
+              for (let i = 0; i < uint8Array.length; i++) {
+                binary += String.fromCharCode(uint8Array[i]);
+              }
+
+              return {
+                success: true,
+                base64: btoa(binary),
+                size: uint8Array.length
+              };
             } catch (err) {
-              throw new Error(`Fetch failed: ${err.message}`);
+              return {
+                success: false,
+                error: err.message
+              };
             }
-          }, deedTypeInfo.href);
+          }, pdfExportUrl);
 
-          if (pdfBase64) {
-            this.directPdfBase64 = pdfBase64;
-            const pdfSize = Buffer.from(pdfBase64, 'base64').length;
-            this.log(`✅ Successfully downloaded PDF: ${(pdfSize / 1024).toFixed(2)} KB`);
+          if (pdfData.success) {
+            this.log(`📦 Received ${(pdfData.size / 1024).toFixed(2)} KB from server`);
+            let pdfBuffer = Buffer.from(pdfData.base64, 'base64');
+            const signature = pdfBuffer.toString('utf8', 0, 4);
+            this.log(`📋 Initial signature: "${signature}"`);
+
+            // Handle PHP errors prepended to PDF
+            if (signature !== '%PDF') {
+              this.log('⚠️ PDF has prepended content, searching for PDF signature...');
+              const searchLimit = Math.min(pdfBuffer.length, 5000);
+              const searchText = pdfBuffer.toString('utf8', 0, searchLimit);
+              const pdfIndex = searchText.indexOf('%PDF');
+
+              if (pdfIndex > 0) {
+                this.log(`✅ Found PDF signature at byte ${pdfIndex} - stripping errors`);
+                pdfBuffer = pdfBuffer.slice(pdfIndex);
+              } else {
+                this.log(`❌ No PDF signature found in first ${searchLimit} bytes`);
+                const preview = searchText.substring(0, 200);
+                this.log(`   Preview: ${preview}`);
+              }
+            }
+
+            // Verify we have a valid PDF now
+            const finalSignature = pdfBuffer.toString('utf8', 0, 4);
+            if (finalSignature === '%PDF') {
+              this.directPdfBase64 = pdfBuffer.toString('base64');
+              this.log(`✅ Successfully downloaded PDF with export parameter: ${(pdfBuffer.length / 1024).toFixed(2)} KB`);
+            } else {
+              this.log(`⚠️ Could not extract valid PDF (final signature: ${finalSignature})`);
+            }
+          } else {
+            this.log(`❌ PDF fetch failed: ${pdfData.error}`);
           }
         } catch (fetchErr) {
-          this.log(`⚠️ Could not fetch PDF directly: ${fetchErr.message}`);
+          this.log(`⚠️ Exception during PDF fetch: ${fetchErr.message}`);
         }
+      } else {
+        this.log('⚠️ Could not extract book/page parameters from deed URL');
       }
 
       // Switch context to the new deed page
