@@ -10,10 +10,9 @@
  * 1. Navigate to Pierce County Real Estate search
  * 2. Enter parcel ID in 'Parcel #' field
  * 3. Find first document that is NOT 'excise tax affidavit'
- * 4. Click on 'Instrument # Book-Page' to view document
- * 5. Click on 'image:' icon
- * 6. Click 'Get Image Now' button
- * 7. Download PDF
+ * 4. Click on 'View' button - new window opens
+ * 5. Click 'Get Image Now' button directly (no need to click image icon)
+ * 6. Download PDF
  */
 
 const DeedScraper = require('../deed-scraper');
@@ -257,6 +256,18 @@ class PierceCountyWashingtonScraper extends DeedScraper {
     });
     await this.randomWait(1000, 2000);
 
+    // **CRITICAL**: Wait for the table data to load (it loads via AJAX)
+    // The data appears in a row with 100+ cells
+    this.log(`⏳ Waiting for document table to load...`);
+
+    await this.page.waitForFunction(() => {
+      const rows = Array.from(document.querySelectorAll('tr'));
+      return rows.some(row => row.querySelectorAll('td').length > 100);
+    }, { timeout: 30000 });
+
+    this.log(`✅ Document table loaded`);
+    await this.randomWait(2000, 3000); // Extra wait for stability
+
     // Find the document table and locate first non-excise-tax document
     // Pierce County uses a grid-based table where all documents are in one row with 200+ cells
     const documentInfo = await this.page.evaluate(() => {
@@ -269,26 +280,20 @@ class PierceCountyWashingtonScraper extends DeedScraper {
         // Look for the data row (has many cells)
         if (cells.length < 100) continue;
 
-        // Each document is a group of cells. Look for "View" links which mark document starts
+        // Each document is a group of cells. Look for "View" cells which mark document starts
         for (let i = 0; i < cells.length; i++) {
           const cell = cells[i];
           const cellText = cell.textContent.trim();
 
-          // Found a "View" link - this marks the start of a document
-          if (cellText === 'View' && cell.querySelector('a')) {
-            const viewLink = cell.querySelector('a');
-
+          // Found a "View" cell - this marks the start of a document
+          // Note: The cell contains a <div> with an image, not an <a> link
+          if (cellText === 'View') {
             // Look ahead for instrument number (typically 2-3 cells later)
             let instrumentNumber = null;
-            let instrumentLink = null;
             for (let j = i + 1; j < Math.min(i + 5, cells.length); j++) {
               const text = cells[j].textContent.trim();
               if (text.match(/^\d{7,}$/)) {
                 instrumentNumber = text;
-                const link = cells[j].querySelector('a');
-                if (link) {
-                  instrumentLink = link;
-                }
                 break;
               }
             }
@@ -313,13 +318,13 @@ class PierceCountyWashingtonScraper extends DeedScraper {
                 continue;
               }
 
-              // Found a valid deed! Return the instrument link or view link
+              // Found a valid deed! Return info to click the View cell
               return {
                 found: true,
                 documentType: documentType,
                 instrumentNumber: instrumentNumber,
-                viewLink: viewLink ? viewLink.href : null,
-                instrumentLink: instrumentLink ? instrumentLink.href : null
+                viewCellIndex: i,
+                rowIndex: rows.indexOf(row)
               };
             }
           }
@@ -339,143 +344,103 @@ class PierceCountyWashingtonScraper extends DeedScraper {
 
     this.instrumentNumber = documentInfo.instrumentNumber;
 
-    // Click on the instrument link (prefer instrumentLink, fallback to viewLink)
-    const linkToClick = documentInfo.instrumentLink || documentInfo.viewLink;
-    if (!linkToClick) {
-      throw new Error('No clickable link found for the document');
+    // Click on the "View" cell to open the document
+    this.log(`🔗 Clicking on "View" cell for instrument ${documentInfo.instrumentNumber}...`);
+    console.log('[Pierce DEBUG] Clicking View cell...');
+
+    // Click the View cell
+    await this.page.evaluate((rowIdx, cellIdx) => {
+      const rows = Array.from(document.querySelectorAll('tr'));
+      const row = rows[rowIdx];
+      if (row) {
+        const cells = Array.from(row.querySelectorAll('td'));
+        const cell = cells[cellIdx];
+        if (cell) {
+          // Click the cell (the div inside is clickable)
+          cell.click();
+        }
+      }
+    }, documentInfo.rowIndex, documentInfo.viewCellIndex);
+
+    // Wait for new page/tab to potentially open
+    console.log('[Pierce DEBUG] Waiting 5 seconds for any new tabs...');
+    await this.randomWait(4000, 5000);
+
+    // Check all pages to see if a new one opened
+    const pages = await this.browser.pages();
+    console.log(`[Pierce DEBUG] Total pages: ${pages.length}`);
+
+    // Look for the newest page (not the original search page)
+    let documentPage = null;
+    if (pages.length > 1) {
+      // Get the last page (usually the newest)
+      documentPage = pages[pages.length - 1];
+
+      const newURL = documentPage.url();
+      console.log(`[Pierce DEBUG] Found new page at: ${newURL}`);
+
+      // Make sure it's not the search page
+      if (!newURL.includes('SearchEntry') && !newURL.includes('SearchResults')) {
+        this.log(`✅ Document page opened in new tab: ${newURL}`);
+
+        // Switch context to the new page for the next step
+        this.page = documentPage;
+        console.log('[Pierce DEBUG] Switched context to new page');
+      } else {
+        console.log('[Pierce DEBUG] New page is still a search page, might not have opened correctly');
+        // Try using the current page
+        documentPage = null;
+      }
+    } else {
+      console.log('[Pierce DEBUG] No new pages detected, checking if current page navigated...');
+
+      // Check if current page URL changed
+      const currentURL = this.page.url();
+      console.log(`[Pierce DEBUG] Current page URL: ${currentURL}`);
+
+      if (currentURL.includes('Search')) {
+        this.log(`⚠️  No new page detected and still on search page`);
+      }
     }
 
-    this.log(`🔗 Clicking on instrument link...`);
-    await Promise.all([
-      this.page.waitForNavigation({ waitUntil: 'networkidle2', timeout: 30000 }),
-      this.page.goto(linkToClick, { waitUntil: 'networkidle2' })
-    ]);
-
-    this.log(`✅ Navigated to document details page`);
-    await this.randomWait(2000, 3000);
+    await this.randomWait(1000, 2000);
   }
 
   /**
-   * Step 3: Download PDF - Click 'image:' icon, then 'Get Image Now'
-   * Based on Mecklenburg County's pattern
+   * Step 3: Download PDF - Click 'Get Image Now' directly
+   * After clicking View button, a new window opens - we go directly to "Get Image Now"
    */
   async downloadDeedPdf() {
     const startTime = Date.now();
 
     try {
       this.log(`📥 STEP 3: Downloading PDF...`);
-      this.log(`🖼️  Clicking "Image" icon to open PDF export page...`);
 
-      // Setup new page listener BEFORE clicking the button
-      const newPagePromise = new Promise(resolve =>
-        this.browser.once('targetcreated', target => resolve(target))
-      );
+      // Check if we're already on a new window/page from clicking View
+      // If so, we can skip the image icon click and go directly to "Get Image Now"
+      const currentUrl = this.page.url();
+      this.log(`Current page URL: ${currentUrl}`);
 
-      // Click the image icon (multiple strategies like Mecklenburg)
-      const imageButtonClicked = await this.page.evaluate(() => {
-        // Strategy 1: Look for "Image:" text in table cells and find the icon next to it
-        const tableCells = Array.from(document.querySelectorAll('td, th'));
+      let popupPage = this.page; // Use current page (which was set in findPriorDeed)
 
-        for (const cell of tableCells) {
-          const text = cell.textContent.trim();
-          if (text === 'Image:' || text.startsWith('Image:')) {
-            // Found the "Image:" label, look for icon in next cell or within same row
-            const row = cell.parentElement;
-            const nextCell = cell.nextElementSibling;
-
-            // Check next cell for a link with an image
-            if (nextCell) {
-              const link = nextCell.querySelector('a');
-              if (link) {
-                link.click();
-                return { success: true, text: 'Image icon (in next cell)' };
-              }
-
-              // Or check if there's an image that's clickable
-              const img = nextCell.querySelector('img');
-              if (img && img.parentElement.tagName === 'A') {
-                img.parentElement.click();
-                return { success: true, text: 'Image icon (img in next cell)' };
-              }
-            }
-
-            // Check in the same row for any clickable images
-            if (row) {
-              const links = row.querySelectorAll('a');
-              for (const link of links) {
-                const img = link.querySelector('img');
-                if (img) {
-                  link.click();
-                  return { success: true, text: 'Image icon (in same row)' };
-                }
-              }
-            }
-          }
-        }
-
-        // Strategy 2: Look for small document/image icons in the main document
-        const imageIcons = Array.from(document.querySelectorAll('a img'));
-        for (const icon of imageIcons) {
-          const src = icon.src || '';
-          const alt = (icon.alt || '').toLowerCase();
-          const title = (icon.title || '').toLowerCase();
-
-          // Look for document/image icons
-          if (src.includes('doc') || src.includes('image') || src.includes('icon') ||
-              alt.includes('image') || title.includes('image')) {
-            const parent = icon.parentElement;
-            if (parent && parent.tagName === 'A') {
-              parent.click();
-              return { success: true, text: `Image icon (${src.split('/').pop()})` };
-            }
-          }
-        }
-
-        // Strategy 3: Look for any link with "image" in attributes
-        const clickables = Array.from(document.querySelectorAll('a'));
-        for (const el of clickables) {
-          const title = (el.title || '').toLowerCase();
-          const href = (el.href || '').toLowerCase();
-
-          if (title.includes('image') || href.includes('image')) {
-            el.click();
-            return { success: true, text: el.title || 'Image link' };
-          }
-        }
-
-        return { success: false };
-      });
-
-      if (!imageButtonClicked.success) {
-        throw new Error('Could not find "Image" icon on document page');
-      }
-
-      this.log(`✅ Clicked: ${imageButtonClicked.text}`);
-
-      // Wait for the new popup window to open
-      this.log('⏳ Waiting for popup window to open...');
-
-      const exportTarget = await Promise.race([
-        newPagePromise,
-        new Promise((_, reject) =>
-          setTimeout(() => reject(new Error('Popup timeout after 15 seconds')), 15000)
-        )
-      ]);
-
-      await this.randomWait(2000, 3000);
-
-      // Get the popup page
-      let popupPage = await exportTarget.page();
-
-      // If page() returns null, find it manually
-      if (!popupPage) {
-        this.log('  Finding popup manually...');
-        await this.randomWait(2000, 3000);
+      // If we're still on search page, we need to find the popup manually
+      if (currentUrl.includes('Search')) {
+        this.log('⚠️  Still on search page, looking for popup window...');
         const pages = await this.browser.pages();
-        popupPage = pages[pages.length - 1];
+
+        // Find the document page (not search page)
+        for (const page of pages) {
+          const url = page.url();
+          if (!url.includes('SearchEntry') && !url.includes('SearchResults')) {
+            popupPage = page;
+            this.page = page;
+            this.log(`✅ Found document page: ${url}`);
+            break;
+          }
+        }
       }
 
-      this.log(`✅ Popup opened: ${popupPage.url()}`);
+      this.log(`✅ Using page: ${popupPage.url()}`);
       await this.randomWait(3000, 4000);
 
       // Look for LTViewer iframe (common in deed systems)
