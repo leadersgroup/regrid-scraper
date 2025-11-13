@@ -974,27 +974,131 @@ class GuilfordCountyNorthCarolinaScraper extends DeedScraper {
 
       // Strategy 5: If we're on deed viewer page, always try screenshot as fallback
       if (currentUrl.includes('gis_viewimage.php') || currentUrl.includes('.pdf')) {
-        this.log('📥 Attempting screenshot capture as fallback...');
+        this.log('📥 Attempting multi-page screenshot capture...');
 
         try {
           // Wait a bit more to ensure content is rendered
           await new Promise(resolve => setTimeout(resolve, 5000));
 
-          // Take a full page screenshot regardless of detected content
-          const screenshotBuffer = await this.page.screenshot({
-            type: 'png',
-            fullPage: true
+          // Check if there are multiple pages (look for navigation controls)
+          const pageInfo = await this.page.evaluate(() => {
+            // Check for common page navigation patterns
+            const pageText = document.body.innerText || '';
+            const pageMatch = pageText.match(/Page\s+(\d+)\s+of\s+(\d+)/i);
+            const pageInputs = document.querySelectorAll('input[type="text"], input[type="number"]');
+            let currentPage = 1;
+            let totalPages = 1;
+
+            if (pageMatch) {
+              currentPage = parseInt(pageMatch[1]);
+              totalPages = parseInt(pageMatch[2]);
+            }
+
+            // Check for page navigation buttons
+            const buttons = Array.from(document.querySelectorAll('button, a, [onclick]'));
+            const hasNextButton = buttons.some(btn =>
+              btn.textContent?.includes('Next') ||
+              btn.onclick?.toString().includes('next') ||
+              btn.getAttribute('onclick')?.includes('next')
+            );
+            const hasPrevButton = buttons.some(btn =>
+              btn.textContent?.includes('Previous') ||
+              btn.textContent?.includes('Prev') ||
+              btn.onclick?.toString().includes('prev') ||
+              btn.getAttribute('onclick')?.includes('prev')
+            );
+
+            return {
+              currentPage,
+              totalPages,
+              hasNavigation: hasNextButton || hasPrevButton || totalPages > 1,
+              pageMatch: pageMatch ? pageMatch[0] : null
+            };
           });
 
-          // Check if screenshot is meaningful (not blank)
-          const isBlank = await this.isImageBlank(screenshotBuffer);
+          this.log(`📄 Page info: ${pageInfo.currentPage}/${pageInfo.totalPages}`);
 
-          if (!isBlank) {
-            // Convert screenshot to PDF
-            const pdfBase64 = await this.convertImageToPdf(screenshotBuffer);
+          // Capture pages
+          const pageBuffers = [];
+
+          if (pageInfo.hasNavigation && pageInfo.totalPages > 1) {
+            this.log(`📚 Detected multi-page document with ${pageInfo.totalPages} pages`);
+
+            // Navigate to first page if not already there
+            if (pageInfo.currentPage !== 1) {
+              // Try to navigate to first page
+              await this.page.evaluate(() => {
+                const buttons = Array.from(document.querySelectorAll('button, a, [onclick]'));
+                const firstButton = buttons.find(btn =>
+                  btn.textContent?.includes('First') ||
+                  btn.onclick?.toString().includes('first') ||
+                  btn.getAttribute('onclick')?.includes('first')
+                );
+                if (firstButton) firstButton.click();
+              });
+              await new Promise(resolve => setTimeout(resolve, 3000));
+            }
+
+            // Capture each page
+            for (let i = 1; i <= Math.min(pageInfo.totalPages, 20); i++) { // Limit to 20 pages for safety
+              this.log(`📸 Capturing page ${i}/${pageInfo.totalPages}...`);
+
+              // Take screenshot of current page
+              const pageScreenshot = await this.page.screenshot({
+                type: 'png',
+                fullPage: true
+              });
+
+              // Check if screenshot is meaningful
+              const isBlank = await this.isImageBlank(pageScreenshot);
+              if (!isBlank) {
+                pageBuffers.push(pageScreenshot);
+              }
+
+              // Navigate to next page if not the last one
+              if (i < pageInfo.totalPages) {
+                const navigated = await this.page.evaluate(() => {
+                  const buttons = Array.from(document.querySelectorAll('button, a, [onclick]'));
+                  const nextButton = buttons.find(btn =>
+                    btn.textContent?.includes('Next') ||
+                    btn.onclick?.toString().includes('next') ||
+                    btn.getAttribute('onclick')?.includes('next')
+                  );
+                  if (nextButton) {
+                    nextButton.click();
+                    return true;
+                  }
+                  return false;
+                });
+
+                if (navigated) {
+                  await new Promise(resolve => setTimeout(resolve, 3000));
+                } else {
+                  this.log('⚠️ Could not navigate to next page');
+                  break;
+                }
+              }
+            }
+          } else {
+            // Single page or no navigation detected
+            this.log('📄 Capturing single page document...');
+            const screenshotBuffer = await this.page.screenshot({
+              type: 'png',
+              fullPage: true
+            });
+
+            const isBlank = await this.isImageBlank(screenshotBuffer);
+            if (!isBlank) {
+              pageBuffers.push(screenshotBuffer);
+            }
+          }
+
+          if (pageBuffers.length > 0) {
+            // Convert screenshots to multi-page PDF
+            const pdfBase64 = await this.convertMultipleImagesToPdf(pageBuffers);
 
             if (pdfBase64) {
-              this.log('✅ Successfully captured deed viewer as screenshot');
+              this.log(`✅ Successfully captured ${pageBuffers.length} page(s) as PDF`);
 
               // Clean up event listener
               mainPage.off('response', responseHandler);
@@ -1009,7 +1113,7 @@ class GuilfordCountyNorthCarolinaScraper extends DeedScraper {
               };
             }
           } else {
-            this.log('⚠️ Screenshot appears to be blank');
+            this.log('⚠️ All captured screenshots appear to be blank');
           }
         } catch (dlErr) {
           this.log(`⚠️  Screenshot capture failed: ${dlErr.message}`);
@@ -1321,6 +1425,79 @@ class GuilfordCountyNorthCarolinaScraper extends DeedScraper {
       return convertedPdfBase64;
     } catch (error) {
       this.log(`❌ Failed to convert image to PDF: ${error.message}`);
+      throw error;
+    }
+  }
+
+  /**
+   * Convert multiple image buffers to a multi-page PDF
+   */
+  async convertMultipleImagesToPdf(imageBuffers) {
+    try {
+      this.log(`🔄 Converting ${imageBuffers.length} images to multi-page PDF...`);
+
+      // Create a new PDF document
+      const pdfDoc = await PDFDocument.create();
+
+      // Process each image and add as a page
+      for (let i = 0; i < imageBuffers.length; i++) {
+        this.log(`  Processing page ${i + 1}/${imageBuffers.length}...`);
+
+        try {
+          // Convert image to PNG using sharp
+          const pngBuffer = await sharp(imageBuffers[i])
+            .png()
+            .toBuffer();
+
+          // Get image dimensions
+          const metadata = await sharp(imageBuffers[i]).metadata();
+          const width = metadata.width || 612;
+          const height = metadata.height || 792;
+
+          // Embed the PNG image
+          const pngImage = await pdfDoc.embedPng(pngBuffer);
+
+          // Calculate page size to fit image (maintain aspect ratio)
+          const maxWidth = 612; // 8.5 inches at 72 DPI
+          const maxHeight = 792; // 11 inches at 72 DPI
+          let pageWidth = width;
+          let pageHeight = height;
+
+          // Scale down if image is too large
+          if (pageWidth > maxWidth || pageHeight > maxHeight) {
+            const scale = Math.min(maxWidth / pageWidth, maxHeight / pageHeight);
+            pageWidth = pageWidth * scale;
+            pageHeight = pageHeight * scale;
+          }
+
+          // Add a page with the image dimensions
+          const page = pdfDoc.addPage([pageWidth, pageHeight]);
+
+          // Draw the image on the page
+          page.drawImage(pngImage, {
+            x: 0,
+            y: 0,
+            width: pageWidth,
+            height: pageHeight,
+          });
+        } catch (pageError) {
+          this.log(`⚠️  Failed to process page ${i + 1}: ${pageError.message}`);
+        }
+      }
+
+      // Save the PDF
+      const pdfBytes = await pdfDoc.save();
+      const convertedPdfBase64 = Buffer.from(pdfBytes).toString('base64');
+
+      this.log(`✅ Multi-page PDF created: ${(pdfBytes.length / 1024).toFixed(2)} KB with ${imageBuffers.length} page(s)`);
+      return convertedPdfBase64;
+    } catch (error) {
+      this.log(`❌ Failed to convert images to multi-page PDF: ${error.message}`);
+      // Fall back to single page if multi-page fails
+      if (imageBuffers.length > 0) {
+        this.log(`🔄 Falling back to single page PDF...`);
+        return await this.convertImageToPdf(imageBuffers[0]);
+      }
       throw error;
     }
   }
