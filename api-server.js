@@ -465,7 +465,7 @@ app.post('/api/getPriorDeed', async (req, res) => {
     const normalizedState = (state || 'FL').toUpperCase();
 
     // Check if 2Captcha API key is configured (required for some counties)
-    const countiesRequiringCaptcha = ['Orange', 'Bexar', 'Wake', 'Guilford'];
+    const countiesRequiringCaptcha = ['Orange', 'Bexar', 'Wake', 'Guilford', 'Forsyth'];
     if (countiesRequiringCaptcha.includes(normalizedCounty) && !process.env.TWOCAPTCHA_TOKEN) {
       return res.status(503).json({
         success: false,
