@@ -306,7 +306,7 @@ class PierceCountyWashingtonScraper extends DeedScraper {
               const text = cells[j].textContent.trim();
               if (text.match(/^(STATUTORY\s+)?WARRANTY\s+DEED$/i) ||
                   text.match(/^QUIT\s*CLAIM\s+DEED$/i) ||
-                  text.match(/^TRUSTEE\s+DEED$/i) ||
+                  text.match(/^TRUSTEE'?S?\s+DEED$/i) ||  // Matches: TRUSTEE DEED, TRUSTEE'S DEED, TRUSTEES DEED
                   text.match(/^DEED$/i) ||
                   text.match(/^EXCISE\s+TAX\s+AFFIDAVIT$/i) ||
                   text.match(/^DEED\s+OF\s+TRUST$/i)) {
