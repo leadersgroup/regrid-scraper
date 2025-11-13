@@ -557,17 +557,48 @@ class GuilfordCountyNorthCarolinaScraper extends DeedScraper {
       const contentType = response.headers()['content-type'] || '';
       if (contentType.includes('application/pdf')) {
         this.log('📄 Deed viewer is serving a PDF directly!');
-        // Try to get the PDF buffer from the response
+        // Store the URL to download the PDF directly
+        this.directPdfUrl = deedTypeInfo.href;
+
+        // Try to download the PDF immediately using fetch in page context
         try {
-          const pdfBuffer = await response.buffer();
-          if (pdfBuffer && pdfBuffer.length > 1000) {
-            this.directPdfBase64 = pdfBuffer.toString('base64');
-            this.log(`✅ Captured PDF from response: ${(pdfBuffer.length / 1024).toFixed(2)} KB`);
+          this.log('📥 Downloading PDF from deed viewer...');
+          const pdfBase64 = await deedPage.evaluate(async (url) => {
+            try {
+              const response = await fetch(url, {
+                credentials: 'include',
+                headers: {
+                  'Accept': 'application/pdf,*/*'
+                }
+              });
+
+              if (!response.ok) {
+                throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+              }
+
+              const blob = await response.blob();
+              const reader = new FileReader();
+
+              return new Promise((resolve, reject) => {
+                reader.onloadend = () => {
+                  const base64 = reader.result.split(',')[1];
+                  resolve(base64);
+                };
+                reader.onerror = reject;
+                reader.readAsDataURL(blob);
+              });
+            } catch (err) {
+              throw new Error(`Fetch failed: ${err.message}`);
+            }
+          }, deedTypeInfo.href);
+
+          if (pdfBase64) {
+            this.directPdfBase64 = pdfBase64;
+            const pdfSize = Buffer.from(pdfBase64, 'base64').length;
+            this.log(`✅ Successfully downloaded PDF: ${(pdfSize / 1024).toFixed(2)} KB`);
           }
-        } catch (bufferErr) {
-          this.log('⚠️ Could not capture PDF from response, will try alternative method');
-          // Store the URL as fallback
-          this.directPdfUrl = deedTypeInfo.href;
+        } catch (fetchErr) {
+          this.log(`⚠️ Could not fetch PDF directly: ${fetchErr.message}`);
         }
       }
 
