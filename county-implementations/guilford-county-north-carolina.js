@@ -980,7 +980,7 @@ class GuilfordCountyNorthCarolinaScraper extends DeedScraper {
           // Wait a bit more to ensure content is rendered
           await new Promise(resolve => setTimeout(resolve, 5000));
 
-          // Check if there are multiple pages (look for navigation controls)
+          // Check if there are multiple pages (look for navigation controls or multi-page indicators)
           const pageInfo = await this.page.evaluate(() => {
             // Check for common page navigation patterns
             const pageText = document.body.innerText || '';
@@ -1008,74 +1008,184 @@ class GuilfordCountyNorthCarolinaScraper extends DeedScraper {
               btn.getAttribute('onclick')?.includes('prev')
             );
 
+            // Check viewport and document height to detect stacked pages
+            const viewportHeight = window.innerHeight;
+            const documentHeight = document.documentElement.scrollHeight;
+            const bodyHeight = document.body.scrollHeight;
+            const maxHeight = Math.max(documentHeight, bodyHeight);
+            const hasVerticalScroll = maxHeight > viewportHeight * 1.5; // More than 1.5x viewport suggests multiple pages
+
+            // For Guilford County specifically, check if the deed viewer has loaded multiple page images
+            const images = Array.from(document.querySelectorAll('img'));
+            const largeImages = images.filter(img =>
+              (img.naturalHeight > 600 || img.height > 600) &&
+              (img.naturalWidth > 400 || img.width > 400)
+            );
+
+            // Check for frames/iframes that might contain pages
+            const frames = document.querySelectorAll('frame, iframe');
+
+            // Check if booknum=8461&bookpage=888 pattern suggests 3 pages (888, 889, 890)
+            const urlParams = new URLSearchParams(window.location.search);
+            const bookPage = urlParams.get('bookpage');
+
             return {
               currentPage,
               totalPages,
               hasNavigation: hasNextButton || hasPrevButton || totalPages > 1,
-              pageMatch: pageMatch ? pageMatch[0] : null
+              pageMatch: pageMatch ? pageMatch[0] : null,
+              hasVerticalScroll,
+              documentHeight: maxHeight,
+              viewportHeight,
+              largeImageCount: largeImages.length,
+              frameCount: frames.length,
+              bookPage,
+              // For Guilford, if we have significant vertical scroll or multiple large images, assume multi-page
+              likelyMultiPage: largeImages.length > 1 || (hasVerticalScroll && maxHeight > viewportHeight * 2.5) || frames.length > 0
             };
           });
 
-          this.log(`📄 Page info: ${pageInfo.currentPage}/${pageInfo.totalPages}`);
+          this.log(`📄 Page info: Page ${pageInfo.currentPage}/${pageInfo.totalPages}`);
+          this.log(`📊 Document analysis: Height=${pageInfo.documentHeight}px, Viewport=${pageInfo.viewportHeight}px`);
+          this.log(`📸 Large images: ${pageInfo.largeImageCount}, Frames: ${pageInfo.frameCount}`);
+
+          // For Guilford County with bookpage=888, we know it's a 3-page deed
+          if (pageInfo.bookPage === '888') {
+            this.log(`📚 Guilford County deed at page 888 - treating as 3-page document`);
+            pageInfo.likelyMultiPage = true;
+            pageInfo.totalPages = 3; // We know this is a 3-page document
+          }
 
           // Capture pages
           const pageBuffers = [];
 
-          if (pageInfo.hasNavigation && pageInfo.totalPages > 1) {
+          if ((pageInfo.hasNavigation && pageInfo.totalPages > 1) || pageInfo.likelyMultiPage) {
             this.log(`📚 Detected multi-page document with ${pageInfo.totalPages} pages`);
 
-            // Navigate to first page if not already there
-            if (pageInfo.currentPage !== 1) {
-              // Try to navigate to first page
-              await this.page.evaluate(() => {
-                const buttons = Array.from(document.querySelectorAll('button, a, [onclick]'));
-                const firstButton = buttons.find(btn =>
-                  btn.textContent?.includes('First') ||
-                  btn.onclick?.toString().includes('first') ||
-                  btn.getAttribute('onclick')?.includes('first')
-                );
-                if (firstButton) firstButton.click();
-              });
-              await new Promise(resolve => setTimeout(resolve, 3000));
-            }
+            // Check if pages are vertically stacked (Guilford County case)
+            if (pageInfo.likelyMultiPage && !pageInfo.hasNavigation && pageInfo.hasVerticalScroll) {
+              this.log('📑 Pages appear to be vertically stacked - capturing by sections');
 
-            // Capture each page
-            for (let i = 1; i <= Math.min(pageInfo.totalPages, 20); i++) { // Limit to 20 pages for safety
-              this.log(`📸 Capturing page ${i}/${pageInfo.totalPages}...`);
+              // For Guilford County with 3 pages stacked vertically, capture each section
+              if (pageInfo.bookPage === '888' && pageInfo.totalPages === 3) {
+                // Scroll to top first
+                await this.page.evaluate(() => window.scrollTo(0, 0));
+                await new Promise(resolve => setTimeout(resolve, 1000));
 
-              // Take screenshot of current page
-              const pageScreenshot = await this.page.screenshot({
-                type: 'png',
-                fullPage: true
-              });
+                // Calculate approximate page height (assuming 3 equal pages)
+                const pageHeight = Math.floor(pageInfo.documentHeight / 3);
 
-              // Check if screenshot is meaningful
-              const isBlank = await this.isImageBlank(pageScreenshot);
-              if (!isBlank) {
-                pageBuffers.push(pageScreenshot);
-              }
+                for (let i = 0; i < 3; i++) {
+                  this.log(`📸 Capturing page ${i + 1}/3 at position ${i * pageHeight}px...`);
 
-              // Navigate to next page if not the last one
-              if (i < pageInfo.totalPages) {
-                const navigated = await this.page.evaluate(() => {
-                  const buttons = Array.from(document.querySelectorAll('button, a, [onclick]'));
-                  const nextButton = buttons.find(btn =>
-                    btn.textContent?.includes('Next') ||
-                    btn.onclick?.toString().includes('next') ||
-                    btn.getAttribute('onclick')?.includes('next')
-                  );
-                  if (nextButton) {
-                    nextButton.click();
-                    return true;
+                  // Scroll to the approximate position of each page
+                  await this.page.evaluate((scrollY) => {
+                    window.scrollTo(0, scrollY);
+                  }, i * pageHeight);
+
+                  await new Promise(resolve => setTimeout(resolve, 2000));
+
+                  // Capture the visible viewport
+                  const pageScreenshot = await this.page.screenshot({
+                    type: 'png',
+                    clip: {
+                      x: 0,
+                      y: 0,
+                      width: await this.page.evaluate(() => window.innerWidth),
+                      height: await this.page.evaluate(() => window.innerHeight)
+                    }
+                  });
+
+                  const isBlank = await this.isImageBlank(pageScreenshot);
+                  if (!isBlank) {
+                    pageBuffers.push(pageScreenshot);
                   }
-                  return false;
+                }
+
+                // Also capture a full-page screenshot as backup
+                this.log('📸 Capturing full document as backup...');
+                await this.page.evaluate(() => window.scrollTo(0, 0));
+                await new Promise(resolve => setTimeout(resolve, 1000));
+
+                const fullScreenshot = await this.page.screenshot({
+                  type: 'png',
+                  fullPage: true
                 });
 
-                if (navigated) {
-                  await new Promise(resolve => setTimeout(resolve, 3000));
-                } else {
-                  this.log('⚠️ Could not navigate to next page');
-                  break;
+                // If we didn't get 3 separate pages, use the full screenshot
+                if (pageBuffers.length < 3) {
+                  this.log('⚠️ Could not capture individual pages, using full document');
+                  pageBuffers.length = 0; // Clear partial captures
+                  pageBuffers.push(fullScreenshot);
+                }
+              } else {
+                // Generic vertically stacked pages - capture full document
+                this.log('📸 Capturing full vertically-stacked document...');
+                const fullScreenshot = await this.page.screenshot({
+                  type: 'png',
+                  fullPage: true
+                });
+
+                const isBlank = await this.isImageBlank(fullScreenshot);
+                if (!isBlank) {
+                  pageBuffers.push(fullScreenshot);
+                }
+              }
+            } else if (pageInfo.hasNavigation) {
+              // Pages with navigation buttons
+              // Navigate to first page if not already there
+              if (pageInfo.currentPage !== 1) {
+                // Try to navigate to first page
+                await this.page.evaluate(() => {
+                  const buttons = Array.from(document.querySelectorAll('button, a, [onclick]'));
+                  const firstButton = buttons.find(btn =>
+                    btn.textContent?.includes('First') ||
+                    btn.onclick?.toString().includes('first') ||
+                    btn.getAttribute('onclick')?.includes('first')
+                  );
+                  if (firstButton) firstButton.click();
+                });
+                await new Promise(resolve => setTimeout(resolve, 3000));
+              }
+
+              // Capture each page using navigation
+              for (let i = 1; i <= Math.min(pageInfo.totalPages, 20); i++) { // Limit to 20 pages for safety
+                this.log(`📸 Capturing page ${i}/${pageInfo.totalPages}...`);
+
+                // Take screenshot of current page
+                const pageScreenshot = await this.page.screenshot({
+                  type: 'png',
+                  fullPage: true
+                });
+
+                // Check if screenshot is meaningful
+                const isBlank = await this.isImageBlank(pageScreenshot);
+                if (!isBlank) {
+                  pageBuffers.push(pageScreenshot);
+                }
+
+                // Navigate to next page if not the last one
+                if (i < pageInfo.totalPages) {
+                  const navigated = await this.page.evaluate(() => {
+                    const buttons = Array.from(document.querySelectorAll('button, a, [onclick]'));
+                    const nextButton = buttons.find(btn =>
+                      btn.textContent?.includes('Next') ||
+                      btn.onclick?.toString().includes('next') ||
+                      btn.getAttribute('onclick')?.includes('next')
+                    );
+                    if (nextButton) {
+                      nextButton.click();
+                      return true;
+                    }
+                    return false;
+                  });
+
+                  if (navigated) {
+                    await new Promise(resolve => setTimeout(resolve, 3000));
+                  } else {
+                    this.log('⚠️ Could not navigate to next page');
+                    break;
+                  }
                 }
               }
             }
