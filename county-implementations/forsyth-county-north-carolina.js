@@ -364,51 +364,123 @@ class ForsythCountyNorthCarolinaScraper extends DeedScraper {
     const startTime = Date.now();
 
     try {
-      this.log('🔍 Looking for Deeds tab...');
+      this.log('🔍 Looking for Deeds navigation...');
 
-      // Find and click Deeds tab
-      const deedsTabClicked = await this.page.evaluate(() => {
-        // Look for Deeds tab/link
-        const allElements = Array.from(document.querySelectorAll('a, button, span, div[role="tab"]'));
+      // Log current URL
+      const currentUrl = this.page.url();
+      this.log(`Current URL: ${currentUrl}`);
 
-        for (const el of allElements) {
-          const text = el.textContent.trim().toLowerCase();
-          if (text === 'deeds' || text.includes('deed')) {
-            el.click();
-            return true;
+      // First, let's see what navigation options are available
+      const availableLinks = await this.page.evaluate(() => {
+        const links = Array.from(document.querySelectorAll('a'));
+        return links.map(link => ({
+          text: link.textContent.trim(),
+          href: link.href,
+          id: link.id,
+          className: link.className
+        })).filter(l => l.text.length > 0 && l.text.length < 50);
+      });
+
+      this.log(`Found ${availableLinks.length} links on page`);
+
+      // Look for links that might be "Deeds"
+      const deedsLinks = availableLinks.filter(l =>
+        l.text.toLowerCase() === 'deeds' ||
+        l.text.toLowerCase().includes('deed')
+      );
+
+      this.log(`Found ${deedsLinks.length} potential deeds links:`);
+      deedsLinks.forEach(l => this.log(`  - "${l.text}" (${l.href})`));
+
+      // Find and click Deeds link (more specific - exact match preferred)
+      const deedsLinkInfo = await this.page.evaluate(() => {
+        // Look for exact "Deeds" link first
+        const allLinks = Array.from(document.querySelectorAll('a'));
+
+        // Priority 1: Exact match "Deeds"
+        for (const link of allLinks) {
+          const text = link.textContent.trim();
+          if (text === 'Deeds') {
+            link.click();
+            return { success: true, text, href: link.href, method: 'exact_match' };
           }
         }
 
-        return false;
+        // Priority 2: Link containing "Deeds" (case-insensitive)
+        for (const link of allLinks) {
+          const text = link.textContent.trim();
+          if (text.toLowerCase() === 'deeds') {
+            link.click();
+            return { success: true, text, href: link.href, method: 'case_insensitive' };
+          }
+        }
+
+        return { success: false };
       });
 
-      if (!deedsTabClicked) {
-        throw new Error('Could not find or click Deeds tab');
+      if (!deedsLinkInfo.success) {
+        throw new Error('Could not find Deeds link');
       }
 
-      this.log('✅ Clicked Deeds tab');
+      this.log(`✅ Clicked Deeds link: "${deedsLinkInfo.text}" (${deedsLinkInfo.method})`);
+      this.log(`   Target URL: ${deedsLinkInfo.href}`);
 
-      // Wait for deeds page to load
+      // Wait for navigation or content to load
       await new Promise(resolve => setTimeout(resolve, 5000));
 
-      // Click on 'Deeds' tab (might be nested)
-      this.log('🔍 Checking for nested Deeds tab...');
-      await this.page.evaluate(() => {
-        const allElements = Array.from(document.querySelectorAll('a, button, span, div[role="tab"]'));
-        for (const el of allElements) {
-          const text = el.textContent.trim().toLowerCase();
-          if (text === 'deeds') {
-            el.click();
-            return true;
-          }
-        }
-        return false;
-      });
+      // Log new URL after clicking
+      const newUrl = this.page.url();
+      this.log(`New URL after Deeds click: ${newUrl}`);
 
-      await new Promise(resolve => setTimeout(resolve, 3000));
+      // If we're still on the same page, check for nested tabs
+      if (newUrl === currentUrl) {
+        this.log('🔍 Checking for nested Deeds tab (page did not navigate)...');
+
+        const nestedTabClicked = await this.page.evaluate(() => {
+          // Look for tab elements specifically
+          const tabs = Array.from(document.querySelectorAll('[role="tab"], .tab, .nav-link'));
+
+          for (const tab of tabs) {
+            const text = tab.textContent.trim();
+            if (text === 'Deeds' || text.toLowerCase() === 'deeds') {
+              tab.click();
+              return { success: true, text };
+            }
+          }
+
+          return { success: false };
+        });
+
+        if (nestedTabClicked.success) {
+          this.log(`✅ Clicked nested Deeds tab: "${nestedTabClicked.text}"`);
+        }
+
+        await new Promise(resolve => setTimeout(resolve, 3000));
+      }
 
       // Find and click first entry under "Deed Type" column
       this.log('🔍 Looking for first Deed Type entry...');
+
+      // First, log what tables and headers we have
+      const tableInfo = await this.page.evaluate(() => {
+        const tables = Array.from(document.querySelectorAll('table'));
+        return tables.map((table, tableIdx) => {
+          const rows = Array.from(table.querySelectorAll('tr'));
+          const headers = Array.from(rows[0]?.querySelectorAll('th, td') || [])
+            .map(h => h.textContent.trim());
+          return {
+            index: tableIdx,
+            rowCount: rows.length,
+            headers: headers
+          };
+        });
+      });
+
+      this.log(`Found ${tableInfo.length} tables on page:`);
+      tableInfo.forEach(t => {
+        this.log(`  Table ${t.index}: ${t.rowCount} rows, Headers: [${t.headers.join(', ')}]`);
+      });
+
       const deedTypeInfo = await this.page.evaluate(() => {
         // Look for table with deed information
         const tables = Array.from(document.querySelectorAll('table'));
@@ -424,8 +496,8 @@ class ForsythCountyNorthCarolinaScraper extends DeedScraper {
             const headers = Array.from(rows[i].querySelectorAll('th'));
             for (let j = 0; j < headers.length; j++) {
               const headerText = headers[j].textContent.toLowerCase().trim();
-              // Look for exact "deed type" header
-              if (headerText === 'deed type') {
+              // Look for exact "deed type" header or variations
+              if (headerText === 'deed type' || headerText === 'type' || headerText.includes('deed')) {
                 deedTypeColumnIndex = j;
                 headerRowIndex = i;
                 break;
@@ -436,7 +508,9 @@ class ForsythCountyNorthCarolinaScraper extends DeedScraper {
 
           // Find first data row AFTER header row with a clickable deed type
           if (deedTypeColumnIndex !== -1 && headerRowIndex !== -1) {
-            // Start from row after header
+            const deedEntries = [];
+
+            // Collect all deed entries first for logging
             for (let i = headerRowIndex + 1; i < rows.length; i++) {
               const row = rows[i];
               const cells = Array.from(row.querySelectorAll('td'));
@@ -447,14 +521,35 @@ class ForsythCountyNorthCarolinaScraper extends DeedScraper {
 
                 if (link) {
                   const deedType = link.textContent.trim();
-                  // Only return if the deed type text is meaningful
                   if (deedType.length > 0) {
-                    let href = link.href;
-                    // CLICK the link to trigger any JavaScript that sets up session
-                    link.click();
-                    return { success: true, deedType, href, clicked: true };
+                    deedEntries.push({
+                      index: i,
+                      deedType,
+                      href: link.href
+                    });
                   }
                 }
+              }
+            }
+
+            // If we found entries, click the first one
+            if (deedEntries.length > 0) {
+              const firstEntry = deedEntries[0];
+              // Re-find and click the link
+              const row = rows[firstEntry.index];
+              const cells = Array.from(row.querySelectorAll('td'));
+              const link = cells[deedTypeColumnIndex]?.querySelector('a');
+
+              if (link) {
+                link.click();
+                return {
+                  success: true,
+                  deedType: firstEntry.deedType,
+                  href: firstEntry.href,
+                  clicked: true,
+                  totalEntries: deedEntries.length,
+                  allEntries: deedEntries.map(e => e.deedType)
+                };
               }
             }
           }
@@ -467,7 +562,14 @@ class ForsythCountyNorthCarolinaScraper extends DeedScraper {
         throw new Error('Could not find or click Deed Type entry');
       }
 
-      this.log(`✅ Found and clicked deed type: ${deedTypeInfo.deedType}`);
+      this.log(`✅ Found ${deedTypeInfo.totalEntries} deed entries:`);
+      if (deedTypeInfo.allEntries) {
+        deedTypeInfo.allEntries.forEach((entry, idx) => {
+          this.log(`  ${idx + 1}. ${entry}`);
+        });
+      }
+
+      this.log(`✅ Clicked first deed type: ${deedTypeInfo.deedType}`);
       this.log(`📄 Deed page URL: ${deedTypeInfo.href}`);
 
       // The link was already clicked in the evaluate function
