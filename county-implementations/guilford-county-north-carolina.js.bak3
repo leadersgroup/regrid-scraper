@@ -477,11 +477,12 @@ class GuilfordCountyNorthCarolinaScraper extends DeedScraper {
                                           deedTypeUpper.includes('BUILDING') ||
                                           deedTypeUpper.includes('MISC');
 
-                  // Only return if it's an actual deed and not building details
+                  // Only click if it's an actual deed and not building details
                   if ((isValidDeed || isDeedUrl) && !isBuildingDetail && deedType.length > 0) {
-                    // DON'T click for Guilford - just return the info
-                    // Guilford's links open in new windows which breaks session
-                    return { success: true, deedType, href, clicked: false };
+                    // CLICK the link to trigger any JavaScript that sets up session
+                    // This is the Forsyth approach - click HERE, not later
+                    link.click();
+                    return { success: true, deedType, href, clicked: true };
                   }
                 }
               }
@@ -498,11 +499,12 @@ class GuilfordCountyNorthCarolinaScraper extends DeedScraper {
           // Check if this link is likely a deed document
           if ((text.includes('DEED') && !text.includes('BUILDING') && !text.includes('IMPROVEMENT') && !text.includes('IMPROVEMENTS')) ||
               (href.includes('deed') && !href.includes('Building') && !href.includes('Improvement'))) {
+            link.click();
             return {
               success: true,
               deedType: link.textContent.trim() || 'DEED',
               href: href,
-              clicked: false
+              clicked: true
             };
           }
         }
@@ -514,21 +516,44 @@ class GuilfordCountyNorthCarolinaScraper extends DeedScraper {
         throw new Error('Could not find any deed document links (only found building/improvement details)');
       }
 
-      this.log(`✅ Found deed type: ${deedTypeInfo.deedType}`);
+      this.log(`✅ Found and clicked deed type: ${deedTypeInfo.deedType}`);
       this.log(`📄 Deed page URL: ${deedTypeInfo.href}`);
 
-      // For Guilford, navigate directly to the deed URL with &export=pdf parameter
-      // This avoids the new tab/window issue
-      this.log('🌐 Navigating directly to deed URL with export parameter...');
-      const deedUrl = new URL(deedTypeInfo.href);
-      deedUrl.searchParams.set('export', 'pdf');
-      const pdfExportUrl = deedUrl.toString();
+      // The link was already clicked in the evaluate function
+      // Now we need to handle the navigation or new tab that opens
 
-      this.log(`  Navigating to: ${pdfExportUrl}`);
-      await this.page.goto(pdfExportUrl, {
-        waitUntil: 'networkidle0',
-        timeout: 30000
-      });
+      // Check if link opens in same tab or new tab
+      this.log('⏳ Waiting for navigation after clicking deed link...');
+
+      try {
+        // First try to wait for navigation in same tab
+        await this.page.waitForNavigation({
+          waitUntil: 'networkidle0',
+          timeout: 5000
+        });
+        this.log('✅ Navigated in same tab with session intact');
+      } catch (e) {
+        // If no navigation in same tab, check for new tab
+        this.log('🔍 Checking for new tab...');
+
+        // Get all pages/tabs
+        const pages = await this.browser.pages();
+
+        // Find the new tab (last one opened)
+        if (pages.length > 1) {
+          const newPage = pages[pages.length - 1];
+          this.log('✅ Found new tab, switching context...');
+
+          // Wait for the new page to load
+          await newPage.waitForSelector('body', { timeout: 10000 });
+
+          // Switch to the new tab
+          this.page = newPage;
+          this.log('✅ Switched to deed document tab');
+        } else {
+          this.log('⚠️ No new tab opened, page may have loaded via JavaScript');
+        }
+      }
 
       // Wait a moment for any dynamic content
       await new Promise(resolve => setTimeout(resolve, 3000));
@@ -799,15 +824,16 @@ class GuilfordCountyNorthCarolinaScraper extends DeedScraper {
 
       throw new Error('Could not find PDF to download using any strategy');
 
-    } catch (error) {
+  } catch (error) {
       this.log(`❌ PDF download failed: ${error.message}`);
       return {
         success: false,
         duration: Date.now() - startTime,
         error: error.message
       };
-    }
   }
+}
+
 
   /**
    * Download PDF from URL using same method as Wake County
