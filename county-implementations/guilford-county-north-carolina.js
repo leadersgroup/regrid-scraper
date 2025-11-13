@@ -1059,11 +1059,69 @@ class GuilfordCountyNorthCarolinaScraper extends DeedScraper {
           // Capture pages
           const pageBuffers = [];
 
+          // Check for frames that might contain deed pages (Guilford County case)
+          const allFrames = this.page.frames();
+          const deedFrames = allFrames.filter(frame => {
+            const url = frame.url();
+            return url && url !== 'about:blank' && (url.includes('viewimage') || url.includes('gis_viewimage'));
+          });
+
+          if (deedFrames.length > 0 && pageInfo.bookPage === '888') {
+            this.log(`🖼️ Found ${deedFrames.length} deed frames - capturing each frame as a page`);
+            pageInfo.likelyMultiPage = true;
+            pageInfo.totalPages = deedFrames.length;
+            pageInfo.hasFrames = true;
+          }
+
           if ((pageInfo.hasNavigation && pageInfo.totalPages > 1) || pageInfo.likelyMultiPage) {
             this.log(`📚 Detected multi-page document with ${pageInfo.totalPages} pages`);
 
-            // Check if pages are vertically stacked (Guilford County case)
-            if (pageInfo.likelyMultiPage && !pageInfo.hasNavigation && pageInfo.hasVerticalScroll) {
+            // Check if pages are in frames (Guilford County special case)
+            if (pageInfo.hasFrames && deedFrames.length > 0) {
+              this.log('🖼️ Pages appear to be in separate frames - capturing each frame');
+
+              for (let i = 0; i < deedFrames.length; i++) {
+                const frame = deedFrames[i];
+                this.log(`📸 Capturing frame ${i + 1}/${deedFrames.length}...`);
+
+                try {
+                  // Wait for frame content to load
+                  await new Promise(resolve => setTimeout(resolve, 2000));
+
+                  // Capture the frame content
+                  const frameScreenshot = await this.page.screenshot({
+                    type: 'png',
+                    fullPage: true
+                  });
+
+                  const isBlank = await this.isImageBlank(frameScreenshot);
+                  if (!isBlank) {
+                    pageBuffers.push(frameScreenshot);
+                    this.log(`  ✅ Captured frame ${i + 1}`);
+                  } else {
+                    this.log(`  ⚠️ Frame ${i + 1} appears blank`);
+                  }
+                } catch (frameErr) {
+                  this.log(`  ❌ Failed to capture frame ${i + 1}: ${frameErr.message}`);
+                }
+              }
+
+              // If we didn't get enough pages from frames, try full page capture
+              if (pageBuffers.length < deedFrames.length) {
+                this.log('⚠️ Some frames were blank, trying full page capture as backup');
+                const fullScreenshot = await this.page.screenshot({
+                  type: 'png',
+                  fullPage: true
+                });
+
+                const isBlank = await this.isImageBlank(fullScreenshot);
+                if (!isBlank && pageBuffers.length === 0) {
+                  pageBuffers.push(fullScreenshot);
+                }
+              }
+            }
+            // Check if pages are vertically stacked
+            else if (pageInfo.likelyMultiPage && !pageInfo.hasNavigation && pageInfo.hasVerticalScroll) {
               this.log('📑 Pages appear to be vertically stacked - capturing by sections');
 
               // For Guilford County with 3 pages stacked vertically, capture each section
