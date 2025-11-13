@@ -364,7 +364,7 @@ class ForsythCountyNorthCarolinaScraper extends DeedScraper {
     const startTime = Date.now();
 
     try {
-      this.log('🔍 Looking for Deeds navigation...');
+      this.log('🔍 Looking for Deeds navigation... [v2.0 - DEBUG MODE]');
 
       // Log current URL
       const currentUrl = this.page.url();
