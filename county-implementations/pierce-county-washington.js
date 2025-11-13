@@ -258,46 +258,71 @@ class PierceCountyWashingtonScraper extends DeedScraper {
     await this.randomWait(1000, 2000);
 
     // Find the document table and locate first non-excise-tax document
+    // Pierce County uses a grid-based table where all documents are in one row with 200+ cells
     const documentInfo = await this.page.evaluate(() => {
-      // Find all rows in the results table
-      const rows = Array.from(document.querySelectorAll('table tr'));
+      // Find the data row (has many cells - typically 200+)
+      const rows = Array.from(document.querySelectorAll('tr'));
 
       for (const row of rows) {
         const cells = Array.from(row.querySelectorAll('td'));
-        if (cells.length === 0) continue;
 
-        // Check if this row has a document type cell
-        let documentType = '';
-        let instrumentLink = null;
+        // Look for the data row (has many cells)
+        if (cells.length < 100) continue;
 
-        for (const cell of cells) {
-          const text = cell.textContent.trim().toLowerCase();
+        // Each document is a group of cells. Look for "View" links which mark document starts
+        for (let i = 0; i < cells.length; i++) {
+          const cell = cells[i];
+          const cellText = cell.textContent.trim();
 
-          // Look for document type
-          if (text.includes('deed') || text.includes('warranty') ||
-              text.includes('quit') || text.includes('excise')) {
-            documentType = cell.textContent.trim();
+          // Found a "View" link - this marks the start of a document
+          if (cellText === 'View' && cell.querySelector('a')) {
+            const viewLink = cell.querySelector('a');
+
+            // Look ahead for instrument number (typically 2-3 cells later)
+            let instrumentNumber = null;
+            let instrumentLink = null;
+            for (let j = i + 1; j < Math.min(i + 5, cells.length); j++) {
+              const text = cells[j].textContent.trim();
+              if (text.match(/^\d{7,}$/)) {
+                instrumentNumber = text;
+                const link = cells[j].querySelector('a');
+                if (link) {
+                  instrumentLink = link;
+                }
+                break;
+              }
+            }
+
+            // Look ahead for document type (typically 8-9 cells after "View")
+            let documentType = null;
+            for (let j = i + 5; j < Math.min(i + 15, cells.length); j++) {
+              const text = cells[j].textContent.trim();
+              if (text.match(/^(STATUTORY\s+)?WARRANTY\s+DEED$/i) ||
+                  text.match(/^QUIT\s*CLAIM\s+DEED$/i) ||
+                  text.match(/^DEED$/i) ||
+                  text.match(/^EXCISE\s+TAX\s+AFFIDAVIT$/i)) {
+                documentType = text;
+                break;
+              }
+            }
+
+            // If we found both instrument number and document type
+            if (instrumentNumber && documentType) {
+              // Skip excise tax affidavits
+              if (documentType.toUpperCase().includes('EXCISE TAX AFFIDAVIT')) {
+                continue;
+              }
+
+              // Found a valid deed! Return the instrument link or view link
+              return {
+                found: true,
+                documentType: documentType,
+                instrumentNumber: instrumentNumber,
+                viewLink: viewLink ? viewLink.href : null,
+                instrumentLink: instrumentLink ? instrumentLink.href : null
+              };
+            }
           }
-
-          // Look for instrument number link
-          const link = cell.querySelector('a');
-          if (link && link.href) {
-            instrumentLink = {
-              href: link.href,
-              text: link.textContent.trim()
-            };
-          }
-        }
-
-        // If this row has a document type and it's NOT excise tax affidavit
-        if (documentType && instrumentLink &&
-            !documentType.toLowerCase().includes('excise tax affidavit')) {
-          return {
-            found: true,
-            documentType: documentType,
-            instrumentNumber: instrumentLink.text,
-            instrumentHref: instrumentLink.href
-          };
         }
       }
 
@@ -314,11 +339,16 @@ class PierceCountyWashingtonScraper extends DeedScraper {
 
     this.instrumentNumber = documentInfo.instrumentNumber;
 
-    // Click on the instrument link
+    // Click on the instrument link (prefer instrumentLink, fallback to viewLink)
+    const linkToClick = documentInfo.instrumentLink || documentInfo.viewLink;
+    if (!linkToClick) {
+      throw new Error('No clickable link found for the document');
+    }
+
     this.log(`🔗 Clicking on instrument link...`);
     await Promise.all([
       this.page.waitForNavigation({ waitUntil: 'networkidle2', timeout: 30000 }),
-      this.page.goto(documentInfo.instrumentHref, { waitUntil: 'networkidle2' })
+      this.page.goto(linkToClick, { waitUntil: 'networkidle2' })
     ]);
 
     this.log(`✅ Navigated to document details page`);
