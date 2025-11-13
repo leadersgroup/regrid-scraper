@@ -44,6 +44,7 @@ const WakeCountyNorthCarolinaScraper = require('./county-implementations/wake-co
 const MecklenburgCountyNorthCarolinaScraper = require('./county-implementations/mecklenburg-county-north-carolina');
 const GuilfordCountyNorthCarolinaScraper = require('./county-implementations/guilford-county-north-carolina');
 const ForsythCountyNorthCarolinaScraper = require('./county-implementations/forsyth-county-north-carolina');
+const KingCountyWashingtonScraper = require('./county-implementations/king-county-washington');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -327,6 +328,21 @@ app.get('/api/counties', (req, res) => {
           'Full PDF download'
         ],
         cost: '$0.001 per deed (with 2Captcha API)'
+      },
+      {
+        name: 'King County',
+        state: 'WA',
+        stateCode: 'Washington',
+        features: [
+          'Property search by address',
+          'RCW 42.56.070(9) acknowledgment',
+          'Property Detail page navigation',
+          'Sales History table extraction',
+          'Recording number detection',
+          'Document download from Register of Deeds',
+          'TIF to PDF conversion (if needed)'
+        ],
+        cost: 'Free (no CAPTCHA)'
       }
     ]
   });
@@ -359,7 +375,8 @@ function normalizeCountyName(county) {
     'wake': 'Wake',
     'mecklenburg': 'Mecklenburg',
     'guilford': 'Guilford',
-    'forsyth': 'Forsyth'
+    'forsyth': 'Forsyth',
+    'king': 'King'
   };
 
   return countyMap[normalized] || county;
@@ -423,6 +440,8 @@ async function processDeedDownload(address, county, state, options = {}) {
     scraper = new GuilfordCountyNorthCarolinaScraper(scraperOptions);
   } else if (detectedCounty === 'Forsyth' && detectedState === 'NC') {
     scraper = new ForsythCountyNorthCarolinaScraper(scraperOptions);
+  } else if (detectedCounty === 'King' && detectedState === 'WA') {
+    scraper = new KingCountyWashingtonScraper(scraperOptions);
   } else {
     throw new Error(`County "${detectedCounty}, ${detectedState}" is not yet supported`);
   }
@@ -465,7 +484,7 @@ app.post('/api/getPriorDeed', async (req, res) => {
     const normalizedState = (state || 'FL').toUpperCase();
 
     // Check if 2Captcha API key is configured (required for some counties)
-    const countiesRequiringCaptcha = ['Orange', 'Bexar', 'Wake', 'Guilford'];
+    const countiesRequiringCaptcha = ['Orange', 'Bexar', 'Wake', 'Guilford', 'Forsyth'];
     if (countiesRequiringCaptcha.includes(normalizedCounty) && !process.env.TWOCAPTCHA_TOKEN) {
       return res.status(503).json({
         success: false,
