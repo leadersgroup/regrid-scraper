@@ -70,9 +70,9 @@ async function testGuilfordWithPlaywright() {
     await page.waitForTimeout(1000);
 
     // Fill address
-    const testAddress = '1205 Glendale Dr';
+    const testAddress = '1209 Glendale Dr, Greensboro, NC 27406';
     const [streetNumber, ...streetNameParts] = testAddress.split(' ');
-    const streetName = streetNameParts.join(' ');
+    const streetName = streetNameParts.join(' ').replace(/, Greensboro, NC 27406/, '');
 
     console.log(`📝 Searching for: ${testAddress}`);
 

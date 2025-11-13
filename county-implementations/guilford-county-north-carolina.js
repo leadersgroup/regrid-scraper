@@ -597,7 +597,7 @@ class GuilfordCountyNorthCarolinaScraper extends DeedScraper {
   }
 
   /**
-   * Download PDF using same method as Wake County
+   * Download PDF using improved network interception
    */
   async downloadDeedPdf() {
     const startTime = Date.now();
@@ -605,18 +605,25 @@ class GuilfordCountyNorthCarolinaScraper extends DeedScraper {
     try {
       this.log('🔍 Looking for deed document on current page...');
 
-      // Set up network monitoring to capture dynamically loaded images
-      const capturedImageUrls = [];
+      // Set up enhanced network monitoring to capture resources
+      const capturedResources = [];
       const responseHandler = async (response) => {
         const url = response.url();
         const contentType = response.headers()['content-type'] || '';
 
-        // Capture image URLs (TIFF, PDF, or large images)
+        // Capture image/PDF resources
         if (contentType.includes('image') || contentType.includes('pdf') ||
             url.includes('.tif') || url.includes('.pdf') ||
             url.includes('viewimage') || url.includes('getimage')) {
-          capturedImageUrls.push(url);
-          this.log(`📸 Captured resource URL: ${url}`);
+
+          try {
+            const buffer = await response.buffer();
+            capturedResources.push({ url, buffer, contentType });
+            this.log(`📸 Captured resource: ${url} (${(buffer.length / 1024).toFixed(2)} KB)`);
+          } catch (bufferErr) {
+            // Resource might be cached or unavailable
+            this.log(`⚠️ Could not get buffer for: ${url}`);
+          }
         }
       };
       this.page.on('response', responseHandler);  // Attach to main page before any frame switching
@@ -1288,21 +1295,57 @@ class GuilfordCountyNorthCarolinaScraper extends DeedScraper {
         }
       }
 
-      // Strategy 6: Try captured image URLs from network monitoring
-      if (capturedImageUrls.length > 0) {
-        this.log(`🌐 Trying ${capturedImageUrls.length} captured resource URLs...`);
+      // Strategy 6: Try captured resources from network monitoring (IMPROVED)
+      if (capturedResources.length > 0) {
+        this.log(`🌐 Found ${capturedResources.length} captured resources from network monitoring`);
 
-        for (const imageUrl of capturedImageUrls) {
+        for (const resource of capturedResources) {
           try {
-            this.log(`  Attempting: ${imageUrl}`);
-            const pdfBase64 = await this.downloadPdfFromUrl(imageUrl);
+            this.log(`  Processing: ${resource.url} (${resource.contentType})`);
 
-            // Verify the content
-            const pdfBuffer = Buffer.from(pdfBase64, 'base64');
-            const isBlank = await this.isImageBlank(pdfBuffer);
+            // Check if buffer is valid
+            if (!resource.buffer || resource.buffer.length < 1000) {
+              this.log(`    Skipping - buffer too small`);
+              continue;
+            }
 
-            if (!isBlank && pdfBuffer.length > 1000) {
-              this.log('✅ Successfully downloaded deed from captured URL');
+            // Check for HTML error pages
+            const firstChars = resource.buffer.toString('utf8', 0, Math.min(100, resource.buffer.length));
+            if (firstChars.includes('<html') || firstChars.includes('<!DOCTYPE') ||
+                firstChars.includes('Notice</b>') || firstChars.includes('Error</b>')) {
+              this.log(`    Skipping - HTML error page`);
+              continue;
+            }
+
+            // Check if it's blank
+            const isBlank = await this.isImageBlank(resource.buffer);
+            if (isBlank) {
+              this.log(`    Skipping - blank image`);
+              continue;
+            }
+
+            // Process the buffer
+            const pdfSignature = resource.buffer.toString('utf8', 0, 4);
+            const tiffSignature = resource.buffer.toString('ascii', 0, 2);
+
+            let pdfBase64;
+
+            if (pdfSignature === '%PDF') {
+              this.log(`    ✅ Valid PDF found`);
+              pdfBase64 = resource.buffer.toString('base64');
+            } else if (tiffSignature === 'II' || tiffSignature === 'MM') {
+              this.log(`    ✅ TIFF found - converting to PDF...`);
+              pdfBase64 = await this.convertImageToPdf(resource.buffer);
+            } else if (resource.contentType.includes('image')) {
+              this.log(`    ✅ Image found - converting to PDF...`);
+              pdfBase64 = await this.convertImageToPdf(resource.buffer);
+            } else {
+              this.log(`    Skipping - unknown format`);
+              continue;
+            }
+
+            if (pdfBase64) {
+              this.log('✅ Successfully processed captured resource');
 
               // Clean up event listener
               mainPage.off('response', responseHandler);
@@ -1312,7 +1355,7 @@ class GuilfordCountyNorthCarolinaScraper extends DeedScraper {
                 duration: Date.now() - startTime,
                 pdfBase64,
                 filename: `guilford_deed_${Date.now()}.pdf`,
-                fileSize: pdfBuffer.length,
+                fileSize: Buffer.from(pdfBase64, 'base64').length,
                 downloadPath: ''
               };
             }
