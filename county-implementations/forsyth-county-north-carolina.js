@@ -397,21 +397,40 @@ class ForsythCountyNorthCarolinaScraper extends DeedScraper {
         // Look for exact "Deeds" link first
         const allLinks = Array.from(document.querySelectorAll('a'));
 
-        // Priority 1: Exact match "Deeds"
+        // Priority 1: Exact match "Deeds" that's a navigation link (not OutbuildingDetails)
         for (const link of allLinks) {
           const text = link.textContent.trim();
-          if (text === 'Deeds') {
+          const href = link.href || '';
+
+          // Must match "Deeds" exactly AND not be OutbuildingDetails
+          if (text === 'Deeds' && !href.includes('OutbuildingDetails') && !href.includes('Outbuilding')) {
             link.click();
-            return { success: true, text, href: link.href, method: 'exact_match' };
+            return { success: true, text, href: link.href, method: 'exact_match_filtered' };
           }
         }
 
-        // Priority 2: Link containing "Deeds" (case-insensitive)
+        // Priority 2: Link containing "Deeds" (case-insensitive) but filter out wrong pages
         for (const link of allLinks) {
           const text = link.textContent.trim();
-          if (text.toLowerCase() === 'deeds') {
+          const href = link.href || '';
+
+          if (text.toLowerCase() === 'deeds' &&
+              !href.includes('OutbuildingDetails') &&
+              !href.includes('Outbuilding') &&
+              !href.includes('Building')) {
             link.click();
-            return { success: true, text, href: link.href, method: 'case_insensitive' };
+            return { success: true, text, href: link.href, method: 'case_insensitive_filtered' };
+          }
+        }
+
+        // Priority 3: Look for links in the main navigation menu/tabs
+        // Usually navigation tabs have specific IDs or are in a nav element
+        const navLinks = Array.from(document.querySelectorAll('nav a, [role="navigation"] a, .navigation a, #mainMenu a'));
+        for (const link of navLinks) {
+          const text = link.textContent.trim();
+          if (text === 'Deeds' || text.toLowerCase() === 'deeds') {
+            link.click();
+            return { success: true, text, href: link.href, method: 'nav_menu' };
           }
         }
 
