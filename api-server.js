@@ -45,6 +45,7 @@ const MecklenburgCountyNorthCarolinaScraper = require('./county-implementations/
 const GuilfordCountyNorthCarolinaScraper = require('./county-implementations/guilford-county-north-carolina');
 const ForsythCountyNorthCarolinaScraper = require('./county-implementations/forsyth-county-north-carolina');
 const KingCountyWashingtonScraper = require('./county-implementations/king-county-washington');
+const PierceCountyWashingtonScraper = require('./county-implementations/pierce-county-washington');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -343,6 +344,21 @@ app.get('/api/counties', (req, res) => {
           'TIF to PDF conversion (if needed)'
         ],
         cost: 'Free (no CAPTCHA)'
+      },
+      {
+        name: 'Pierce County',
+        state: 'WA',
+        stateCode: 'Washington',
+        features: [
+          'Property search by parcel ID',
+          'Disclaimer acknowledgment',
+          'Document type filtering (excludes excise tax affidavits)',
+          'Instrument number detection',
+          'Image viewer integration',
+          'PDF download'
+        ],
+        cost: 'Free (no CAPTCHA)',
+        note: 'Requires parcel ID (can be obtained from Regrid.com)'
       }
     ]
   });
@@ -376,7 +392,8 @@ function normalizeCountyName(county) {
     'mecklenburg': 'Mecklenburg',
     'guilford': 'Guilford',
     'forsyth': 'Forsyth',
-    'king': 'King'
+    'king': 'King',
+    'pierce': 'Pierce'
   };
 
   return countyMap[normalized] || county;
@@ -442,6 +459,8 @@ async function processDeedDownload(address, county, state, options = {}) {
     scraper = new ForsythCountyNorthCarolinaScraper(scraperOptions);
   } else if (detectedCounty === 'King' && detectedState === 'WA') {
     scraper = new KingCountyWashingtonScraper(scraperOptions);
+  } else if (detectedCounty === 'Pierce' && detectedState === 'WA') {
+    scraper = new PierceCountyWashingtonScraper(scraperOptions);
   } else {
     throw new Error(`County "${detectedCounty}, ${detectedState}" is not yet supported`);
   }
