@@ -43,6 +43,7 @@ const DurhamCountyNorthCarolinaScraper = require('./county-implementations/durha
 const WakeCountyNorthCarolinaScraper = require('./county-implementations/wake-county-north-carolina');
 const MecklenburgCountyNorthCarolinaScraper = require('./county-implementations/mecklenburg-county-north-carolina');
 const GuilfordCountyNorthCarolinaScraper = require('./county-implementations/guilford-county-north-carolina');
+const ForsythCountyNorthCarolinaScraper = require('./county-implementations/forsyth-county-north-carolina');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -312,6 +313,20 @@ app.get('/api/counties', (req, res) => {
           'Full PDF download'
         ],
         cost: '$0.001 per deed (with 2Captcha API)'
+      },
+      {
+        name: 'Forsyth County',
+        state: 'NC',
+        stateCode: 'North Carolina',
+        features: [
+          'Property search by street number and name',
+          'Location address search integration',
+          'Parcel number extraction',
+          'Deeds tab integration',
+          'Automatic CAPTCHA solving',
+          'Full PDF download'
+        ],
+        cost: '$0.001 per deed (with 2Captcha API)'
       }
     ]
   });
@@ -343,7 +358,8 @@ function normalizeCountyName(county) {
     'durham': 'Durham',
     'wake': 'Wake',
     'mecklenburg': 'Mecklenburg',
-    'guilford': 'Guilford'
+    'guilford': 'Guilford',
+    'forsyth': 'Forsyth'
   };
 
   return countyMap[normalized] || county;
@@ -405,6 +421,8 @@ async function processDeedDownload(address, county, state, options = {}) {
     scraper = new MecklenburgCountyNorthCarolinaScraper(scraperOptions);
   } else if (detectedCounty === 'Guilford' && detectedState === 'NC') {
     scraper = new GuilfordCountyNorthCarolinaScraper(scraperOptions);
+  } else if (detectedCounty === 'Forsyth' && detectedState === 'NC') {
+    scraper = new ForsythCountyNorthCarolinaScraper(scraperOptions);
   } else {
     throw new Error(`County "${detectedCounty}, ${detectedState}" is not yet supported`);
   }
