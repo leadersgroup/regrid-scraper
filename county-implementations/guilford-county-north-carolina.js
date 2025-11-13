@@ -627,12 +627,12 @@ class GuilfordCountyNorthCarolinaScraper extends DeedScraper {
       // If we're on the deed viewer page, wait for dynamic content
       if (this.page.url().includes('gis_viewimage.php')) {
         this.log('📄 On deed viewer page - waiting for dynamic content...');
-        
+
         // Wait longer for JavaScript to render the deed
-        await new Promise(resolve => setTimeout(resolve, 15000));
-        
-        // Check if deed content has been rendered
-        const hasRenderedContent = await this.page.evaluate(() => {
+        await new Promise(resolve => setTimeout(resolve, 20000));
+
+        // Check if deed content has been rendered in main page or frames
+        let hasRenderedContent = await this.page.evaluate(() => {
           const bodyText = document.body.innerText || '';
           // Look for typical deed content
           return bodyText.includes('GUILFORD COUNTY') ||
@@ -642,9 +642,37 @@ class GuilfordCountyNorthCarolinaScraper extends DeedScraper {
                  bodyText.includes('DEED') ||
                  bodyText.includes('CONSIDERATION');
         });
-        
+
+        // Also check frames for deed content
+        if (!hasRenderedContent) {
+          const frames = this.page.frames();
+          for (const frame of frames) {
+            try {
+              const frameUrl = frame.url();
+              if (frameUrl && frameUrl !== 'about:blank') {
+                const frameHasContent = await frame.evaluate(() => {
+                  const bodyText = document.body ? (document.body.innerText || '') : '';
+                  return bodyText.includes('GUILFORD COUNTY') ||
+                         bodyText.includes('REGISTER OF DEEDS') ||
+                         bodyText.includes('Book') ||
+                         bodyText.includes('Page');
+                });
+                if (frameHasContent) {
+                  hasRenderedContent = true;
+                  this.log('✅ Deed content detected in frame');
+                  break;
+                }
+              }
+            } catch (e) {
+              // Frame might be detached or cross-origin
+            }
+          }
+        }
+
         if (hasRenderedContent) {
           this.log('✅ Deed content detected after waiting');
+        } else {
+          this.log('⚠️ No deed text detected, but continuing to try screenshot');
         }
       } else {
         await new Promise(resolve => setTimeout(resolve, 8000));  // Standard wait for frames
@@ -803,7 +831,7 @@ class GuilfordCountyNorthCarolinaScraper extends DeedScraper {
         this.log('📸 Deed content detected - taking full page screenshot...');
         try {
           // Take a full page screenshot
-          const screenshotBuffer = await currentContext.screenshot({
+          const screenshotBuffer = await this.page.screenshot({
             type: 'png',
             fullPage: true
           });
@@ -879,7 +907,7 @@ class GuilfordCountyNorthCarolinaScraper extends DeedScraper {
         this.log('📊 Found canvas element - attempting screenshot...');
         try {
           // Take a screenshot of the viewer area
-          const screenshotBuffer = await currentContext.screenshot({
+          const screenshotBuffer = await this.page.screenshot({
             type: 'png',
             fullPage: false
           });
@@ -944,35 +972,47 @@ class GuilfordCountyNorthCarolinaScraper extends DeedScraper {
         }
       }
 
-      // Strategy 5: Try direct download from URL (if all else fails)
+      // Strategy 5: If we're on deed viewer page, always try screenshot as fallback
       if (currentUrl.includes('gis_viewimage.php') || currentUrl.includes('.pdf')) {
-        this.log('📥 Attempting direct download...');
-        
+        this.log('📥 Attempting screenshot capture as fallback...');
+
         try {
-          // Take a screenshot as last resort
-          const screenshotBuffer = await currentContext.screenshot({
+          // Wait a bit more to ensure content is rendered
+          await new Promise(resolve => setTimeout(resolve, 5000));
+
+          // Take a full page screenshot regardless of detected content
+          const screenshotBuffer = await this.page.screenshot({
             type: 'png',
             fullPage: true
           });
 
-          // Convert screenshot to PDF
-          const pdfBase64 = await this.convertImageToPdf(screenshotBuffer);
+          // Check if screenshot is meaningful (not blank)
+          const isBlank = await this.isImageBlank(screenshotBuffer);
 
-          if (pdfBase64) {
-            // Clean up event listener
-            mainPage.off('response', responseHandler);
-            
-            return {
-              success: true,
-              duration: Date.now() - startTime,
-              pdfBase64,
-              filename: `guilford_deed_${Date.now()}.pdf`,
-              fileSize: Buffer.from(pdfBase64, 'base64').length,
-              downloadPath: ''
-            };
+          if (!isBlank) {
+            // Convert screenshot to PDF
+            const pdfBase64 = await this.convertImageToPdf(screenshotBuffer);
+
+            if (pdfBase64) {
+              this.log('✅ Successfully captured deed viewer as screenshot');
+
+              // Clean up event listener
+              mainPage.off('response', responseHandler);
+
+              return {
+                success: true,
+                duration: Date.now() - startTime,
+                pdfBase64,
+                filename: `guilford_deed_${Date.now()}.pdf`,
+                fileSize: Buffer.from(pdfBase64, 'base64').length,
+                downloadPath: ''
+              };
+            }
+          } else {
+            this.log('⚠️ Screenshot appears to be blank');
           }
         } catch (dlErr) {
-          this.log(`⚠️  Direct download failed: ${dlErr.message}`);
+          this.log(`⚠️  Screenshot capture failed: ${dlErr.message}`);
         }
       }
 
