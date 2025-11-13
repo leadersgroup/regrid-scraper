@@ -34,7 +34,57 @@ class PierceCountyWashingtonScraper extends DeedScraper {
   }
 
   /**
-   * Main entry point - download prior deed for an address
+   * API-compatible entry point - uses Regrid to get parcel ID
+   * This method is called by the API server
+   */
+  async getPriorDeed(address) {
+    const startTime = Date.now();
+
+    try {
+      this.log(`🏁 Starting prior deed download for: ${address}`);
+
+      // Step 1: Get property data from Regrid to extract parcel ID
+      this.log(`📍 Step 1: Getting property data from Regrid...`);
+      const regridData = await this.getPropertyDataFromRegrid(address);
+
+      if (!regridData.success || !regridData.parcelId) {
+        throw new Error('Failed to get parcel ID from Regrid');
+      }
+
+      this.log(`✅ Step 1 Complete: Parcel ID: ${regridData.parcelId}`);
+
+      // Step 2-4: Use Pierce County's specific workflow
+      const result = await this.downloadPriorDeed(address, regridData.parcelId);
+
+      // Return in API-compatible format
+      return {
+        success: result.success,
+        address: address,
+        parcelId: regridData.parcelId,
+        instrumentNumber: result.instrumentNumber,
+        pdfBase64: result.pdfBase64,
+        filename: result.filename,
+        fileSize: result.fileSize,
+        timestamp: new Date().toISOString(),
+        duration: Date.now() - startTime,
+        error: result.error
+      };
+
+    } catch (error) {
+      this.log(`❌ ERROR: ${error.message}`);
+      return {
+        success: false,
+        address: address,
+        error: error.message,
+        timestamp: new Date().toISOString(),
+        duration: Date.now() - startTime
+      };
+    }
+  }
+
+  /**
+   * Direct entry point when parcel ID is already known
+   * This method is called by getPriorDeed() or can be called directly for testing
    */
   async downloadPriorDeed(address, parcelId = null) {
     const startTime = Date.now();
