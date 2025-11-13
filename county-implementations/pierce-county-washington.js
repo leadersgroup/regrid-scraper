@@ -10,7 +10,7 @@
  * 1. Navigate to Pierce County Real Estate search
  * 2. Enter parcel ID in 'Parcel #' field
  * 3. Find first document that is NOT 'excise tax affidavit'
- * 4. Click on 'View' button - new window opens
+ * 4. Click on View button - new window opens
  * 5. Click 'Get Image Now' button directly (no need to click image icon)
  * 6. Download PDF
  */
@@ -290,10 +290,12 @@ class PierceCountyWashingtonScraper extends DeedScraper {
           if (cellText === 'View') {
             // Look ahead for instrument number (typically 2-3 cells later)
             let instrumentNumber = null;
+            let instrumentCellIndex = null;
             for (let j = i + 1; j < Math.min(i + 5, cells.length); j++) {
               const text = cells[j].textContent.trim();
               if (text.match(/^\d{7,}$/)) {
                 instrumentNumber = text;
+                instrumentCellIndex = j;
                 break;
               }
             }
@@ -318,11 +320,12 @@ class PierceCountyWashingtonScraper extends DeedScraper {
                 continue;
               }
 
-              // Found a valid deed! Return info to click the View cell
+              // Found a valid deed! Return info to click the instrument number cell
               return {
                 found: true,
                 documentType: documentType,
                 instrumentNumber: instrumentNumber,
+                instrumentCellIndex: instrumentCellIndex,
                 viewCellIndex: i,
                 rowIndex: rows.indexOf(row)
               };
@@ -344,11 +347,15 @@ class PierceCountyWashingtonScraper extends DeedScraper {
 
     this.instrumentNumber = documentInfo.instrumentNumber;
 
-    // Click on the "View" cell to open the document
-    this.log(`🔗 Clicking on "View" cell for instrument ${documentInfo.instrumentNumber}...`);
+    // Click on the View cell to open the document
+    this.log(`🔗 Clicking on View button for instrument ${documentInfo.instrumentNumber}...`);
     console.log('[Pierce DEBUG] Clicking View cell...');
 
-    // Click the View cell
+    // Get page count before click
+    const pagesBefore = await this.browser.pages();
+    console.log(`[Pierce DEBUG] Pages before click: ${pagesBefore.length}`);
+
+    // Add a unique attribute to the View cell so we can click it with Puppeteer
     await this.page.evaluate((rowIdx, cellIdx) => {
       const rows = Array.from(document.querySelectorAll('tr'));
       const row = rows[rowIdx];
@@ -356,50 +363,118 @@ class PierceCountyWashingtonScraper extends DeedScraper {
         const cells = Array.from(row.querySelectorAll('td'));
         const cell = cells[cellIdx];
         if (cell) {
-          // Click the cell (the div inside is clickable)
-          cell.click();
+          cell.setAttribute('data-pierce-view-cell', 'true');
+          // Also mark any clickable child elements
+          const div = cell.querySelector('div');
+          const img = cell.querySelector('img');
+          if (div) div.setAttribute('data-pierce-view-div', 'true');
+          if (img) img.setAttribute('data-pierce-view-img', 'true');
         }
       }
     }, documentInfo.rowIndex, documentInfo.viewCellIndex);
 
-    // Wait for new page/tab to potentially open
-    console.log('[Pierce DEBUG] Waiting 5 seconds for any new tabs...');
-    await this.randomWait(4000, 5000);
+    console.log('[Pierce DEBUG] Marked View cell, attempting Puppeteer click...');
 
-    // Check all pages to see if a new one opened
-    const pages = await this.browser.pages();
-    console.log(`[Pierce DEBUG] Total pages: ${pages.length}`);
+    // Try clicking with Puppeteer's native click (triggers popups properly)
+    let clickSuccess = false;
 
-    // Look for the newest page (not the original search page)
-    let documentPage = null;
-    if (pages.length > 1) {
-      // Get the last page (usually the newest)
-      documentPage = pages[pages.length - 1];
+    // Strategy 1: Try clicking div inside the cell
+    try {
+      const divExists = await this.page.$('[data-pierce-view-div]');
+      if (divExists) {
+        console.log('[Pierce DEBUG] Clicking div with Puppeteer click');
+        await this.page.click('[data-pierce-view-div]');
+        clickSuccess = true;
+      }
+    } catch (e) {
+      console.log('[Pierce DEBUG] Div click failed:', e.message);
+    }
 
-      const newURL = documentPage.url();
-      console.log(`[Pierce DEBUG] Found new page at: ${newURL}`);
+    // Strategy 2: Try clicking img inside the cell
+    if (!clickSuccess) {
+      try {
+        const imgExists = await this.page.$('[data-pierce-view-img]');
+        if (imgExists) {
+          console.log('[Pierce DEBUG] Clicking img with Puppeteer click');
+          await this.page.click('[data-pierce-view-img]');
+          clickSuccess = true;
+        }
+      } catch (e) {
+        console.log('[Pierce DEBUG] Img click failed:', e.message);
+      }
+    }
 
-      // Make sure it's not the search page
-      if (!newURL.includes('SearchEntry') && !newURL.includes('SearchResults')) {
-        this.log(`✅ Document page opened in new tab: ${newURL}`);
+    // Strategy 3: Click the cell itself
+    if (!clickSuccess) {
+      try {
+        console.log('[Pierce DEBUG] Clicking cell with Puppeteer click');
+        await this.page.click('[data-pierce-view-cell]');
+        clickSuccess = true;
+      } catch (e) {
+        console.log('[Pierce DEBUG] Cell click failed:', e.message);
+      }
+    }
 
-        // Switch context to the new page for the next step
-        this.page = documentPage;
-        console.log('[Pierce DEBUG] Switched context to new page');
-      } else {
-        console.log('[Pierce DEBUG] New page is still a search page, might not have opened correctly');
-        // Try using the current page
-        documentPage = null;
+    if (!clickSuccess) {
+      throw new Error('Failed to click View button');
+    }
+
+    console.log('[Pierce DEBUG] Click executed, waiting for popup...');
+
+    // Wait a few seconds for popup to appear
+    await this.randomWait(3000, 4000);
+
+    // Get page count after click
+    const pagesAfter = await this.browser.pages();
+    console.log(`[Pierce DEBUG] Pages after click: ${pagesAfter.length}`);
+
+    // Find the new page
+    let newPage = null;
+    if (pagesAfter.length > pagesBefore.length) {
+      // A new page was created - find it
+      for (const page of pagesAfter) {
+        if (!pagesBefore.includes(page)) {
+          newPage = page;
+          console.log('[Pierce DEBUG] Found new page!');
+          break;
+        }
+      }
+    }
+
+    if (newPage) {
+      console.log(`[Pierce DEBUG] New page URL (initial): ${newPage.url()}`);
+
+      // Wait for the new page to load content (navigate away from about:blank)
+      try {
+        await newPage.waitForFunction(
+          () => window.location.href !== 'about:blank',
+          { timeout: 10000 }
+        );
+
+        await this.randomWait(2000, 3000);
+
+        const newURL = newPage.url();
+        console.log(`[Pierce DEBUG] New page loaded at: ${newURL}`);
+
+        this.page = newPage;
+        this.log(`✅ Document page opened in new window: ${newURL}`);
+      } catch (e) {
+        console.log(`[Pierce DEBUG] Popup stayed at about:blank: ${e.message}`);
+        // Use it anyway
+        this.page = newPage;
+        this.log(`⚠️  Popup opened but stayed at about:blank`);
       }
     } else {
-      console.log('[Pierce DEBUG] No new pages detected, checking if current page navigated...');
+      console.log('[Pierce DEBUG] No new page detected');
 
-      // Check if current page URL changed
+      // Check if current page navigated
       const currentURL = this.page.url();
-      console.log(`[Pierce DEBUG] Current page URL: ${currentURL}`);
+      console.log(`[Pierce DEBUG] Current URL: ${currentURL}`);
 
-      if (currentURL.includes('Search')) {
-        this.log(`⚠️  No new page detected and still on search page`);
+      if (!currentURL.includes('Search')) {
+        this.log(`✅ Document page loaded: ${currentURL}`);
+      } else {
+        this.log(`⚠️  Still on search page, no popup detected`);
       }
     }
 
@@ -416,25 +491,24 @@ class PierceCountyWashingtonScraper extends DeedScraper {
     try {
       this.log(`📥 STEP 3: Downloading PDF...`);
 
-      // Check if we're already on a new window/page from clicking View
-      // If so, we can skip the image icon click and go directly to "Get Image Now"
+      // Check if we're already on the document viewer page
       const currentUrl = this.page.url();
       this.log(`Current page URL: ${currentUrl}`);
 
       let popupPage = this.page; // Use current page (which was set in findPriorDeed)
 
-      // If we're still on search page, we need to find the popup manually
-      if (currentUrl.includes('Search')) {
-        this.log('⚠️  Still on search page, looking for popup window...');
+      // SearchImage.aspx is the correct document page, SearchResults.aspx is the search page
+      if (currentUrl.includes('SearchResults') || currentUrl.includes('SearchEntry')) {
+        this.log('⚠️  Still on search page, looking for document viewer window...');
         const pages = await this.browser.pages();
 
-        // Find the document page (not search page)
+        // Find the SearchImage page (document viewer)
         for (const page of pages) {
           const url = page.url();
-          if (!url.includes('SearchEntry') && !url.includes('SearchResults')) {
+          if (url.includes('SearchImage')) {
             popupPage = page;
             this.page = page;
-            this.log(`✅ Found document page: ${url}`);
+            this.log(`✅ Found document viewer page: ${url}`);
             break;
           }
         }
@@ -443,67 +517,106 @@ class PierceCountyWashingtonScraper extends DeedScraper {
       this.log(`✅ Using page: ${popupPage.url()}`);
       await this.randomWait(3000, 4000);
 
-      // Look for LTViewer iframe (common in deed systems)
-      this.log('🔍 Looking for viewer iframe...');
-      let frames = popupPage.frames();
-      this.log(`  Found ${frames.length} frames in popup`);
+      // Look for "Get Image Now" button on the main page first
+      this.log(`📥 Looking for "Get Image Now" button on main page...`);
 
-      let viewerFrame = null;
-      for (const frame of frames) {
-        const url = frame.url();
-        if (url.includes('LTViewer') || url.includes('Viewer') || url.includes('Image')) {
-          viewerFrame = frame;
-          this.log(`  ✓ Found viewer iframe: ${url}`);
-          break;
+      const getImageButtonOnMain = await popupPage.evaluate(() => {
+        const allElements = Array.from(document.querySelectorAll('a, button, input[type="button"], input[type="submit"]'));
+
+        for (const el of allElements) {
+          const text = (el.textContent || el.value || '').toLowerCase().trim();
+          const id = el.id || '';
+
+          if (text.includes('get image now') ||
+              text === 'get image now' ||
+              id.toLowerCase().includes('getimage') ||
+              id === 'btnProcessNow') {
+            return {
+              found: true,
+              text: el.textContent || el.value || '',
+              id: el.id,
+              tagName: el.tagName
+            };
+          }
+        }
+
+        return { found: false };
+      });
+
+      let getImageClicked = { success: false };
+
+      if (getImageButtonOnMain.found) {
+        this.log(`✅ Found "Get Image Now" button: ${getImageButtonOnMain.text} (ID: ${getImageButtonOnMain.id})`);
+
+        // Click using Puppeteer's native click if we have an ID
+        if (getImageButtonOnMain.id) {
+          try {
+            await popupPage.click(`#${getImageButtonOnMain.id}`);
+            this.log(`✅ Clicked "Get Image Now" button`);
+            getImageClicked = { success: true };
+          } catch (e) {
+            this.log(`⚠️  Puppeteer click failed, trying evaluate click: ${e.message}`);
+            getImageClicked = await popupPage.evaluate((btnId) => {
+              const btn = document.getElementById(btnId);
+              if (btn) {
+                btn.click();
+                return { success: true };
+              }
+              return { success: false };
+            }, getImageButtonOnMain.id);
+          }
+        } else {
+          // No ID, use evaluate click
+          getImageClicked = await popupPage.evaluate((text) => {
+            const allElements = Array.from(document.querySelectorAll('a, button, input[type="button"], input[type="submit"]'));
+            for (const el of allElements) {
+              const elText = (el.textContent || el.value || '').trim();
+              if (elText === text) {
+                el.click();
+                return { success: true };
+              }
+            }
+            return { success: false };
+          }, getImageButtonOnMain.text);
         }
       }
 
-      // If iframe exists, click "Get Image Now" inside it
-      if (viewerFrame) {
-        this.log(`📥 Clicking "Get Image Now" inside iframe...`);
+      // If not found on main page, try iframe
+      if (!getImageClicked.success) {
+        this.log('🔍 Looking for "Get Image Now" button in iframes...');
 
-        const getImageClicked = await viewerFrame.evaluate(() => {
-          const allElements = Array.from(document.querySelectorAll('a, button, input[type="button"], input[type="submit"]'));
+        const frames = popupPage.frames();
+        this.log(`  Found ${frames.length} frames`);
 
-          for (const el of allElements) {
-            const text = (el.textContent || el.value || '').toLowerCase().trim();
-            if (text.includes('get image now') || text.includes('get item') || el.id === 'btnProcessNow') {
-              el.click();
-              return { success: true, text: el.textContent || el.value || 'Get Image Now' };
+        for (const frame of frames) {
+          const frameUrl = frame.url();
+
+          try {
+            const buttonInFrame = await frame.evaluate(() => {
+              const allElements = Array.from(document.querySelectorAll('a, button, input[type="button"], input[type="submit"]'));
+              for (const el of allElements) {
+                const text = (el.textContent || el.value || '').toLowerCase().trim();
+                if (text.includes('get image now') || el.id === 'btnProcessNow') {
+                  el.click();
+                  return { success: true, text: el.textContent || el.value || 'Get Image Now' };
+                }
+              }
+              return { success: false };
+            });
+
+            if (buttonInFrame.success) {
+              this.log(`✅ Clicked "Get Image Now" in iframe: ${frameUrl}`);
+              getImageClicked = buttonInFrame;
+              break;
             }
+          } catch (e) {
+            // Frame might be cross-origin, skip
           }
-
-          return { success: false };
-        });
-
-        if (!getImageClicked.success) {
-          throw new Error('Could not find "Get Image Now" button in iframe');
         }
+      }
 
-        this.log(`✅ Clicked: ${getImageClicked.text}`);
-      } else {
-        // No iframe, look for "Get Image Now" button on main popup page
-        this.log(`📥 Clicking "Get Image Now" on popup page...`);
-
-        const getImageClicked = await popupPage.evaluate(() => {
-          const allElements = Array.from(document.querySelectorAll('a, button, input[type="button"], input[type="submit"]'));
-
-          for (const el of allElements) {
-            const text = (el.textContent || el.value || '').toLowerCase().trim();
-            if (text.includes('get image now') || text.includes('get image')) {
-              el.click();
-              return { success: true, text: el.textContent || el.value || 'Get Image Now' };
-            }
-          }
-
-          return { success: false };
-        });
-
-        if (!getImageClicked.success) {
-          throw new Error('Could not find "Get Image Now" button');
-        }
-
-        this.log(`✅ Clicked: ${getImageClicked.text}`);
+      if (!getImageClicked.success) {
+        throw new Error('Could not find "Get Image Now" button on page or in iframes');
       }
 
       // Wait for PDF to load
