@@ -17,6 +17,8 @@
 const DeedScraper = require('../deed-scraper');
 const puppeteer = require('puppeteer-extra');
 const StealthPlugin = require('puppeteer-extra-plugin-stealth');
+const sharp = require('sharp');
+const { PDFDocument } = require('pdf-lib');
 
 // Use stealth plugin to avoid bot detection
 puppeteer.use(StealthPlugin());
@@ -431,181 +433,141 @@ class KingCountyWashingtonScraper extends DeedScraper {
         throw new Error('No deed URL available. getRecordingNumber() must be called first.');
       }
 
-      this.log(`🌐 Navigating to deed URL: ${this.deedUrl}`);
+      this.log(`📥 Downloading document from: ${this.deedUrl}`);
 
-      // Navigate directly to the deed URL
-      await this.page.goto(this.deedUrl, {
-        waitUntil: 'networkidle2',
-        timeout: 30000
-      });
+      // Fetch document directly (avoid ERR_ABORTED from page.goto on download URLs)
+      const docData = await this.page.evaluate(async (url) => {
+        try {
+          const response = await fetch(url, {
+            credentials: 'include',
+            headers: { 'Accept': '*/*' }
+          });
 
-      await new Promise(resolve => setTimeout(resolve, 3000));
-
-      const currentUrl = this.page.url();
-      this.log(`Current URL: ${currentUrl}`);
-
-      // Strategy 1: Check if current page is a PDF
-      if (currentUrl.toLowerCase().includes('.pdf') || currentUrl.includes('document') || currentUrl.includes('recording')) {
-        this.log('📥 Attempting to download PDF from current page...');
-
-        const pdfData = await this.page.evaluate(async (url) => {
-          try {
-            const response = await fetch(url, {
-              credentials: 'include',
-              headers: {
-                'Accept': 'application/pdf,*/*'
-              }
-            });
-
-            if (!response.ok) {
-              throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-            }
-
-            const blob = await response.blob();
-            const arrayBuffer = await blob.arrayBuffer();
-            const uint8Array = new Uint8Array(arrayBuffer);
-
-            // Convert to base64
-            let binary = '';
-            for (let i = 0; i < uint8Array.length; i++) {
-              binary += String.fromCharCode(uint8Array[i]);
-            }
-
-            return {
-              success: true,
-              base64: btoa(binary),
-              size: uint8Array.length
-            };
-          } catch (err) {
-            return {
-              success: false,
-              error: err.message
-            };
+          if (!response.ok) {
+            return { success: false, error: `HTTP ${response.status}: ${response.statusText}` };
           }
-        }, currentUrl);
 
-        if (pdfData.success) {
-          const pdfBuffer = Buffer.from(pdfData.base64, 'base64');
-          const signature = pdfBuffer.toString('utf8', 0, 4);
+          const contentType = response.headers.get('content-type') || '';
+          const blob = await response.blob();
+          const arrayBuffer = await blob.arrayBuffer();
+          const uint8Array = new Uint8Array(arrayBuffer);
 
-          if (signature === '%PDF') {
-            this.log(`✅ PDF downloaded successfully: ${(pdfBuffer.length / 1024).toFixed(2)} KB`);
-            return {
-              success: true,
-              duration: Date.now() - startTime,
-              pdfBase64: pdfData.base64,
-              filename: `king_deed_${Date.now()}.pdf`,
-              fileSize: pdfBuffer.length,
-              downloadPath: ''
-            };
+          // Convert to base64
+          let binary = '';
+          for (let i = 0; i < uint8Array.length; i++) {
+            binary += String.fromCharCode(uint8Array[i]);
           }
+
+          return {
+            success: true,
+            base64: btoa(binary),
+            size: uint8Array.length,
+            contentType: contentType
+          };
+        } catch (err) {
+          return { success: false, error: err.message };
         }
+      }, this.deedUrl);
+
+      if (!docData.success) {
+        throw new Error(`Download failed: ${docData.error}`);
       }
 
-      // Strategy 2: Look for PDF in iframe
-      this.log('📥 Checking for PDF in iframe...');
-      const iframeInfo = await this.page.evaluate(() => {
-        const iframes = Array.from(document.querySelectorAll('iframe'));
-        for (const iframe of iframes) {
-          if (iframe.src && (iframe.src.includes('.pdf') || iframe.src.includes('document'))) {
-            return { found: true, src: iframe.src };
-          }
-        }
-        return { found: false };
-      });
+      this.log(`✅ Downloaded ${(docData.size / 1024).toFixed(2)} KB`);
+      this.log(`   Content-Type: ${docData.contentType}`);
 
-      if (iframeInfo.found) {
-        this.log(`✅ Found PDF in iframe: ${iframeInfo.src}`);
-        const pdfBase64 = await this.downloadPdfFromUrl(iframeInfo.src);
+      // Check document format
+      const docBuffer = Buffer.from(docData.base64, 'base64');
+      const signature = docBuffer.toString('utf8', 0, 10);
 
+      // Check if it's a PDF
+      if (signature.startsWith('%PDF')) {
+        this.log(`✅ Document is PDF format`);
         return {
           success: true,
           duration: Date.now() - startTime,
-          pdfBase64,
-          filename: `king_deed_${Date.now()}.pdf`,
-          fileSize: Buffer.from(pdfBase64, 'base64').length,
+          pdfBase64: docData.base64,
+          filename: `king_deed_${this.recordingNumber}.pdf`,
+          fileSize: docBuffer.length,
           downloadPath: ''
         };
       }
 
-      // Strategy 3: Look for embed or object
-      this.log('📥 Checking for PDF embed/object...');
-      const embedInfo = await this.page.evaluate(() => {
-        const embeds = Array.from(document.querySelectorAll('embed, object'));
-        for (const embed of embeds) {
-          const src = embed.src || embed.data;
-          if (src && (src.includes('.pdf') || src.includes('document'))) {
-            return { found: true, src };
-          }
+      // Check if it's a TIF image (II = little-endian, MM = big-endian)
+      if (signature.startsWith('II') || signature.startsWith('MM')) {
+        this.log(`⚠️  Document is TIF format - converting to PDF...`);
+
+        try {
+          // Convert TIF to PNG using sharp
+          this.log(`   Converting TIF to PNG...`);
+          const pngBuffer = await sharp(docBuffer)
+            .png()
+            .toBuffer();
+
+          this.log(`   Creating PDF document...`);
+          const pdfDoc = await PDFDocument.create();
+          const image = await pdfDoc.embedPng(pngBuffer);
+
+          // Get image dimensions
+          const { width, height } = image.scale(1);
+
+          // Create page with image dimensions and draw image
+          const page = pdfDoc.addPage([width, height]);
+          page.drawImage(image, {
+            x: 0,
+            y: 0,
+            width: width,
+            height: height
+          });
+
+          // Save PDF
+          const pdfBytes = await pdfDoc.save();
+          const pdfBuffer = Buffer.from(pdfBytes);
+          const pdfBase64 = pdfBuffer.toString('base64');
+
+          this.log(`✅ TIF converted to PDF: ${(pdfBuffer.length / 1024).toFixed(2)} KB`);
+
+          return {
+            success: true,
+            duration: Date.now() - startTime,
+            pdfBase64: pdfBase64,
+            filename: `king_deed_${this.recordingNumber}.pdf`,
+            fileSize: pdfBuffer.length,
+            downloadPath: '',
+            convertedFrom: 'tif'
+          };
+        } catch (conversionError) {
+          this.log(`❌ TIF to PDF conversion failed: ${conversionError.message}`);
+          // Fall back to returning the TIF as-is
+          return {
+            success: true,
+            duration: Date.now() - startTime,
+            pdfBase64: docData.base64,
+            filename: `king_deed_${this.recordingNumber}.tif`,
+            fileSize: docBuffer.length,
+            downloadPath: '',
+            format: 'tif',
+            note: `TIF conversion failed: ${conversionError.message}`
+          };
         }
-        return { found: false };
-      });
-
-      if (embedInfo.found) {
-        this.log(`✅ Found PDF in embed: ${embedInfo.src}`);
-        const pdfBase64 = await this.downloadPdfFromUrl(embedInfo.src);
-
-        return {
-          success: true,
-          duration: Date.now() - startTime,
-          pdfBase64,
-          filename: `king_deed_${Date.now()}.pdf`,
-          fileSize: Buffer.from(pdfBase64, 'base64').length,
-          downloadPath: ''
-        };
       }
 
-      throw new Error('Could not find PDF to download');
+      // Unknown format
+      this.log(`⚠️  Unknown document format. First 10 bytes: "${signature}"`);
+      return {
+        success: false,
+        duration: Date.now() - startTime,
+        error: `Unknown document format (signature: ${signature.substring(0, 10)})`
+      };
 
     } catch (error) {
-      this.log(`❌ PDF download failed: ${error.message}`);
+      this.log(`❌ Document download failed: ${error.message}`);
       return {
         success: false,
         duration: Date.now() - startTime,
         error: error.message
       };
     }
-  }
-
-  /**
-   * Download PDF from URL
-   */
-  async downloadPdfFromUrl(url) {
-    this.log(`📥 Downloading PDF from: ${url}`);
-
-    const pdfBase64 = await this.page.evaluate(async (url) => {
-      const response = await fetch(url, {
-        credentials: 'include'
-      });
-
-      if (!response.ok) {
-        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-      }
-
-      const blob = await response.blob();
-
-      return new Promise((resolve, reject) => {
-        const reader = new FileReader();
-        reader.onloadend = () => {
-          const base64 = reader.result.split(',')[1];
-          resolve(base64);
-        };
-        reader.onerror = reject;
-        reader.readAsDataURL(blob);
-      });
-    }, url);
-
-    // Verify it's a PDF
-    const pdfBuffer = Buffer.from(pdfBase64, 'base64');
-    const pdfSignature = pdfBuffer.toString('utf8', 0, 4);
-
-    if (pdfSignature !== '%PDF') {
-      this.log(`⚠️  Downloaded content doesn't appear to be a PDF (signature: ${pdfSignature})`);
-    } else {
-      this.log(`✅ PDF downloaded: ${(pdfBuffer.length / 1024).toFixed(2)} KB`);
-    }
-
-    return pdfBase64;
   }
 }
 
