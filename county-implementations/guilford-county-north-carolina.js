@@ -627,51 +627,129 @@ class GuilfordCountyNorthCarolinaScraper extends DeedScraper {
       if (this.page.url().includes('gis_viewimage.php')) {
         this.log('📄 On deed viewer page - waiting for dynamic content...');
 
-        // Wait longer for JavaScript to render the deed
-        await new Promise(resolve => setTimeout(resolve, 20000));
+        // Progressive waiting strategy for deed images
+        let contentLoaded = false;
+        const maxWaitTime = 40000; // Total max wait time: 40 seconds
+        const checkInterval = 2000; // Check every 2 seconds
+        let waitedTime = 0;
 
-        // Check if deed content has been rendered in main page or frames
-        let hasRenderedContent = await this.page.evaluate(() => {
-          const bodyText = document.body.innerText || '';
-          // Look for typical deed content
-          return bodyText.includes('GUILFORD COUNTY') ||
-                 bodyText.includes('REGISTER OF DEEDS') ||
-                 bodyText.includes('Book') ||
-                 bodyText.includes('Page') ||
-                 bodyText.includes('DEED') ||
-                 bodyText.includes('CONSIDERATION');
-        });
+        while (waitedTime < maxWaitTime && !contentLoaded) {
+          await new Promise(resolve => setTimeout(resolve, checkInterval));
+          waitedTime += checkInterval;
 
-        // Also check frames for deed content
-        if (!hasRenderedContent) {
+          // Check multiple indicators that content has loaded
+          const loadStatus = await this.page.evaluate(() => {
+            // Check for images (including those that might not report dimensions)
+            const images = Array.from(document.querySelectorAll('img'));
+            const hasLargeImage = images.some(img =>
+              ((img.naturalWidth > 400 || img.width > 400) &&
+               (img.naturalHeight > 400 || img.height > 400) &&
+               img.complete) ||
+              (img.src && img.src.includes('gis_viewimage.php')) // Guilford specific check
+            );
+
+            // Check for any img with src pointing to deed viewer
+            const hasDeedViewerImage = images.some(img =>
+              img.src && (img.src.includes('viewimage') || img.src.includes('.tif'))
+            );
+
+            // Check for canvas (some viewers render to canvas)
+            const canvases = Array.from(document.querySelectorAll('canvas'));
+            const hasCanvas = canvases.some(canvas =>
+              (canvas.width > 400 || canvas.height > 400) &&
+              canvas.getContext('2d')
+            );
+
+            // Check for embed/object (for TIFF viewers)
+            const embeds = Array.from(document.querySelectorAll('embed, object'));
+            const hasEmbed = embeds.some(embed => {
+              const src = embed.src || embed.data || '';
+              return src.includes('.tif') || src.includes('viewimage');
+            });
+
+            // Check for background images
+            const divsWithBg = Array.from(document.querySelectorAll('div')).filter(div => {
+              const bgImage = window.getComputedStyle(div).backgroundImage;
+              return bgImage && bgImage !== 'none' && bgImage.includes('url');
+            });
+
+            // Check body background color (deed viewer often has non-white background when loaded)
+            const bodyBgColor = window.getComputedStyle(document.body).backgroundColor;
+            const hasNonWhiteBg = bodyBgColor && bodyBgColor !== 'rgb(255, 255, 255)' &&
+                                  bodyBgColor !== 'rgba(0, 0, 0, 0)' &&
+                                  bodyBgColor !== 'transparent';
+
+            // Check for deed text content
+            const bodyText = document.body.innerText || '';
+            const hasDeedText = bodyText.includes('GUILFORD COUNTY') ||
+                               bodyText.includes('REGISTER OF DEEDS') ||
+                               bodyText.includes('Book') ||
+                               bodyText.includes('Page') ||
+                               bodyText.includes('DEED');
+
+            // For Guilford County, check if page has specific structure
+            const hasGuilfordStructure = document.body &&
+                                        document.body.style.backgroundColor === 'rgb(40, 40, 40)' ||
+                                        document.querySelector('center') !== null;
+
+            return {
+              hasLargeImage,
+              hasDeedViewerImage,
+              hasCanvas,
+              hasEmbed,
+              hasBackgroundImage: divsWithBg.length > 0,
+              hasNonWhiteBg,
+              hasDeedText,
+              hasGuilfordStructure,
+              imageCount: images.length,
+              largeImageCount: images.filter(img => img.naturalWidth > 400 || img.width > 400).length
+            };
+          });
+
+          // Also check frames for content
           const frames = this.page.frames();
           for (const frame of frames) {
             try {
-              const frameUrl = frame.url();
-              if (frameUrl && frameUrl !== 'about:blank') {
-                const frameHasContent = await frame.evaluate(() => {
+              if (frame.url() && frame.url() !== 'about:blank') {
+                const frameStatus = await frame.evaluate(() => {
+                  const images = Array.from(document.querySelectorAll('img'));
+                  const hasImage = images.some(img => img.naturalWidth > 400 && img.complete);
                   const bodyText = document.body ? (document.body.innerText || '') : '';
-                  return bodyText.includes('GUILFORD COUNTY') ||
-                         bodyText.includes('REGISTER OF DEEDS') ||
-                         bodyText.includes('Book') ||
-                         bodyText.includes('Page');
+                  const hasText = bodyText.includes('DEED') || bodyText.includes('GUILFORD');
+                  return { hasImage, hasText };
                 });
-                if (frameHasContent) {
-                  hasRenderedContent = true;
-                  this.log('✅ Deed content detected in frame');
-                  break;
+                if (frameStatus.hasImage || frameStatus.hasText) {
+                  loadStatus.hasLargeImage = true;
+                  loadStatus.hasDeedText = frameStatus.hasText;
                 }
               }
             } catch (e) {
-              // Frame might be detached or cross-origin
+              // Frame might be detached
             }
+          }
+
+          // Determine if content has loaded based on multiple factors
+          contentLoaded = loadStatus.hasLargeImage ||
+                         loadStatus.hasDeedViewerImage ||
+                         loadStatus.hasCanvas ||
+                         loadStatus.hasEmbed ||
+                         loadStatus.hasDeedText ||
+                         loadStatus.hasGuilfordStructure ||
+                         (loadStatus.hasNonWhiteBg && loadStatus.largeImageCount > 0);
+
+          if (!contentLoaded && waitedTime % 10000 === 0) {
+            this.log(`⏳ Still waiting for deed content... (${waitedTime/1000}s elapsed)`);
+            this.log(`  Images: ${loadStatus.imageCount}, Large: ${loadStatus.largeImageCount}`);
+            this.log(`  Canvas: ${loadStatus.hasCanvas}, Embed: ${loadStatus.hasEmbed}`);
           }
         }
 
-        if (hasRenderedContent) {
+        if (contentLoaded) {
           this.log('✅ Deed content detected after waiting');
+          // Give it a bit more time to fully render
+          await new Promise(resolve => setTimeout(resolve, 3000));
         } else {
-          this.log('⚠️ No deed text detected, but continuing to try screenshot');
+          this.log('⚠️ No deed content detected after maximum wait time, but continuing to try screenshot');
         }
       } else {
         await new Promise(resolve => setTimeout(resolve, 8000));  // Standard wait for frames

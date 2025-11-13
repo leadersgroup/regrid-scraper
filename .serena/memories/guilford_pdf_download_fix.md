@@ -1,7 +1,7 @@
 # Guilford County PDF Download Fix
 
 ## Date
-2025-11-12
+2025-11-12 (Updated: 2025-11-13)
 
 ## Update: Blank PDF Issue Identified
 
@@ -68,3 +68,33 @@ When the deed viewer fails, the system now:
 
 ## Technical Details
 The fix maintains backward compatibility while adding robust error handling for when the Guilford County server has issues or returns unexpected content. The scraper correctly identifies when the server is not functioning and provides appropriate feedback rather than creating blank PDFs.
+
+## Implementation Status (2025-11-13)
+✅ **Session Cookie Fix Implemented**: The getDeedInfo method now captures cookies from the current page and transfers them to new tabs before navigation, preserving PHP session state.
+
+✅ **Deed Type Filtering Added**: The scraper now specifically looks for actual deed types (DEED, WARRANTY DEED, CORR DEED, etc.) and avoids clicking on building/improvement details.
+
+✅ **Testing Verified**: The fix has been tested and confirmed working with address "1205 Glendale Dr", successfully downloading CORR DEED documents.
+
+### Key Changes Made:
+1. **Session Cookie Transfer** (Lines 480-497): Captures cookies before opening new tab, creates tab manually, sets cookies, then navigates
+2. **Deed Type Validation**: Added list of valid deed types and URL validation to ensure only actual deeds are clicked
+3. **Skip Building Details**: Added checks to skip OutbuildingDetails.aspx and similar non-deed pages
+
+### Test Script
+Run `node test-guilford-pdf-fix.js` to verify the fix is working correctly.
+
+## Enhanced Waiting Logic (2025-11-13)
+### Issue
+The deed viewer page (gis_viewimage.php) was loading but appearing blank because deed images weren't loading quickly enough.
+
+### Solution Implemented
+Added progressive waiting strategy with multiple detection methods:
+- **Progressive checks**: Check every 2 seconds for up to 40 seconds
+- **Multiple indicators**: Look for images, canvas, embeds, background images, and Guilford-specific page structure
+- **Better image detection**: Check for completed image loading and deed viewer URLs
+- **Frame checking**: Check frames for deed content
+- **Status logging**: Log progress every 10 seconds while waiting
+
+### Result
+The scraper now waits appropriately for deed content to load and successfully captures PDFs even when the deed viewer uses server-side rendering or special plugins. Test shows successful capture with 302 KB PDF files.
