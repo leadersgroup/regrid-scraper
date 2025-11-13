@@ -184,35 +184,38 @@ class PierceCountyWashingtonScraper extends DeedScraper {
     this.log(`📝 Entering parcel ID: ${this.parcelId}`);
 
     // Look for the Parcel # input field
+    // Based on exploration, the field is: cphNoMargin_f_Datatextedit28p
     const parcelField = await this.page.evaluate(() => {
-      // Find label with text "Parcel #"
-      const labels = Array.from(document.querySelectorAll('label, span, td'));
-      for (const label of labels) {
-        if (label.textContent.includes('Parcel #') || label.textContent.includes('Parcel Number')) {
-          // Find associated input field
-          const input = label.nextElementSibling?.querySelector('input') ||
-                       label.parentElement?.querySelector('input') ||
-                       document.querySelector('input[name*="Parcel"]') ||
-                       document.querySelector('input[id*="Parcel"]');
-
-          if (input) {
-            return {
-              id: input.id,
-              name: input.name,
-              type: input.type
-            };
-          }
-        }
+      // Strategy 1: Direct ID (most reliable based on exploration)
+      let input = document.querySelector('#cphNoMargin_f_Datatextedit28p');
+      if (input) {
+        return {
+          id: input.id,
+          name: input.name,
+          type: input.type,
+          found: 'direct-id'
+        };
       }
 
-      // Fallback: look for any input with "parcel" in name/id
-      const parcelInput = document.querySelector('input[name*="arcel" i], input[id*="arcel" i]');
-      if (parcelInput) {
-        return {
-          id: parcelInput.id,
-          name: parcelInput.name,
-          type: parcelInput.type
-        };
+      // Strategy 2: Find by label text "Parcel #:"
+      const allElements = Array.from(document.querySelectorAll('span, label, td, th'));
+      for (const el of allElements) {
+        const text = el.textContent.trim();
+        if (text === 'Parcel #:' || text === 'Parcel #' || text.includes('Parcel #')) {
+          // Found label, look for input in same table row
+          const row = el.closest('tr');
+          if (row) {
+            const input = row.querySelector('input[type="text"]:not([type="hidden"])');
+            if (input) {
+              return {
+                id: input.id,
+                name: input.name,
+                type: input.type,
+                found: 'by-label'
+              };
+            }
+          }
+        }
       }
 
       return null;
