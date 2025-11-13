@@ -548,10 +548,28 @@ class GuilfordCountyNorthCarolinaScraper extends DeedScraper {
 
       // Now navigate to the deed URL with session intact
       this.log('🌐 Navigating to deed URL with session intact...');
-      await deedPage.goto(deedTypeInfo.href, {
+      const response = await deedPage.goto(deedTypeInfo.href, {
         waitUntil: 'networkidle0',
         timeout: 60000
       });
+
+      // Check if the response is a PDF
+      const contentType = response.headers()['content-type'] || '';
+      if (contentType.includes('application/pdf')) {
+        this.log('📄 Deed viewer is serving a PDF directly!');
+        // Try to get the PDF buffer from the response
+        try {
+          const pdfBuffer = await response.buffer();
+          if (pdfBuffer && pdfBuffer.length > 1000) {
+            this.directPdfBase64 = pdfBuffer.toString('base64');
+            this.log(`✅ Captured PDF from response: ${(pdfBuffer.length / 1024).toFixed(2)} KB`);
+          }
+        } catch (bufferErr) {
+          this.log('⚠️ Could not capture PDF from response, will try alternative method');
+          // Store the URL as fallback
+          this.directPdfUrl = deedTypeInfo.href;
+        }
+      }
 
       // Switch context to the new deed page
       this.page = deedPage;
@@ -596,6 +614,52 @@ class GuilfordCountyNorthCarolinaScraper extends DeedScraper {
 
     try {
       this.log('🔍 Looking for deed document on current page...');
+
+      // Check if we have a direct PDF (deed viewer served PDF directly)
+      if (this.directPdfBase64) {
+        this.log('📄 Using captured PDF from deed viewer response');
+        const pdfBase64 = this.directPdfBase64;
+
+        // Clean up
+        delete this.directPdfBase64;
+
+        return {
+          success: true,
+          duration: Date.now() - startTime,
+          pdfBase64,
+          filename: `guilford_deed_${Date.now()}.pdf`,
+          fileSize: Buffer.from(pdfBase64, 'base64').length,
+          downloadPath: ''
+        };
+      }
+
+      // Fallback: Try to download PDF if we have the URL
+      if (this.directPdfUrl) {
+        this.log('📄 Attempting to download PDF from deed viewer URL...');
+        try {
+          const pdfBase64 = await this.downloadPdfFromUrl(this.directPdfUrl);
+
+          if (pdfBase64) {
+            this.log('✅ Successfully downloaded deed PDF');
+
+            // Clean up
+            delete this.directPdfUrl;
+
+            return {
+              success: true,
+              duration: Date.now() - startTime,
+              pdfBase64,
+              filename: `guilford_deed_${Date.now()}.pdf`,
+              fileSize: Buffer.from(pdfBase64, 'base64').length,
+              downloadPath: ''
+            };
+          }
+        } catch (directErr) {
+          this.log(`⚠️ Direct PDF download failed: ${directErr.message}`);
+          // Continue with other strategies
+          delete this.directPdfUrl;
+        }
+      }
 
       // Set up enhanced network monitoring to capture resources
       const capturedResources = [];

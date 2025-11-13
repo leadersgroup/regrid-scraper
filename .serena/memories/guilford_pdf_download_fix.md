@@ -98,3 +98,20 @@ Added progressive waiting strategy with multiple detection methods:
 
 ### Result
 The scraper now waits appropriately for deed content to load and successfully captures PDFs even when the deed viewer uses server-side rendering or special plugins. Test shows successful capture with 302 KB PDF files.
+
+## Direct PDF Serving Issue (2025-11-13)
+### Root Cause Discovered
+The Guilford County deed viewer (`gis_viewimage.php`) directly serves PDF files with `Content-Type: application/pdf` instead of displaying them in an HTML page. This causes Puppeteer to show a blank page since browsers can't render PDFs in the DOM.
+
+### Solution Implemented
+Modified the `getDeedInfo` method to:
+1. Detect when the response is a PDF (`Content-Type: application/pdf`)
+2. Capture the PDF buffer directly from the response
+3. Store it as `directPdfBase64` for immediate use
+
+Modified the `downloadDeedPdf` method to:
+1. Check for `directPdfBase64` first and use it immediately
+2. Fall back to URL download if buffer capture fails
+3. Continue with other strategies if needed
+
+This handles the case where the deed viewer serves PDFs directly instead of displaying them in the browser.
