@@ -361,71 +361,99 @@ class GuilfordCountyNorthCarolinaScraper extends DeedScraper {
    * Navigate to Deeds tab and click first deed entry
    */
   async getDeedInfo() {
-    const startTime = Date.now();
-
     try {
       this.log('🔍 Looking for Deeds tab...');
-
-      // Find and click Deeds tab
-      const deedsTabClicked = await this.page.evaluate(() => {
-        // Look for Deeds tab/link
-        const allElements = Array.from(document.querySelectorAll('a, button, span, div[role="tab"]'));
-
+      
+      // Click the Deeds tab
+      const deedTabClicked = await this.page.evaluate(() => {
+        // Try different selectors for the Deeds tab
+        const selectors = [
+          'a:contains("Deeds")',
+          'button:contains("Deeds")',
+          'span:contains("Deeds")',
+          '[role="tab"]:contains("Deeds")',
+          'li:contains("Deeds")'
+        ];
+        
+        const allElements = Array.from(document.querySelectorAll('a, button, span, div[role="tab"], li[role="tab"], ul.nav-tabs a'));
         for (const el of allElements) {
-          const text = el.textContent.trim().toLowerCase();
-          if (text === 'deeds' || text.includes('deed')) {
+          if (el.textContent.trim().toLowerCase() === 'deeds' || 
+              el.textContent.trim() === 'Deeds' ||
+              (el.getAttribute('aria-controls') && el.getAttribute('aria-controls').toLowerCase().includes('deed'))) {
             el.click();
             return true;
           }
         }
-
         return false;
       });
 
-      if (!deedsTabClicked) {
-        throw new Error('Could not find or click Deeds tab');
+      if (!deedTabClicked) {
+        this.log('⚠️ Could not find main Deeds tab');
+        return { success: false };
       }
 
       this.log('✅ Clicked Deeds tab');
+      await new Promise(resolve => setTimeout(resolve, 3000));
 
-      // Wait for deeds page to load
-      await new Promise(resolve => setTimeout(resolve, 5000));
-
-      // Click on 'Deeds' tab (might be nested)
+      // Check if there's a nested Deeds tab
       this.log('🔍 Checking for nested Deeds tab...');
-      await this.page.evaluate(() => {
-        const allElements = Array.from(document.querySelectorAll('a, button, span, div[role="tab"]'));
-        for (const el of allElements) {
-          const text = el.textContent.trim().toLowerCase();
-          if (text === 'deeds') {
-            el.click();
-            return true;
+      const nestedDeedTabClicked = await this.page.evaluate(() => {
+        // After clicking the main Deeds tab, there might be another Deeds sub-tab
+        const deedsHeaders = Array.from(document.querySelectorAll('h3, h4, h5, strong'));
+        const hasDeedsHeader = deedsHeaders.some(h => h.textContent.trim() === 'Deeds');
+        
+        // Check if we're already on the deeds page
+        const tables = Array.from(document.querySelectorAll('table'));
+        const hasDeeedTable = tables.some(table => {
+          const headers = Array.from(table.querySelectorAll('th'));
+          return headers.some(th => th.textContent.includes('Deed Type'));
+        });
+        
+        if (!hasDeeedTable) {
+          // Try to find a nested tab
+          const nestedTabs = Array.from(document.querySelectorAll('.nav-tabs a, .nav-pills a, [role="tab"]'));
+          for (const tab of nestedTabs) {
+            if (tab.textContent.trim().toLowerCase() === 'deeds' || 
+                tab.textContent.trim() === 'Deeds' ||
+                tab.textContent.includes('Deed')) {
+              tab.click();
+              return true;
+            }
           }
         }
+        
         return false;
       });
 
-      await new Promise(resolve => setTimeout(resolve, 3000));
+      if (nestedDeedTabClicked) {
+        this.log('✅ Clicked nested Deeds tab');
+        await new Promise(resolve => setTimeout(resolve, 3000));
+      }
 
-      // Find and click first entry under "Deed Type" column
+      // Look for the first ACTUAL Deed Type entry (not building details)
       this.log('🔍 Looking for first Deed Type entry...');
+      
       const deedTypeInfo = await this.page.evaluate(() => {
-        // Look for table with deed information
+        // Find the table with deed information
         const tables = Array.from(document.querySelectorAll('table'));
-
+        
+        // List of actual deed types to look for (excluding building/improvement details)
+        const validDeedTypes = [
+          'DEED', 'WARRANTY DEED', 'CORR DEED', 'QUITCLAIM DEED', 
+          'SPECIAL WARRANTY DEED', 'DEED OF TRUST', 'TRUSTEES DEED',
+          'GRANT DEED', 'GENERAL WARRANTY DEED', 'LIMITED WARRANTY DEED'
+        ];
+        
         for (const table of tables) {
           const rows = Array.from(table.querySelectorAll('tr'));
-
-          // Find header row to identify Deed Type column
           let deedTypeColumnIndex = -1;
           let headerRowIndex = -1;
-
+          
+          // Find the header row and Deed Type column
           for (let i = 0; i < rows.length; i++) {
             const headers = Array.from(rows[i].querySelectorAll('th'));
             for (let j = 0; j < headers.length; j++) {
-              const headerText = headers[j].textContent.toLowerCase().trim();
-              // Look for exact "deed type" header
-              if (headerText === 'deed type') {
+              if (headers[j].textContent.includes('Deed Type')) {
                 deedTypeColumnIndex = j;
                 headerRowIndex = i;
                 break;
@@ -433,166 +461,130 @@ class GuilfordCountyNorthCarolinaScraper extends DeedScraper {
             }
             if (deedTypeColumnIndex !== -1) break;
           }
-
-          // Find first data row AFTER header row with a clickable deed type
-          if (deedTypeColumnIndex !== -1 && headerRowIndex !== -1) {
-            // Start from row after header
+          
+          // If we found the Deed Type column, look for an actual deed entry
+          if (deedTypeColumnIndex !== -1) {
             for (let i = headerRowIndex + 1; i < rows.length; i++) {
-              const row = rows[i];
-              const cells = Array.from(row.querySelectorAll('td'));
-
-              if (cells.length > deedTypeColumnIndex) {
+              const cells = Array.from(rows[i].querySelectorAll('td'));
+              if (cells[deedTypeColumnIndex]) {
                 const deedTypeCell = cells[deedTypeColumnIndex];
                 const link = deedTypeCell.querySelector('a');
-
+                
                 if (link) {
-                  const deedType = link.textContent.trim();
-                  // Only return if the deed type text contains "deed" (like "CORR DEED")
-                  // This filters out navigation links
-                  if (deedType.length > 0 && deedType.toLowerCase().includes('deed')) {
-                    let href = link.href;
-                    // IMPORTANT: Guilford uses http:// not https://
-                    // The browser might auto-upgrade to https, but the server needs http
-                    if (href.includes('https://rdlxweb')) {
-                      href = href.replace('https://', 'http://');
-                      console.log('Fixed protocol: ' + href);
-                    }
-                    // CLICK the link to trigger any JavaScript that sets up session
-                    link.click();
-                    return { success: true, deedType, href, clicked: true };
+                  const href = link.href;
+                  const deedType = link.textContent.trim().toUpperCase();
+                  
+                  // Check if this is an actual deed type and the URL points to the deed viewer
+                  const isValidDeed = validDeedTypes.some(valid => 
+                    deedType.includes(valid) || valid.includes(deedType)
+                  );
+                  
+                  // Also check if the URL is for the deed viewer (gis_viewimage.php)
+                  const isDeedViewerUrl = href.includes('gis_viewimage.php') || 
+                                          href.includes('viewimage') ||
+                                          href.includes('deed');
+                  
+                  // Skip if it's a building/improvement detail page
+                  const isBuildingDetail = href.includes('OutbuildingDetails') || 
+                                           href.includes('BuildingDetails') ||
+                                           deedType.includes('IMPROVEMENT') ||
+                                           deedType.includes('BUILDING');
+                  
+                  if ((isValidDeed || isDeedViewerUrl) && !isBuildingDetail) {
+                    return { 
+                      success: true, 
+                      deedType: link.textContent.trim(),
+                      href: href
+                    };
                   }
                 }
               }
             }
           }
         }
-
+        
+        // If no valid deed found in Deed Type column, look for any deed viewer links
+        const allLinks = Array.from(document.querySelectorAll('a'));
+        for (const link of allLinks) {
+          const href = link.href;
+          const text = link.textContent.trim().toUpperCase();
+          
+          // Check if this link points to the deed viewer
+          if (href.includes('gis_viewimage.php') || 
+              (href.includes('viewimage') && !href.includes('Building'))) {
+            return {
+              success: true,
+              deedType: link.textContent.trim() || 'DEED',
+              href: href
+            };
+          }
+        }
+        
         return { success: false };
       });
 
       if (!deedTypeInfo.success) {
-        throw new Error('Could not find or click Deed Type entry');
+        throw new Error('Could not find any deed document links (only found building/improvement details)');
       }
 
-      this.log(`✅ Found and clicked deed type: ${deedTypeInfo.deedType}`);
+      this.log(`✅ Found deed type: ${deedTypeInfo.deedType}`);
       this.log(`📄 Deed page URL: ${deedTypeInfo.href}`);
 
-      // The link was already clicked in the evaluate function
-      // Now we need to handle the navigation or new tab that opens
+      // SESSION COOKIE FIX: Capture cookies before opening new tab
+      this.log('🍪 Capturing session cookies from current page...');
+      const cookies = await this.page.cookies();
+      this.log(`🍪 Captured ${cookies.length} cookies from current session`);
 
-      // Check if link opens in same tab or new tab
-      this.log('⏳ Waiting for navigation after clicking deed link...');
+      // Create a new page/tab manually
+      this.log('📑 Opening new tab for deed document...');
+      const deedPage = await this.browser.newPage();
 
-      try {
-        // First try to wait for navigation in same tab
-        await this.page.waitForNavigation({
-          waitUntil: 'networkidle0',
-          timeout: 5000
-        });
-        this.log('✅ Navigated in same tab with session intact');
-      } catch (e) {
-        // If no navigation in same tab, check for new tab
-        this.log('🔍 Checking for new tab...');
-
-        // Get all pages/tabs
-        const pages = await this.browser.pages();
-
-        // Find the new tab (last one opened)
-        if (pages.length > 1) {
-          const newPage = pages[pages.length - 1];
-          this.log('✅ Found new tab, switching context...');
-
-          // Wait for the new page to load
-          await newPage.waitForSelector('body', { timeout: 10000 });
-
-          // Switch to the new tab
-          this.page = newPage;
-          this.log('✅ Switched to deed document tab');
-        } else {
-          this.log('⚠️ No new tab opened, page may have loaded via JavaScript');
-        }
+      // Set the captured cookies in the new tab BEFORE navigating
+      if (cookies.length > 0) {
+        this.log('🍪 Setting session cookies in new tab...');
+        await deedPage.setCookie(...cookies);
+        this.log('✅ Session cookies transferred to new tab');
       }
+
+      // Now navigate to the deed URL with session intact
+      this.log('🌐 Navigating to deed URL with session intact...');
+      await deedPage.goto(deedTypeInfo.href, {
+        waitUntil: 'networkidle0',
+        timeout: 60000
+      });
+
+      // Switch context to the new deed page
+      this.page = deedPage;
+      this.log('✅ Switched to deed document tab with session preserved');
 
       // Wait a moment for any dynamic content
       await new Promise(resolve => setTimeout(resolve, 3000));
 
       this.log('✅ On deed document page');
 
-      // Check for captcha (check current page before download)
+      // Check for captcha
       this.log('🔍 Checking for captcha on deeds page...');
-      const captchaInfo = await this.page.evaluate(() => {
-        const bodyText = document.body.innerText.toLowerCase();
-        const hasCaptcha = bodyText.includes('captcha') ||
-                          bodyText.includes('recaptcha') ||
-                          document.querySelector('[class*="captcha"]') !== null ||
-                          document.querySelector('[id*="captcha"]') !== null ||
-                          document.querySelector('.g-recaptcha') !== null ||
-                          document.querySelector('iframe[src*="recaptcha"]') !== null;
-        return { hasCaptcha };
+      const hasCaptcha = await this.page.evaluate(() => {
+        const bodyText = document.body.innerText || '';
+        return bodyText.toLowerCase().includes('captcha') || 
+               document.querySelector('iframe[src*="recaptcha"]') !== null ||
+               document.querySelector('[class*="captcha"]') !== null;
       });
 
-      if (captchaInfo.hasCaptcha) {
-        this.log('⚠️  reCAPTCHA detected');
-
-        // Check if 2Captcha API key is configured
-        if (process.env.TWOCAPTCHA_TOKEN) {
-          this.log('🔧 Attempting to solve reCAPTCHA using 2Captcha API...');
-
-          try {
-            // Use puppeteer-extra-plugin-recaptcha to solve CAPTCHA
-            await this.page.solveRecaptchas();
-            this.log('✅ reCAPTCHA solved successfully!');
-
-            // Wait for page to process the CAPTCHA solution
-            this.log('⏳ Waiting for page to load after CAPTCHA...');
-            await new Promise(resolve => setTimeout(resolve, 5000));
-
-          } catch (captchaError) {
-            this.log(`❌ Failed to solve reCAPTCHA: ${captchaError.message}`);
-            throw new Error(`CAPTCHA solving failed: ${captchaError.message}`);
-          }
-        } else {
-          // No 2Captcha API key - wait for manual solution
-          this.log('⚠️  No 2Captcha API key configured - waiting for manual solution...');
-          this.log('Please solve the captcha in the browser window or set TWOCAPTCHA_TOKEN environment variable');
-
-          // Wait up to 2 minutes for captcha to be solved manually
-          let captchaWaitTime = 0;
-          const maxWaitTime = 120000; // 2 minutes
-
-          while (captchaWaitTime < maxWaitTime) {
-            await new Promise(resolve => setTimeout(resolve, 5000));
-            captchaWaitTime += 5000;
-
-            const stillHasCaptcha = await this.page.evaluate(() => {
-              const bodyText = document.body.innerText.toLowerCase();
-              return bodyText.includes('captcha') || bodyText.includes('recaptcha');
-            });
-
-            if (!stillHasCaptcha) {
-              this.log('✅ Captcha appears to be solved');
-              break;
-            }
-          }
-
-          if (captchaWaitTime >= maxWaitTime) {
-            throw new Error('Captcha timeout - please solve captcha faster or configure TWOCAPTCHA_TOKEN');
-          }
-        }
+      if (hasCaptcha) {
+        this.log('⚠️ CAPTCHA detected on deed page - manual intervention may be required');
+        // Don't throw error - let's try to continue anyway
       }
 
-      return {
+      return { 
         success: true,
-        duration: Date.now() - startTime
+        deedType: deedTypeInfo.deedType,
+        deedUrl: deedTypeInfo.href
       };
 
     } catch (error) {
       this.log(`❌ Failed to get deed info: ${error.message}`);
-      return {
-        success: false,
-        duration: Date.now() - startTime,
-        error: error.message
-      };
+      return { success: false, error: error.message };
     }
   }
 
