@@ -498,39 +498,50 @@ class KingCountyWashingtonScraper extends DeedScraper {
         this.log(`⚠️  Document is TIF format - converting to PDF...`);
 
         try {
-          // Get TIF metadata to check for multiple pages
-          const metadata = await sharp(docBuffer, { pages: -1 }).metadata();
-          const pageCount = metadata.pages || 1;
-
-          this.log(`   TIF document has ${pageCount} page(s)`);
-
           // Create PDF document
           this.log(`   Creating PDF document...`);
           const pdfDoc = await PDFDocument.create();
 
-          // Process each page
-          for (let pageIndex = 0; pageIndex < pageCount; pageIndex++) {
-            this.log(`   Converting page ${pageIndex + 1}/${pageCount} to PNG...`);
+          // Extract pages one by one until we can't extract any more
+          // Multi-page TIFs with different page properties can't use metadata.pages
+          let pageIndex = 0;
+          let extractedPages = 0;
 
-            // Extract and convert current page to PNG
-            const pngBuffer = await sharp(docBuffer, { page: pageIndex })
-              .png()
-              .toBuffer();
+          while (true) {
+            try {
+              this.log(`   Converting page ${pageIndex + 1} to PNG...`);
 
-            // Embed PNG into PDF
-            const image = await pdfDoc.embedPng(pngBuffer);
-            const { width, height } = image.scale(1);
+              // Try to extract current page to PNG
+              const pngBuffer = await sharp(docBuffer, { page: pageIndex })
+                .png()
+                .toBuffer();
 
-            // Create PDF page with image dimensions and draw image
-            const page = pdfDoc.addPage([width, height]);
-            page.drawImage(image, {
-              x: 0,
-              y: 0,
-              width: width,
-              height: height
-            });
+              // Embed PNG into PDF
+              const image = await pdfDoc.embedPng(pngBuffer);
+              const { width, height } = image.scale(1);
 
-            this.log(`   ✅ Page ${pageIndex + 1} added to PDF`);
+              // Create PDF page with image dimensions and draw image
+              const page = pdfDoc.addPage([width, height]);
+              page.drawImage(image, {
+                x: 0,
+                y: 0,
+                width: width,
+                height: height
+              });
+
+              extractedPages++;
+              this.log(`   ✅ Page ${pageIndex + 1} added to PDF`);
+              pageIndex++;
+            } catch (pageError) {
+              // No more pages to extract
+              if (extractedPages === 0) {
+                // If we couldn't extract even the first page, re-throw the error
+                throw pageError;
+              }
+              // Otherwise, we've extracted all available pages
+              this.log(`   Finished extracting ${extractedPages} page(s)`);
+              break;
+            }
           }
 
           // Save PDF
@@ -538,7 +549,7 @@ class KingCountyWashingtonScraper extends DeedScraper {
           const pdfBuffer = Buffer.from(pdfBytes);
           const pdfBase64 = pdfBuffer.toString('base64');
 
-          this.log(`✅ TIF converted to PDF: ${pageCount} page(s), ${(pdfBuffer.length / 1024).toFixed(2)} KB`);
+          this.log(`✅ TIF converted to PDF: ${extractedPages} page(s), ${(pdfBuffer.length / 1024).toFixed(2)} KB`);
 
           return {
             success: true,
@@ -548,7 +559,7 @@ class KingCountyWashingtonScraper extends DeedScraper {
             fileSize: pdfBuffer.length,
             downloadPath: '',
             convertedFrom: 'tif',
-            pageCount: pageCount
+            pageCount: extractedPages
           };
         } catch (conversionError) {
           this.log(`❌ TIF to PDF conversion failed: ${conversionError.message}`);
