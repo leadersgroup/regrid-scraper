@@ -1,0 +1,44 @@
+{
+  "attorneys": [
+    {
+      "name": "Example: Robert Johnson",
+      "firm": "Johnson Estate Planning Law Group",
+      "location": "Los Angeles, CA",
+      "phone": "(310) 555-0100",
+      "email": "rjohnson@johnsonestatelaw.com",
+      "website": "https://www.johnsonestatelaw.com",
+      "practice_areas": [
+        "Estate Planning",
+        "Trusts",
+        "Probate"
+      ],
+      "years_experience": 15,
+      "bar_number": "CA12345",
+      "source": "Manual Entry"
+    },
+    {
+      "name": "Example: Robert Johnson",
+      "firm": "Johnson Estate Planning Law Group",
+      "location": "Los Angeles, CA",
+      "phone": "(310) 555-0100",
+      "email": "rjohnson@johnsonestatelaw.com",
+      "website": "https://www.johnsonestatelaw.com",
+      "practice_areas": [
+        "Estate Planning",
+        "Trusts",
+        "Probate"
+      ],
+      "years_experience": 15,
+      "bar_number": "CA12345",
+      "source": "Manual Entry"
+    }
+  ],
+  "citiesCompleted": [
+    "Los Angeles",
+    "San Francisco",
+    "San Diego",
+    "San Jose",
+    "Sacramento"
+  ],
+  "lastUpdate": "2025-11-14T01:24:51.108Z"
+}
