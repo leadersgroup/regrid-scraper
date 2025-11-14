@@ -1,0 +1,487 @@
+{
+  "uploadDate": "2025-11-14T04:04:59.331Z",
+  "totalUploaded": 0,
+  "totalFailed": 50,
+  "attorneys": [
+    {
+      "attorney": "Barbara Savage",
+      "firm": "Hollander & Hollander, P.C.",
+      "location": "Oakland, CA",
+      "success": false,
+      "companyCreated": false,
+      "personCreated": false,
+      "noteAdded": false
+    },
+    {
+      "attorney": "Mike Broad",
+      "firm": "East Bay Probate & Trust Administration",
+      "location": "Oakland, CA",
+      "success": false,
+      "companyCreated": false,
+      "personCreated": false,
+      "noteAdded": false
+    },
+    {
+      "attorney": "Law Office Representative",
+      "firm": "Opelon LLP",
+      "location": "San Diego, CA",
+      "success": false,
+      "companyCreated": false,
+      "personCreated": false,
+      "noteAdded": false
+    },
+    {
+      "attorney": "Law Office Representative",
+      "firm": "Lonich Patton Ehrlich Policastri",
+      "location": "San Jose, CA",
+      "success": false,
+      "companyCreated": false,
+      "personCreated": false,
+      "noteAdded": false
+    },
+    {
+      "attorney": "Terrence M. Franklin",
+      "firm": "Sacks, Glazier, Franklin, Lodise, McMurtrey & Scheerer, LLP",
+      "location": "Los Angeles, CA",
+      "success": false,
+      "companyCreated": false,
+      "personCreated": false,
+      "noteAdded": false
+    },
+    {
+      "attorney": "Josh Wang",
+      "firm": "Josh Wang Law",
+      "location": "South Pasadena, CA",
+      "success": false,
+      "companyCreated": false,
+      "personCreated": false,
+      "noteAdded": false
+    },
+    {
+      "attorney": "Edmund Vincent",
+      "firm": "Edmund Vincent Law",
+      "location": "Los Angeles, CA",
+      "success": false,
+      "companyCreated": false,
+      "personCreated": false,
+      "noteAdded": false
+    },
+    {
+      "attorney": "Barry Bassin",
+      "firm": "The Bassin Law Firm",
+      "location": "San Francisco, CA",
+      "success": false,
+      "companyCreated": false,
+      "personCreated": false,
+      "noteAdded": false
+    },
+    {
+      "attorney": "T.S. Wrobel",
+      "firm": "T.S. Wrobel & Associates",
+      "location": "San Francisco, CA",
+      "success": false,
+      "companyCreated": false,
+      "personCreated": false,
+      "noteAdded": false
+    },
+    {
+      "attorney": "Jack Klosek",
+      "firm": "Klosek Law Offices",
+      "location": "Sacramento, CA",
+      "success": false,
+      "companyCreated": false,
+      "personCreated": false,
+      "noteAdded": false
+    },
+    {
+      "attorney": "W. Bailey Smith",
+      "firm": "YourTrustDr.com",
+      "location": "Irvine, CA",
+      "success": false,
+      "companyCreated": false,
+      "personCreated": false,
+      "noteAdded": false
+    },
+    {
+      "attorney": "Lawrence Jacobson",
+      "firm": "Lawrence Jacobson Law Firm",
+      "location": "Beverly Hills, CA",
+      "success": false,
+      "companyCreated": false,
+      "personCreated": false,
+      "noteAdded": false
+    },
+    {
+      "attorney": "John D. Teter",
+      "firm": "John D. Teter Law Offices",
+      "location": "San Jose, CA",
+      "success": false,
+      "companyCreated": false,
+      "personCreated": false,
+      "noteAdded": false
+    },
+    {
+      "attorney": "Richard Wingerden",
+      "firm": "The Law Offices of Richard Wingerden",
+      "location": "San Jose, CA",
+      "success": false,
+      "companyCreated": false,
+      "personCreated": false,
+      "noteAdded": false
+    },
+    {
+      "attorney": "Gary G. Bagdasarian",
+      "firm": "Gary G. Bagdasarian, Attorney at Law",
+      "location": "Fresno, CA",
+      "success": false,
+      "companyCreated": false,
+      "personCreated": false,
+      "noteAdded": false
+    },
+    {
+      "attorney": "Philip M. Flanigan",
+      "firm": "The Law Office of Philip M. Flanigan, P.C.",
+      "location": "Fresno, CA",
+      "success": false,
+      "companyCreated": false,
+      "personCreated": false,
+      "noteAdded": false
+    },
+    {
+      "attorney": "David D.L. Horton",
+      "firm": "Law Offices of David D.L. Horton, Esq.",
+      "location": "Riverside, CA",
+      "success": false,
+      "companyCreated": false,
+      "personCreated": false,
+      "noteAdded": false
+    },
+    {
+      "attorney": "Robert M. Baskin",
+      "firm": "Law Office of Robert M. Baskin",
+      "location": "Santa Barbara, CA",
+      "success": false,
+      "companyCreated": false,
+      "personCreated": false,
+      "noteAdded": false
+    },
+    {
+      "attorney": "Verleana D. Green",
+      "firm": "Law Offices of Verleana D. Green, ESQ",
+      "location": "Oakland, CA",
+      "success": false,
+      "companyCreated": false,
+      "personCreated": false,
+      "noteAdded": false
+    },
+    {
+      "attorney": "Law Office Representative",
+      "firm": "CunninghamLegal",
+      "location": "Los Angeles, CA",
+      "success": false,
+      "companyCreated": false,
+      "personCreated": false,
+      "noteAdded": false
+    },
+    {
+      "attorney": "Law Office Representative",
+      "firm": "Boyd Law",
+      "location": "Los Angeles, CA",
+      "success": false,
+      "companyCreated": false,
+      "personCreated": false,
+      "noteAdded": false
+    },
+    {
+      "attorney": "Law Office Representative",
+      "firm": "Elder Law Services of California",
+      "location": "Los Angeles, CA",
+      "success": false,
+      "companyCreated": false,
+      "personCreated": false,
+      "noteAdded": false
+    },
+    {
+      "attorney": "Law Office Representative",
+      "firm": "The Hayes Law Firm",
+      "location": "South Pasadena, CA",
+      "success": false,
+      "companyCreated": false,
+      "personCreated": false,
+      "noteAdded": false
+    },
+    {
+      "attorney": "Law Office Representative",
+      "firm": "JKZ LLP",
+      "location": "San Francisco, CA",
+      "success": false,
+      "companyCreated": false,
+      "personCreated": false,
+      "noteAdded": false
+    },
+    {
+      "attorney": "Law Office Representative",
+      "firm": "Freedman Law Firm",
+      "location": "San Francisco, CA",
+      "success": false,
+      "companyCreated": false,
+      "personCreated": false,
+      "noteAdded": false
+    },
+    {
+      "attorney": "Law Office Representative",
+      "firm": "Leland, Parachini, Steinberg, Matzger & Melnick LLP",
+      "location": "San Francisco, CA",
+      "success": false,
+      "companyCreated": false,
+      "personCreated": false,
+      "noteAdded": false
+    },
+    {
+      "attorney": "Law Office Representative",
+      "firm": "Lim Law Practice",
+      "location": "Fremont and San Francisco, CA",
+      "success": false,
+      "companyCreated": false,
+      "personCreated": false,
+      "noteAdded": false
+    },
+    {
+      "attorney": "Law Office Representative",
+      "firm": "California Living Trusts",
+      "location": "San Diego, CA",
+      "success": false,
+      "companyCreated": false,
+      "personCreated": false,
+      "noteAdded": false
+    },
+    {
+      "attorney": "Law Office Representative",
+      "firm": "Tresp Law, APC",
+      "location": "Solana Beach, CA",
+      "success": false,
+      "companyCreated": false,
+      "personCreated": false,
+      "noteAdded": false
+    },
+    {
+      "attorney": "Law Office Representative",
+      "firm": "San Diego Probate Attorneys",
+      "location": "San Diego, CA",
+      "success": false,
+      "companyCreated": false,
+      "personCreated": false,
+      "noteAdded": false
+    },
+    {
+      "attorney": "Law Office Representative",
+      "firm": "Palomar Law Group",
+      "location": "San Diego County, CA",
+      "success": false,
+      "companyCreated": false,
+      "personCreated": false,
+      "noteAdded": false
+    },
+    {
+      "attorney": "Law Office Representative",
+      "firm": "Naimish & Lewis",
+      "location": "San Diego, CA",
+      "success": false,
+      "companyCreated": false,
+      "personCreated": false,
+      "noteAdded": false
+    },
+    {
+      "attorney": "Law Office Representative",
+      "firm": "Boyd Law Firm",
+      "location": "San Diego, CA",
+      "success": false,
+      "companyCreated": false,
+      "personCreated": false,
+      "noteAdded": false
+    },
+    {
+      "attorney": "Law Office Representative",
+      "firm": "Northern California Estate Planning (Norcal Planners)",
+      "location": "Sacramento, CA",
+      "success": false,
+      "companyCreated": false,
+      "personCreated": false,
+      "noteAdded": false
+    },
+    {
+      "attorney": "Law Office Representative",
+      "firm": "Yee Law Group, Inc.",
+      "location": "Sacramento, CA",
+      "success": false,
+      "companyCreated": false,
+      "personCreated": false,
+      "noteAdded": false
+    },
+    {
+      "attorney": "Law Office Representative",
+      "firm": "Devereaux Estate Law, PC",
+      "location": "Sacramento, CA",
+      "success": false,
+      "companyCreated": false,
+      "personCreated": false,
+      "noteAdded": false
+    },
+    {
+      "attorney": "Law Office Representative",
+      "firm": "Law Office of Williams & Associates, P.C.",
+      "location": "Sacramento, CA",
+      "success": false,
+      "companyCreated": false,
+      "personCreated": false,
+      "noteAdded": false
+    },
+    {
+      "attorney": "Law Office Representative",
+      "firm": "CunninghamLegal Oakland",
+      "location": "Oakland, CA",
+      "success": false,
+      "companyCreated": false,
+      "personCreated": false,
+      "noteAdded": false
+    },
+    {
+      "attorney": "Law Office Representative",
+      "firm": "OC Wills & Trust Attorneys",
+      "location": "Irvine, CA",
+      "success": false,
+      "companyCreated": false,
+      "personCreated": false,
+      "noteAdded": false
+    },
+    {
+      "attorney": "Law Office Representative",
+      "firm": "OC Trial Group",
+      "location": "Newport Beach, CA",
+      "success": false,
+      "companyCreated": false,
+      "personCreated": false,
+      "noteAdded": false
+    },
+    {
+      "attorney": "Law Office Representative",
+      "firm": "Buffington Law Firm",
+      "location": "Orange County, CA",
+      "success": false,
+      "companyCreated": false,
+      "personCreated": false,
+      "noteAdded": false
+    },
+    {
+      "attorney": "Law Office Representative",
+      "firm": "The Estate Lawyers",
+      "location": "Newport Beach, CA",
+      "success": false,
+      "companyCreated": false,
+      "personCreated": false,
+      "noteAdded": false
+    },
+    {
+      "attorney": "Law Office Representative",
+      "firm": "Alkana Law",
+      "location": "Pasadena, CA",
+      "success": false,
+      "companyCreated": false,
+      "personCreated": false,
+      "noteAdded": false
+    },
+    {
+      "attorney": "Law Office Representative",
+      "firm": "Kristof & Kristof Attorneys at Law",
+      "location": "Pasadena, CA",
+      "success": false,
+      "companyCreated": false,
+      "personCreated": false,
+      "noteAdded": false
+    },
+    {
+      "attorney": "Law Office Representative",
+      "firm": "Morris & Morris",
+      "location": "Arcadia, CA",
+      "success": false,
+      "companyCreated": false,
+      "personCreated": false,
+      "noteAdded": false
+    },
+    {
+      "attorney": "Law Office Representative",
+      "firm": "SAC Attorneys LLP",
+      "location": "San Jose, CA",
+      "success": false,
+      "companyCreated": false,
+      "personCreated": false,
+      "noteAdded": false
+    },
+    {
+      "attorney": "Law Office Representative",
+      "firm": "Sowards Law Firm",
+      "location": "Campbell, CA",
+      "success": false,
+      "companyCreated": false,
+      "personCreated": false,
+      "noteAdded": false
+    },
+    {
+      "attorney": "Law Office Representative",
+      "firm": "Law Offices of Berge & Berge LLP",
+      "location": "San Jose, CA",
+      "success": false,
+      "companyCreated": false,
+      "personCreated": false,
+      "noteAdded": false
+    },
+    {
+      "attorney": "Law Office Representative",
+      "firm": "Tuttle & McCloskey",
+      "location": "Fresno, CA",
+      "success": false,
+      "companyCreated": false,
+      "personCreated": false,
+      "noteAdded": false
+    },
+    {
+      "attorney": "Law Office Representative",
+      "firm": "McCormick Barstow LLP",
+      "location": "Fresno, CA",
+      "success": false,
+      "companyCreated": false,
+      "personCreated": false,
+      "noteAdded": false
+    }
+  ],
+  "locationBreakdown": {
+    "San Diego, CA": 5,
+    "San Jose, CA": 5,
+    "Los Angeles, CA": 5,
+    "San Francisco, CA": 5,
+    "Sacramento, CA": 5,
+    "Oakland, CA": 4,
+    "Fresno, CA": 4,
+    "South Pasadena, CA": 2,
+    "Irvine, CA": 2,
+    "Newport Beach, CA": 2,
+    "Pasadena, CA": 2,
+    "Beverly Hills, CA": 1,
+    "Riverside, CA": 1,
+    "Santa Barbara, CA": 1,
+    "Fremont and San Francisco, CA": 1,
+    "Solana Beach, CA": 1,
+    "San Diego County, CA": 1,
+    "Orange County, CA": 1,
+    "Arcadia, CA": 1,
+    "Campbell, CA": 1
+  },
+  "summary": {
+    "companiesCreated": 0,
+    "personsCreated": 0,
+    "notesAdded": 0,
+    "withEmail": 4,
+    "withPhone": 50,
+    "withWebsite": 49
+  }
+}
