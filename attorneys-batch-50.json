@@ -1,0 +1,618 @@
+[
+  {
+    "name": "Alexandra Thomas",
+    "firm": "Thomas Legal Center",
+    "location": "Anaheim, CA",
+    "phone": "(393) 972-1974",
+    "email": "alexandrathomas@thomaslegal.com",
+    "website": "https://www.thomaslegal.com",
+    "practice_areas": [
+      "Trust Administration",
+      "Estate Planning",
+      "Tax Planning"
+    ]
+  },
+  {
+    "name": "Kelly Guzman",
+    "firm": "Kelly Guzman Estate Group",
+    "location": "Richmond, CA",
+    "phone": "(894) 528-1052",
+    "email": "kellyguzman@guzmanlegal.com",
+    "website": "https://www.guzmanlegal.com",
+    "practice_areas": [
+      "Trust Administration",
+      "Estate Planning"
+    ]
+  },
+  {
+    "name": "Kelly Russell",
+    "firm": "Kelly Russell Estate Attorneys",
+    "location": "Westminster, CA",
+    "phone": "(807) 815-8733",
+    "email": "kellyrussell@russelllegal.com",
+    "website": "https://www.russelllegal.com",
+    "practice_areas": [
+      "Trusts",
+      "Estate Planning",
+      "Tax Planning"
+    ]
+  },
+  {
+    "name": "Joyce Jenkins",
+    "firm": "Joyce Jenkins Law Associates",
+    "location": "Norwalk, CA",
+    "phone": "(698) 473-8888",
+    "email": "joycejenkins@jenkinslegal.com",
+    "website": "https://www.jenkinslegal.com",
+    "practice_areas": [
+      "Probate",
+      "Trust Administration"
+    ]
+  },
+  {
+    "name": "Carol Johnson",
+    "firm": "Carol Johnson Legal Corporation",
+    "location": "Santa Ana, CA",
+    "phone": "(303) 682-4885",
+    "email": "caroljohnson@johnsonlaw.com",
+    "website": "https://www.johnsonlaw.com",
+    "practice_areas": [
+      "Estate Planning",
+      "Asset Protection"
+    ]
+  },
+  {
+    "name": "Evelyn Powell",
+    "firm": "Powell Estate Attorneys",
+    "location": "Oakland, CA",
+    "phone": "(892) 317-7661",
+    "email": "evelynpowell@powelllegal.com",
+    "website": "https://www.powelllegal.com",
+    "practice_areas": [
+      "Trust Administration",
+      "Estate Planning",
+      "Tax Planning"
+    ]
+  },
+  {
+    "name": "Michael Daniels",
+    "firm": "Michael Daniels Legal Partners",
+    "location": "Livermore, CA",
+    "phone": "(977) 229-6787",
+    "email": "michaeldaniels@danielslegal.com",
+    "website": "https://www.danielslegal.com",
+    "practice_areas": [
+      "Estate Planning",
+      "Trusts"
+    ]
+  },
+  {
+    "name": "Kevin Dixon",
+    "firm": "Dixon Law Firm",
+    "location": "San Mateo, CA",
+    "phone": "(482) 287-9667",
+    "email": "kevindixon@dixonlaw.com",
+    "website": "https://www.dixonlaw.com",
+    "practice_areas": [
+      "Trust Administration",
+      "Estate Planning",
+      "Tax Planning"
+    ]
+  },
+  {
+    "name": "Grace Meyer",
+    "firm": "Meyer Trust Law",
+    "location": "Citrus Heights, CA",
+    "phone": "(794) 886-5740",
+    "email": "gracemeyer@meyerlegal.com",
+    "website": "https://www.meyerlegal.com",
+    "practice_areas": [
+      "Trust Administration",
+      "Elder Law"
+    ]
+  },
+  {
+    "name": "Victoria Gonzalez",
+    "firm": "Gonzalez Law Firm",
+    "location": "Anaheim, CA",
+    "phone": "(335) 542-7803",
+    "email": "victoriagonzalez@gonzalezlegal.com",
+    "website": "https://www.gonzalezlegal.com",
+    "practice_areas": [
+      "Estate Planning",
+      "Tax Planning"
+    ]
+  },
+  {
+    "name": "Joshua Washington",
+    "firm": "Joshua Washington Law Associates",
+    "location": "South Gate, CA",
+    "phone": "(239) 647-4157",
+    "email": "joshuawashington@washingtonlaw.com",
+    "website": "https://www.washingtonlaw.com",
+    "practice_areas": [
+      "Trust Administration",
+      "Estate Planning"
+    ]
+  },
+  {
+    "name": "Carl Dunn",
+    "firm": "Carl Dunn Estate Planning",
+    "location": "Torrance, CA",
+    "phone": "(914) 478-8165",
+    "email": "carldunn@dunnlegal.com",
+    "website": "https://www.dunnlegal.com",
+    "practice_areas": [
+      "Trust Administration",
+      "Elder Law"
+    ]
+  },
+  {
+    "name": "Jordan Rose",
+    "firm": "Jordan Rose Legal Group",
+    "location": "Temecula, CA",
+    "phone": "(267) 239-9455",
+    "email": "jordanrose@roselegal.com",
+    "website": "https://www.roselegal.com",
+    "practice_areas": [
+      "Estate Planning",
+      "Probate"
+    ]
+  },
+  {
+    "name": "Roger Sanchez",
+    "firm": "Sanchez Trust Attorneys",
+    "location": "Palmdale, CA",
+    "phone": "(875) 901-2923",
+    "email": "rogersanchez@sanchezlegal.com",
+    "website": "https://www.sanchezlegal.com",
+    "practice_areas": [
+      "Estate Planning",
+      "Tax Planning"
+    ]
+  },
+  {
+    "name": "Ryan Salazar",
+    "firm": "Salazar Trust Counsel",
+    "location": "Santa Monica, CA",
+    "phone": "(819) 361-8715",
+    "email": "ryansalazar@salazarlaw.com",
+    "website": "https://www.salazarlaw.com",
+    "practice_areas": [
+      "Estate Planning",
+      "Tax Planning"
+    ]
+  },
+  {
+    "name": "Willie McDonald",
+    "firm": "Willie McDonald Law Firm",
+    "location": "Chino, CA",
+    "phone": "(756) 231-4116",
+    "email": "williemcdonald@mcdonaldlaw.com",
+    "website": "https://www.mcdonaldlaw.com",
+    "practice_areas": [
+      "Trusts",
+      "Estate Planning",
+      "Tax Planning"
+    ]
+  },
+  {
+    "name": "Kevin Stephens",
+    "firm": "Kevin Stephens Law Office",
+    "location": "Hawthorne, CA",
+    "phone": "(283) 594-2006",
+    "email": "kevinstephens@stephenslegal.com",
+    "website": "https://www.stephenslegal.com",
+    "practice_areas": [
+      "Estate Planning",
+      "Asset Protection"
+    ]
+  },
+  {
+    "name": "Randy White",
+    "firm": "Randy White Law Group",
+    "location": "Norwalk, CA",
+    "phone": "(720) 717-2538",
+    "email": "randywhite@whitelaw.com",
+    "website": "https://www.whitelaw.com",
+    "practice_areas": [
+      "Estate Planning",
+      "Trusts"
+    ]
+  },
+  {
+    "name": "Kelly Cooper",
+    "firm": "Cooper Legal Center",
+    "location": "Antioch, CA",
+    "phone": "(375) 506-6291",
+    "email": "kellycooper@cooperlaw.com",
+    "website": "https://www.cooperlaw.com",
+    "practice_areas": [
+      "Trusts",
+      "Estate Planning",
+      "Tax Planning"
+    ]
+  },
+  {
+    "name": "Beverly Munoz",
+    "firm": "Beverly Munoz Estate Attorneys",
+    "location": "Merced, CA",
+    "phone": "(993) 668-1851",
+    "email": "beverlymunoz@munozlaw.com",
+    "website": "https://www.munozlaw.com",
+    "practice_areas": [
+      "Estate Planning",
+      "Probate"
+    ]
+  },
+  {
+    "name": "Michelle Anderson",
+    "firm": "Anderson Legal Center",
+    "location": "Chico, CA",
+    "phone": "(488) 350-2905",
+    "email": "michelleanderson@andersonlaw.com",
+    "website": "https://www.andersonlaw.com",
+    "practice_areas": [
+      "Trust Administration",
+      "Elder Law"
+    ]
+  },
+  {
+    "name": "Jessica Collins",
+    "firm": "Collins Estate Law",
+    "location": "Oxnard, CA",
+    "phone": "(448) 750-4959",
+    "email": "jessicacollins@collinslaw.com",
+    "website": "https://www.collinslaw.com",
+    "practice_areas": [
+      "Trust Administration",
+      "Estate Planning"
+    ]
+  },
+  {
+    "name": "Jack Porter",
+    "firm": "Porter Law Group",
+    "location": "San Bernardino, CA",
+    "phone": "(427) 983-7053",
+    "email": "jackporter@porterlaw.com",
+    "website": "https://www.porterlaw.com",
+    "practice_areas": [
+      "Estate Planning",
+      "Trusts"
+    ]
+  },
+  {
+    "name": "Nicholas Ford",
+    "firm": "Ford Trust Solutions",
+    "location": "Jurupa Valley, CA",
+    "phone": "(721) 406-9206",
+    "email": "nicholasford@fordlaw.com",
+    "website": "https://www.fordlaw.com",
+    "practice_areas": [
+      "Estate Planning",
+      "Trusts"
+    ]
+  },
+  {
+    "name": "Jeffrey Rogers",
+    "firm": "Jeffrey Rogers Law Corporation",
+    "location": "Livermore, CA",
+    "phone": "(914) 884-4379",
+    "email": "jeffreyrogers@rogerslaw.com",
+    "website": "https://www.rogerslaw.com",
+    "practice_areas": [
+      "Estate Planning",
+      "Asset Protection"
+    ]
+  },
+  {
+    "name": "Russell Marshall",
+    "firm": "Russell Marshall Legal Center",
+    "location": "San Francisco, CA",
+    "phone": "(854) 214-1810",
+    "email": "russellmarshall@marshalllegal.com",
+    "website": "https://www.marshalllegal.com",
+    "practice_areas": [
+      "Trusts",
+      "Elder Law",
+      "Probate"
+    ]
+  },
+  {
+    "name": "Amanda Ryan",
+    "firm": "Ryan Law Group",
+    "location": "Sunnyvale, CA",
+    "phone": "(465) 715-3823",
+    "email": "amandaryan@ryanlegal.com",
+    "website": "https://www.ryanlegal.com",
+    "practice_areas": [
+      "Trust Administration",
+      "Elder Law"
+    ]
+  },
+  {
+    "name": "Susan Nguyen",
+    "firm": "Susan Nguyen Estate Planning",
+    "location": "Tracy, CA",
+    "phone": "(597) 762-6755",
+    "email": "susannguyen@nguyenlaw.com",
+    "website": "https://www.nguyenlaw.com",
+    "practice_areas": [
+      "Trust Administration",
+      "Elder Law"
+    ]
+  },
+  {
+    "name": "Nathan Burns",
+    "firm": "Nathan Burns Law Office",
+    "location": "San Bernardino, CA",
+    "phone": "(359) 599-3817",
+    "email": "nathanburns@burnslegal.com",
+    "website": "https://www.burnslegal.com",
+    "practice_areas": [
+      "Trusts",
+      "Elder Law",
+      "Probate"
+    ]
+  },
+  {
+    "name": "Joan Marshall",
+    "firm": "Joan Marshall Law Office",
+    "location": "Newport Beach, CA",
+    "phone": "(832) 875-4714",
+    "email": "joanmarshall@marshalllegal.com",
+    "website": "https://www.marshalllegal.com",
+    "practice_areas": [
+      "Probate",
+      "Trust Administration"
+    ]
+  },
+  {
+    "name": "Henry Taylor",
+    "firm": "Henry Taylor Trust & Estate",
+    "location": "Hesperia, CA",
+    "phone": "(472) 208-5630",
+    "email": "henrytaylor@taylorlegal.com",
+    "website": "https://www.taylorlegal.com",
+    "practice_areas": [
+      "Estate Planning",
+      "Probate"
+    ]
+  },
+  {
+    "name": "Ronald Sullivan",
+    "firm": "Ronald Sullivan Legal Group",
+    "location": "Inglewood, CA",
+    "phone": "(283) 228-7903",
+    "email": "ronaldsullivan@sullivanlaw.com",
+    "website": "https://www.sullivanlaw.com",
+    "practice_areas": [
+      "Estate Planning",
+      "Tax Planning"
+    ]
+  },
+  {
+    "name": "Frank Hill",
+    "firm": "Frank Hill Legal Corporation",
+    "location": "Fairfield, CA",
+    "phone": "(734) 368-6008",
+    "email": "frankhill@hilllaw.com",
+    "website": "https://www.hilllaw.com",
+    "practice_areas": [
+      "Trusts",
+      "Estate Planning",
+      "Tax Planning"
+    ]
+  },
+  {
+    "name": "Henry Castro",
+    "firm": "Henry Castro Law Group",
+    "location": "Compton, CA",
+    "phone": "(523) 582-6905",
+    "email": "henrycastro@castrolaw.com",
+    "website": "https://www.castrolaw.com",
+    "practice_areas": [
+      "Trusts",
+      "Elder Law",
+      "Probate"
+    ]
+  },
+  {
+    "name": "Arthur Woods",
+    "firm": "Woods Law Group",
+    "location": "Mission Viejo, CA",
+    "phone": "(371) 325-3562",
+    "email": "arthurwoods@woodslegal.com",
+    "website": "https://www.woodslegal.com",
+    "practice_areas": [
+      "Trusts",
+      "Elder Law",
+      "Probate"
+    ]
+  },
+  {
+    "name": "Pamela White",
+    "firm": "White Legal Center",
+    "location": "Oceanside, CA",
+    "phone": "(505) 976-7269",
+    "email": "pamelawhite@whitelegal.com",
+    "website": "https://www.whitelegal.com",
+    "practice_areas": [
+      "Estate Planning",
+      "Tax Planning"
+    ]
+  },
+  {
+    "name": "Marilyn Olson",
+    "firm": "Marilyn Olson Trust & Estate",
+    "location": "Costa Mesa, CA",
+    "phone": "(741) 950-6713",
+    "email": "marilynolson@olsonlaw.com",
+    "website": "https://www.olsonlaw.com",
+    "practice_areas": [
+      "Trust Administration",
+      "Estate Planning",
+      "Tax Planning"
+    ]
+  },
+  {
+    "name": "Kyle Morales",
+    "firm": "Morales Legal Center",
+    "location": "Whittier, CA",
+    "phone": "(380) 747-3688",
+    "email": "kylemorales@moraleslaw.com",
+    "website": "https://www.moraleslaw.com",
+    "practice_areas": [
+      "Estate Planning",
+      "Probate"
+    ]
+  },
+  {
+    "name": "Jerry Jimenez",
+    "firm": "Jimenez Trust Solutions",
+    "location": "Anaheim, CA",
+    "phone": "(395) 415-4905",
+    "email": "jerryjimenez@jimenezlegal.com",
+    "website": "https://www.jimenezlegal.com",
+    "practice_areas": [
+      "Trusts",
+      "Estate Planning",
+      "Tax Planning"
+    ]
+  },
+  {
+    "name": "Russell Freeman",
+    "firm": "Freeman Law Group",
+    "location": "Torrance, CA",
+    "phone": "(284) 987-5485",
+    "email": "russellfreeman@freemanlaw.com",
+    "website": "https://www.freemanlaw.com",
+    "practice_areas": [
+      "Estate Planning",
+      "Asset Protection"
+    ]
+  },
+  {
+    "name": "Wayne Soto",
+    "firm": "Soto Legal Center",
+    "location": "Whittier, CA",
+    "phone": "(881) 319-9879",
+    "email": "waynesoto@sotolegal.com",
+    "website": "https://www.sotolegal.com",
+    "practice_areas": [
+      "Trust Administration",
+      "Elder Law"
+    ]
+  },
+  {
+    "name": "Rebecca Snyder",
+    "firm": "Rebecca Snyder Law Corporation",
+    "location": "Simi Valley, CA",
+    "phone": "(501) 301-8559",
+    "email": "rebeccasnyder@snyderlegal.com",
+    "website": "https://www.snyderlegal.com",
+    "practice_areas": [
+      "Trusts",
+      "Estate Planning",
+      "Tax Planning"
+    ]
+  },
+  {
+    "name": "Laura Bell",
+    "firm": "Laura Bell Law Office",
+    "location": "Newport Beach, CA",
+    "phone": "(929) 849-1124",
+    "email": "laurabell@belllaw.com",
+    "website": "https://www.belllaw.com",
+    "practice_areas": [
+      "Estate Planning",
+      "Probate"
+    ]
+  },
+  {
+    "name": "Kevin Romero",
+    "firm": "Kevin Romero Trust & Estate",
+    "location": "Lancaster, CA",
+    "phone": "(492) 419-2864",
+    "email": "kevinromero@romerolegal.com",
+    "website": "https://www.romerolegal.com",
+    "practice_areas": [
+      "Estate Planning",
+      "Probate"
+    ]
+  },
+  {
+    "name": "Bradley Castro",
+    "firm": "Bradley Castro Estate Attorneys",
+    "location": "Santa Clara, CA",
+    "phone": "(435) 745-3836",
+    "email": "bradleycastro@castrolegal.com",
+    "website": "https://www.castrolegal.com",
+    "practice_areas": [
+      "Trusts",
+      "Elder Law",
+      "Probate"
+    ]
+  },
+  {
+    "name": "Sara Shaw",
+    "firm": "Shaw Legal Group",
+    "location": "Chino, CA",
+    "phone": "(688) 683-7132",
+    "email": "sarashaw@shawlegal.com",
+    "website": "https://www.shawlegal.com",
+    "practice_areas": [
+      "Trust Administration",
+      "Elder Law"
+    ]
+  },
+  {
+    "name": "Ruth Washington",
+    "firm": "Ruth Washington Trust Law",
+    "location": "Alhambra, CA",
+    "phone": "(358) 921-1900",
+    "email": "ruthwashington@washingtonlaw.com",
+    "website": "https://www.washingtonlaw.com",
+    "practice_areas": [
+      "Estate Planning",
+      "Probate"
+    ]
+  },
+  {
+    "name": "Danielle Moore",
+    "firm": "Danielle Moore Legal Corporation",
+    "location": "San Bernardino, CA",
+    "phone": "(213) 333-8823",
+    "email": "daniellemoore@moorelaw.com",
+    "website": "https://www.moorelaw.com",
+    "practice_areas": [
+      "Probate",
+      "Trust Administration"
+    ]
+  },
+  {
+    "name": "Nicole Washington",
+    "firm": "Nicole Washington Law Group",
+    "location": "Bakersfield, CA",
+    "phone": "(678) 694-2702",
+    "email": "nicolewashington@washingtonlegal.com",
+    "website": "https://www.washingtonlegal.com",
+    "practice_areas": [
+      "Trusts",
+      "Elder Law",
+      "Probate"
+    ]
+  },
+  {
+    "name": "Julie Gibson",
+    "firm": "Gibson Legal Center",
+    "location": "Santa Ana, CA",
+    "phone": "(413) 248-4435",
+    "email": "juliegibson@gibsonlegal.com",
+    "website": "https://www.gibsonlegal.com",
+    "practice_areas": [
+      "Estate Planning",
+      "Trusts"
+    ]
+  }
+]

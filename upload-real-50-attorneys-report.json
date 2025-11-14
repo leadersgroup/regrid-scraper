@@ -1,0 +1,73 @@
+{
+  "timestamp": "2025-11-14T03:16:34.965Z",
+  "total": 49,
+  "successful": 45,
+  "duplicates": 0,
+  "failed": 4,
+  "successfulAttorneys": [
+    "Larissa L. Abruscato",
+    "Michelle C. Bartolic",
+    "Evan A. Basakis",
+    "Amy L. Gostanian",
+    "Carl L. Jones",
+    "Ryan B. Kalashian",
+    "Kaden J. Kennedy",
+    "Justin M. Kincheloe",
+    "Bradley R. Kirk",
+    "Michael McDonald",
+    "Kimberly R. McGhee",
+    "Natalie E. Ortiz",
+    "Timothy P. Murphy",
+    "Debra DeCarli",
+    "Eric R. Bardwell",
+    "Carolyn Clark",
+    "Bradford S. Cohen",
+    "Megan Ferkel Earhart",
+    "Neil C. Erickson",
+    "Patrick Handy",
+    "Scott A. Harshman",
+    "Paul M. LaMartina",
+    "Matthew J. Landa",
+    "Timothy Lappen",
+    "Jennifer L. Long",
+    "Sarah Mills",
+    "Burton A. Mitchell",
+    "Ryan D. Nowicki",
+    "Jamie K. Ogden",
+    "Alex Palabrica",
+    "Anthony Salvador Perez",
+    "Irina Hoversten",
+    "Gordon A. Schaller",
+    "Julia Siewit",
+    "Jill R. Skinner",
+    "Noah Soofer",
+    "Andrew K. Steenbock",
+    "Caprice L. Collins",
+    "Matt Odgers",
+    "Suzanne P. Nicholl",
+    "Daniel R. Sallus",
+    "Jason M. Stone",
+    "Adam G. Carpinelli",
+    "Shenne J. Hahn",
+    "Elizabeth A. Tresp"
+  ],
+  "duplicateAttorneys": [],
+  "failedAttorneys": [
+    {
+      "name": "Bob DeCarli",
+      "error": "Request failed with status code 400"
+    },
+    {
+      "name": "Abraham A. Ames",
+      "error": "Request failed with status code 400"
+    },
+    {
+      "name": "James J. White",
+      "error": "Request failed with status code 400"
+    },
+    {
+      "name": "Tony Gaston",
+      "error": "Request failed with status code 400"
+    }
+  ]
+}
