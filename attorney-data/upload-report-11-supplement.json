@@ -1,0 +1,106 @@
+{
+  "uploadDate": "2025-11-14T22:54:08.559Z",
+  "totalProcessed": 11,
+  "successful": 11,
+  "failed": 0,
+  "results": [
+    {
+      "success": true,
+      "name": "Jessica Llort",
+      "firm": "Geiger Law Office, P.C.",
+      "location": "Carlsbad, CA",
+      "personId": "b96e1f54-3934-427e-916e-fedcbb93ef70"
+    },
+    {
+      "success": true,
+      "name": "Linda J. Sinclair",
+      "firm": "Geiger Law Office, P.C.",
+      "location": "Carlsbad, CA",
+      "personId": "12e04d97-085e-48ed-9b71-fa36124ab7ef"
+    },
+    {
+      "success": true,
+      "name": "Scott Grossman",
+      "firm": "The Grossman Law Firm, APC",
+      "location": "Riverside, CA",
+      "personId": "26742a6d-de63-4d3e-afc4-07c3e66e67f8"
+    },
+    {
+      "success": true,
+      "name": "Jeremy J. Ofseyer",
+      "firm": "Law Offices of Jeremy J. Ofseyer",
+      "location": "San Francisco, CA",
+      "personId": "c997f1b6-698c-4cf9-a1a7-60325aab9dde"
+    },
+    {
+      "success": true,
+      "name": "David Hamilton",
+      "firm": "Hamilton Law Firm",
+      "location": "San Jose, CA",
+      "personId": "150cd4ae-b7ed-402e-a5d3-e0d15ed5e854"
+    },
+    {
+      "success": true,
+      "name": "Cynthia C. Sayegh",
+      "firm": "Law Office of Cynthia C. Sayegh",
+      "location": "Walnut Creek, CA",
+      "personId": "8732a01e-e7df-470c-8f31-8afe20cfc01e"
+    },
+    {
+      "success": true,
+      "name": "Daniel L. DuRee",
+      "firm": "Law Offices of Daniel L. DuRee",
+      "location": "Walnut Creek, CA",
+      "personId": "8fa244ab-1f4c-4c39-a469-ab48e101b1ea"
+    },
+    {
+      "success": true,
+      "name": "Brian Darling",
+      "firm": "Darling & Wilson, PC",
+      "location": "Bakersfield, CA",
+      "personId": "bc847598-ef88-432e-80d2-7c9113ede74c"
+    },
+    {
+      "success": true,
+      "name": "Michael Lungu",
+      "firm": "Lungu Law Group, A Professional Corporation",
+      "location": "Long Beach, CA",
+      "personId": "dde07c45-c0d5-4102-8d9c-14ed0791227f"
+    },
+    {
+      "success": true,
+      "name": "Jennifer Van Sciver",
+      "firm": "Van Sciver Law",
+      "location": "Bakersfield, CA",
+      "personId": "4e3fbffe-1ba0-4d79-b375-45d791aab2e2"
+    },
+    {
+      "success": true,
+      "name": "Young Wooldridge",
+      "firm": "The Law Offices of Young Wooldridge, LLP",
+      "location": "Bakersfield, CA",
+      "personId": "d2ca8546-7e8c-47fc-a284-d6207f514faa"
+    }
+  ],
+  "locationBreakdown": {
+    "Carlsbad": 2,
+    "Riverside": 1,
+    "San Francisco": 1,
+    "San Jose": 1,
+    "Walnut Creek": 2,
+    "Bakersfield": 3,
+    "Long Beach": 1
+  },
+  "firmBreakdown": {
+    "Geiger Law Office, P.C.": 2,
+    "The Grossman Law Firm, APC": 1,
+    "Law Offices of Jeremy J. Ofseyer": 1,
+    "Hamilton Law Firm": 1,
+    "Law Office of Cynthia C. Sayegh": 1,
+    "Law Offices of Daniel L. DuRee": 1,
+    "Darling & Wilson, PC": 1,
+    "Lungu Law Group, A Professional Corporation": 1,
+    "Van Sciver Law": 1,
+    "The Law Offices of Young Wooldridge, LLP": 1
+  }
+}

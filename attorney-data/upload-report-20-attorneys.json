@@ -1,0 +1,154 @@
+{
+  "uploadDate": "2025-11-14T22:52:54.010Z",
+  "totalProcessed": 20,
+  "successful": 9,
+  "failed": 11,
+  "results": [
+    {
+      "success": false,
+      "name": "Gary Brainin",
+      "firm": "Brainin Law Office",
+      "error": "Request failed with status code 400"
+    },
+    {
+      "success": false,
+      "name": "Reba Birmingham",
+      "firm": "Long Beach Law, Inc.",
+      "error": "Request failed with status code 400"
+    },
+    {
+      "success": false,
+      "name": "Stephanie Loftin",
+      "firm": "Long Beach Law, Inc.",
+      "error": "Request failed with status code 400"
+    },
+    {
+      "success": false,
+      "name": "Robert H. Brumfield",
+      "firm": "Law Offices of Robert H. Brumfield, P.C.",
+      "error": "Request failed with status code 400"
+    },
+    {
+      "success": false,
+      "name": "Brenda Geiger",
+      "firm": "Geiger Law Office, P.C.",
+      "error": "Request failed with status code 400"
+    },
+    {
+      "success": false,
+      "name": "William Lange",
+      "firm": "Geiger Law Office, P.C.",
+      "error": "Request failed with status code 400"
+    },
+    {
+      "success": false,
+      "name": "Sandra Diaz",
+      "firm": "The Law Offices of Sandra Diaz PC",
+      "error": "Request failed with status code 400"
+    },
+    {
+      "success": false,
+      "name": "Richard T. Williamson",
+      "firm": "Williamson & Gentilini",
+      "error": "Request failed with status code 400"
+    },
+    {
+      "success": false,
+      "name": "Christina E. Gentilini",
+      "firm": "Williamson & Gentilini",
+      "error": "Request failed with status code 400"
+    },
+    {
+      "success": false,
+      "name": "Mark L. Cederborg",
+      "firm": "Cederborg & Bret LLP",
+      "error": "Request failed with status code 400"
+    },
+    {
+      "success": true,
+      "name": "Thomas V. Bret",
+      "firm": "Cederborg & Bret LLP",
+      "location": "Walnut Creek, CA",
+      "personId": "16cb47f0-f767-4e89-a940-0dafddd1b8ab"
+    },
+    {
+      "success": true,
+      "name": "Christopher B. Johnson",
+      "firm": "Law Office of Christopher B. Johnson",
+      "location": "Pasadena, CA",
+      "personId": "10660bc7-fdcd-4deb-98ce-3ac30d5d0e79"
+    },
+    {
+      "success": true,
+      "name": "Dennis Michael Sandoval",
+      "firm": "Dennis M. Sandoval, a Professional Law Corporation",
+      "location": "Riverside, CA",
+      "personId": "ae7b86f9-6580-48f6-b9b1-b3301865e0e5"
+    },
+    {
+      "success": true,
+      "name": "Kristine M. Borgia",
+      "firm": "Law Office of Kristine M. Borgia",
+      "location": "Riverside, CA",
+      "personId": "2ab2a006-0b36-4c8c-955b-9af3cb4c1cb5"
+    },
+    {
+      "success": true,
+      "name": "Jim Cunningham",
+      "firm": "CunninghamLegal",
+      "location": "Walnut Creek, CA",
+      "personId": "0ae996c9-2b94-43ce-bd21-f3e98f753a62"
+    },
+    {
+      "success": true,
+      "name": "Matthew Talbot",
+      "firm": "Talbot Law Group",
+      "location": "Walnut Creek, CA",
+      "personId": "94f6a95e-ae6c-4e51-9f02-ab17b8ea62c5"
+    },
+    {
+      "success": true,
+      "name": "David Brillant",
+      "firm": "Brillant Law Firm",
+      "location": "Walnut Creek, CA",
+      "personId": "affec9c3-24ff-4244-80e4-97f260d1f2d4"
+    },
+    {
+      "success": false,
+      "name": "Owen Rassman",
+      "firm": "Opelon LLP",
+      "error": "Request failed with status code 400"
+    },
+    {
+      "success": true,
+      "name": "Robert Wall",
+      "firm": "Wall Wall & Peake",
+      "location": "Bakersfield, CA",
+      "personId": "81c6e157-48ab-478a-aeaf-445983ae79bb"
+    },
+    {
+      "success": true,
+      "name": "Bruce Klein",
+      "firm": "Klein DeNatale Goldner",
+      "location": "Bakersfield, CA",
+      "personId": "d5bc0bc6-2dd1-4416-aa5c-c18fade98d4e"
+    }
+  ],
+  "locationBreakdown": {
+    "Walnut Creek": 4,
+    "Pasadena": 1,
+    "Riverside": 2,
+    "Bakersfield": 2
+  },
+  "firmBreakdown": {
+    "Cederborg & Bret LLP": 1,
+    "Law Office of Christopher B. Johnson": 1,
+    "Dennis M. Sandoval, a Professional Law Corporation": 1,
+    "Law Office of Kristine M. Borgia": 1,
+    "CunninghamLegal": 1,
+    "Talbot Law Group": 1,
+    "Brillant Law Firm": 1,
+    "Wall Wall & Peake": 1,
+    "Klein DeNatale Goldner": 1
+  }
+}
