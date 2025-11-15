@@ -1,0 +1,654 @@
+[
+  {
+    "name": "Michael Meyring",
+    "firm": "Meyring Law Firm",
+    "location": "Atlanta, GA",
+    "city": "Atlanta",
+    "phone": "(678) 257-3332",
+    "website": "https://www.meyringlaw.com",
+    "practiceAreas": "Trust & Estate Planning, Probate",
+    "source": "WebSearch - Law Firm Website"
+  },
+  {
+    "name": "Catie Libby",
+    "firm": "The Libby Law Firm",
+    "location": "Atlanta, GA",
+    "city": "Atlanta",
+    "phone": "(404) 467-8613",
+    "website": "http://thelibbylawfirm.com",
+    "practiceAreas": "Estate & Trust Attorney",
+    "source": "WebSearch - Law Firm Website"
+  },
+  {
+    "name": "Paul Black",
+    "firm": "The Law Office of Paul Black",
+    "location": "Atlanta, GA",
+    "city": "Atlanta",
+    "website": "https://georgia-estatelaw.com",
+    "practiceAreas": "Estate Planning, Probate, Elder Law",
+    "source": "WebSearch - Professional Profile"
+  },
+  {
+    "name": "Sarah Siedentopf",
+    "firm": "Siedentopf Law",
+    "location": "Atlanta, GA",
+    "city": "Atlanta",
+    "website": "https://estatelawatlanta.com",
+    "practiceAreas": "Estate Plans, Trusts, Wills, POA",
+    "source": "WebSearch - Super Lawyers"
+  },
+  {
+    "name": "Althea DeBarr-Johnson",
+    "firm": "Estate Attorneys of Atlanta",
+    "location": "Atlanta, GA",
+    "city": "Atlanta",
+    "website": "https://www.atlantaestateattorneys.com",
+    "practiceAreas": "Estate Planning, Wills, Trusts, Probate",
+    "yearsExperience": "25+",
+    "source": "WebSearch - Law Firm Website"
+  },
+  {
+    "name": "Attorney",
+    "firm": "Atlanta Wills & Trusts Law Group",
+    "location": "Alpharetta, GA",
+    "city": "Alpharetta",
+    "phone": "(770) 508-6525",
+    "email": "info@atlwills.com",
+    "website": "https://atlantawillsandtrusts.com",
+    "practiceAreas": "Wills, Trusts, Estate Planning",
+    "source": "WebSearch - Law Firm Website"
+  },
+  {
+    "name": "Attorney",
+    "firm": "Georgia Legacy Law Group, LLC",
+    "location": "Alpharetta, GA",
+    "city": "Alpharetta",
+    "phone": "(770) 450-4480",
+    "website": "https://www.estatelawga.com",
+    "practiceAreas": "Wills, Trusts, Estates, Elder Law",
+    "source": "WebSearch - Law Firm Website"
+  },
+  {
+    "name": "Attorney",
+    "firm": "Coleman Legal Group, LLC",
+    "location": "Alpharetta, GA",
+    "city": "Alpharetta",
+    "phone": "(470) 947-2471",
+    "website": "https://www.colemanlegalgroup.com",
+    "practiceAreas": "Estates, Trusts, Wills, Probate",
+    "source": "WebSearch - Law Firm Website"
+  },
+  {
+    "name": "Attorney",
+    "firm": "Law Offices of Miller & Chaet, PC",
+    "location": "Alpharetta, GA",
+    "city": "Alpharetta",
+    "address": "11800 Amber Park Drive, Suite 130, Alpharetta, GA 30009",
+    "phone": "(678) 746-2900",
+    "email": "admin@northfultonwills.com",
+    "website": "https://northfultonwills.com",
+    "practiceAreas": "Wills, Trusts, Estate Planning",
+    "source": "WebSearch - Law Firm Website"
+  },
+  {
+    "name": "Attorney",
+    "firm": "Morgan & DiSalvo, P.C.",
+    "location": "Alpharetta, GA",
+    "city": "Alpharetta",
+    "phone": "(678) 720-0750",
+    "website": "https://morgandisalvo.com",
+    "practiceAreas": "Trusts and Estates Law",
+    "source": "WebSearch - Best Lawyers 2025 Tier 1"
+  },
+  {
+    "name": "Michael Smith",
+    "firm": "Solo Practitioner",
+    "location": "Savannah, GA",
+    "city": "Savannah",
+    "address": "7393 Hodgson Memorial Dr Suite 202, Savannah, GA 31406",
+    "phone": "(912) 352-3999",
+    "practiceAreas": "Estate Planning, Elder Law, Probate",
+    "yearsExperience": "29",
+    "source": "WebSearch - Justia"
+  },
+  {
+    "name": "Attorney",
+    "firm": "Ranitz, Mahoney, Mahoney & Pace, P.C.",
+    "location": "Savannah, GA",
+    "city": "Savannah",
+    "phone": "(912) 233-7961",
+    "website": "https://www.rmm-lawfirm.com",
+    "practiceAreas": "Estate Planning, Probate, Wills, Trusts",
+    "source": "WebSearch - Law Firm Website"
+  },
+  {
+    "name": "Michael Deming",
+    "firm": "Deming Parker",
+    "location": "Savannah, GA",
+    "city": "Savannah",
+    "address": "22 Barnard Street, Suite 240, Savannah, GA 31401",
+    "phone": "(912) 527-2000",
+    "practiceAreas": "Estate Planning, Probate",
+    "yearsExperience": "35+",
+    "source": "WebSearch - Law Firm Website"
+  },
+  {
+    "name": "Attorney",
+    "firm": "Oliver Maner LLP",
+    "location": "Savannah, GA",
+    "city": "Savannah",
+    "phone": "(912) 236-3311",
+    "website": "https://olivermaner.com",
+    "practiceAreas": "Estate Planning, Probate, Trust Administration",
+    "source": "WebSearch - Law Firm Website"
+  },
+  {
+    "name": "J. Scott Vaughan",
+    "firm": "Solo Practitioner",
+    "location": "Savannah, GA",
+    "city": "Savannah",
+    "address": "7505 Waters Suite B1, Savannah, GA 31406",
+    "phone": "(912) 349-2065",
+    "practiceAreas": "Probate, Estate Matters",
+    "source": "WebSearch - Professional Profile"
+  },
+  {
+    "name": "L. Rachel Wilson",
+    "firm": "NEST Estate Planning",
+    "location": "Savannah, GA",
+    "city": "Savannah",
+    "address": "327 Eisenhower Dr, Savannah, GA 31406",
+    "phone": "(912) 405-6378",
+    "website": "http://nestestateplanning.com",
+    "practiceAreas": "Estate Planning, Trusts, Wills, Probate",
+    "source": "WebSearch - Professional Directory"
+  },
+  {
+    "name": "Attorney",
+    "firm": "Walters Law, P.C.",
+    "location": "Savannah, GA",
+    "city": "Savannah",
+    "address": "100 Blue Fin Circle, Suite 1, Savannah, GA 31410",
+    "phone": "(912) 897-4100",
+    "website": "https://www.walterslawpc.com",
+    "practiceAreas": "Estate Planning, Probate",
+    "source": "WebSearch - Law Firm Website"
+  },
+  {
+    "name": "Attorney",
+    "firm": "Rhodes Law Firm, PC",
+    "location": "Augusta, GA",
+    "city": "Augusta",
+    "address": "3938 Washington Rd, Augusta, GA 30907",
+    "phone": "(706) 724-0405",
+    "website": "https://www.rhodeslawfirmpc.com",
+    "practiceAreas": "Estate Planning, Wills, Trusts",
+    "yearsExperience": "30+",
+    "source": "WebSearch - Law Firm Website"
+  },
+  {
+    "name": "Attorney",
+    "firm": "Trotter Jones, LLP",
+    "location": "Augusta, GA",
+    "city": "Augusta",
+    "phone": "(706) 737-3138",
+    "website": "https://www.trotterjones.com",
+    "practiceAreas": "Trusts, Wills, Estates, Probate",
+    "source": "WebSearch - Law Firm Website"
+  },
+  {
+    "name": "Attorney",
+    "firm": "Donsbach Law Group, LLC",
+    "location": "Martinez, GA",
+    "city": "Martinez",
+    "address": "504 Blackburn Dr, Martinez, GA 30907",
+    "website": "https://donsbachlaw.com",
+    "practiceAreas": "Estate Planning, Probate, Business Law",
+    "source": "WebSearch - Law Firm Website"
+  },
+  {
+    "name": "Attorney",
+    "firm": "PHM&G Law",
+    "location": "Augusta, GA",
+    "city": "Augusta",
+    "phone": "(706) 722-4111",
+    "website": "https://www.phmglaw.com",
+    "practiceAreas": "Wills, Trusts, Estate Planning",
+    "source": "WebSearch - Law Firm Website"
+  },
+  {
+    "name": "Attorney",
+    "firm": "Poydasheff & Sowers, LLC",
+    "location": "Columbus, GA",
+    "city": "Columbus",
+    "phone": "(706) 705-5777",
+    "website": "https://www.poydasheffsowers.com",
+    "practiceAreas": "Estate Planning, Wills, Trusts",
+    "yearsExperience": "60+ combined",
+    "source": "WebSearch - Law Firm Website"
+  },
+  {
+    "name": "Attorney",
+    "firm": "Arey & Cross, P.C.",
+    "location": "Columbus, GA",
+    "city": "Columbus",
+    "phone": "(706) 596-6745",
+    "website": "https://alc-law.com",
+    "practiceAreas": "Wills, Trusts, Estate Planning",
+    "source": "WebSearch - Law Firm Website"
+  },
+  {
+    "name": "Brad Coppedge",
+    "firm": "Goggans, Stutzman, Hudson, Wilson, and Mize, LLP",
+    "location": "Columbus, GA",
+    "city": "Columbus",
+    "phone": "(706) 243-6216",
+    "website": "https://gshattorneys.com",
+    "practiceAreas": "Estate Planning, Wills, Trusts",
+    "yearsExperience": "25+",
+    "source": "WebSearch - Law Firm Website"
+  },
+  {
+    "name": "James Robert Moye",
+    "firm": "Posey, Moye & Cartledge, LLC",
+    "location": "Columbus, GA",
+    "city": "Columbus",
+    "phone": "(706) 223-1373",
+    "website": "https://www.pmandc.com",
+    "practiceAreas": "Wills, Estate Planning, Probate",
+    "yearsExperience": "45+",
+    "source": "WebSearch - Law Firm Website"
+  },
+  {
+    "name": "Charles W. Miller",
+    "firm": "Charles W. Miller, P.C.",
+    "location": "Columbus, GA",
+    "city": "Columbus",
+    "phone": "(706) 565-7795",
+    "website": "https://www.cwmpc.com",
+    "practiceAreas": "Estate Planning, Probate, Taxation",
+    "source": "WebSearch - Law Firm Website"
+  },
+  {
+    "name": "R. Chix Miller",
+    "firm": "Sell & Melton LLP",
+    "location": "Macon, GA",
+    "city": "Macon",
+    "address": "577 Mulberry Street, Suite 810, Macon, GA 31201",
+    "phone": "(478) 464-5342",
+    "email": "[email protected]",
+    "practiceAreas": "Estate Planning, Probate",
+    "source": "WebSearch - Law Firm Website"
+  },
+  {
+    "name": "Attorney",
+    "firm": "Martin Snow LLP",
+    "location": "Macon, GA",
+    "city": "Macon",
+    "address": "240 Third Street, Macon, GA 31201",
+    "phone": "(478) 749-1700",
+    "website": "https://www.martinsnow.com",
+    "practiceAreas": "Wills, Trusts, Probate, Tax Planning",
+    "source": "WebSearch - Law Firm Website"
+  },
+  {
+    "name": "Attorney",
+    "firm": "Lisenby & Associates",
+    "location": "Macon, GA",
+    "city": "Macon",
+    "website": "https://lisenbylaw.com",
+    "practiceAreas": "Estate Planning, Probate, Trusts",
+    "source": "WebSearch - Law Firm Website"
+  },
+  {
+    "name": "Attorney",
+    "firm": "Cooper, Barton & Cooper",
+    "location": "Macon, GA",
+    "city": "Macon",
+    "phone": "(478) 202-7050",
+    "website": "https://www.cooperbarton.com",
+    "practiceAreas": "Probate Litigation, Estate Matters",
+    "source": "WebSearch - Law Firm Website"
+  },
+  {
+    "name": "Jen Haskins",
+    "firm": "Jen Haskins Law, LLC",
+    "location": "Macon, GA",
+    "city": "Macon",
+    "phone": "(478) 200-2232",
+    "website": "https://www.jenhaskinslaw.com",
+    "practiceAreas": "Estate Planning, Elder Law, Probate",
+    "source": "WebSearch - Law Firm Website"
+  },
+  {
+    "name": "Attorney",
+    "firm": "Bloodworth, Crowley & Leverett",
+    "location": "Macon, GA",
+    "city": "Macon",
+    "phone": "(478) 772-3938",
+    "website": "https://www.bloodworthlawoffice.com",
+    "practiceAreas": "Estate Planning, Probate",
+    "source": "WebSearch - Law Firm Website"
+  },
+  {
+    "name": "Tim Thompson",
+    "firm": "Tim J. Thompson Law",
+    "location": "Macon, GA",
+    "city": "Macon",
+    "website": "https://www.timjthompsonlaw.com",
+    "practiceAreas": "Probate Attorney",
+    "source": "WebSearch - Professional Profile"
+  },
+  {
+    "name": "Attorney",
+    "firm": "Blasingame, Burch, Garrard & Ashley, P.C.",
+    "location": "Athens, GA",
+    "city": "Athens",
+    "phone": "(706) 354-4000",
+    "website": "https://www.bbga.com",
+    "practiceAreas": "Tax, Estate Planning, Trusts",
+    "source": "WebSearch - Law Firm Website"
+  },
+  {
+    "name": "Christopher M. Riser",
+    "firm": "Solo Practitioner",
+    "location": "Athens, GA",
+    "city": "Athens",
+    "address": "191 E Broad St Ste 307, Athens, GA 30601",
+    "phone": "(706) 552-4800",
+    "practiceAreas": "Estate Planning",
+    "yearsExperience": "28",
+    "source": "WebSearch - Justia"
+  },
+  {
+    "name": "C. David Rowe",
+    "firm": "Solo Practitioner",
+    "location": "Watkinsville, GA",
+    "city": "Watkinsville",
+    "address": "3651 Mars Hill Rd, Suite 500-A, Watkinsville, GA 30677",
+    "phone": "(706) 534-3676",
+    "practiceAreas": "Estate Planning",
+    "yearsExperience": "23",
+    "source": "WebSearch - Justia"
+  },
+  {
+    "name": "Attorney",
+    "firm": "Arch Legacy Firm",
+    "location": "Athens, GA",
+    "city": "Athens",
+    "website": "https://archlegacyfirm.com",
+    "practiceAreas": "Wills, Estate Planning",
+    "source": "WebSearch - Professional Directory"
+  },
+  {
+    "name": "Attorney",
+    "firm": "Sperr Law Offices",
+    "location": "Athens, GA",
+    "city": "Athens",
+    "website": "https://sperrlaw.com",
+    "practiceAreas": "Estate Planning, Wills, Living Trusts",
+    "source": "WebSearch - Law Firm Website"
+  },
+  {
+    "name": "James B. Cronon",
+    "firm": "Solo Practitioner",
+    "location": "Athens, GA",
+    "city": "Athens",
+    "phone": "(706) 395-2759",
+    "practiceAreas": "Estate Planning",
+    "source": "WebSearch - Justia"
+  },
+  {
+    "name": "William H. Kimbrough Jr.",
+    "firm": "Solo Practitioner",
+    "location": "Athens, GA",
+    "city": "Athens",
+    "phone": "(706) 850-6910",
+    "practiceAreas": "Estate Planning",
+    "source": "WebSearch - Justia"
+  },
+  {
+    "name": "Attorney",
+    "firm": "Chan Law Firm LLC",
+    "location": "Marietta, GA",
+    "city": "Marietta",
+    "phone": "(678) 894-7917",
+    "website": "https://www.chanprobate.com",
+    "practiceAreas": "Probate Litigation, Elder Law, Estate Administration",
+    "source": "WebSearch - Law Firm Website"
+  },
+  {
+    "name": "Scott K. Camp",
+    "firm": "Scott K. Camp and Associates, LLC",
+    "location": "Marietta, GA",
+    "city": "Marietta",
+    "phone": "(770) 952-4000",
+    "practiceAreas": "Estate Planning, Asset Protection",
+    "source": "WebSearch - Law Firm Website"
+  },
+  {
+    "name": "Attorney",
+    "firm": "Georgia Estate Plan: Worrall Law LLC",
+    "location": "Marietta, GA",
+    "city": "Marietta",
+    "website": "https://www.georgiaestateplan.com",
+    "practiceAreas": "Wills, Trusts, Probate, Special Needs",
+    "source": "WebSearch - Law Firm Website"
+  },
+  {
+    "name": "Attorney",
+    "firm": "The Manely Firm, P.C.",
+    "location": "Marietta, GA",
+    "city": "Marietta",
+    "phone": "(866) 687-8561",
+    "practiceAreas": "Estate Planning, Probate, Wills, Trusts",
+    "source": "WebSearch - Law Firm Website"
+  },
+  {
+    "name": "Attorney",
+    "firm": "The Libby Law Firm (Marietta Office)",
+    "location": "Marietta, GA",
+    "city": "Marietta",
+    "address": "630 Village Trace NE, Marietta",
+    "phone": "(404) 445-7771",
+    "practiceAreas": "Estate Law, Probate, Trust Litigation",
+    "source": "WebSearch - Law Firm Website"
+  },
+  {
+    "name": "Attorney",
+    "firm": "John B. Miller & Associates",
+    "location": "Marietta, GA",
+    "city": "Marietta",
+    "phone": "(770) 863-8355",
+    "practiceAreas": "Probate, Estate Planning",
+    "yearsExperience": "55 combined",
+    "source": "WebSearch - Law Firm Website"
+  },
+  {
+    "name": "Attorney",
+    "firm": "Berman Law LLC",
+    "location": "Marietta, GA",
+    "city": "Marietta",
+    "practiceAreas": "Wills, Trusts, Estate Tax Planning, Probate",
+    "source": "WebSearch - Law Firm Website"
+  },
+  {
+    "name": "Attorney",
+    "firm": "Georgia Wills, Trusts and Probate Firm, LLC",
+    "location": "Marietta, GA",
+    "city": "Marietta",
+    "practiceAreas": "Estate Planning, Wills, Trusts, Tax Planning",
+    "yearsExperience": "30+ combined",
+    "source": "WebSearch - Law Firm Website"
+  },
+  {
+    "name": "Attorney",
+    "firm": "Coleman Legal Group (Roswell Office)",
+    "location": "Roswell, GA",
+    "city": "Roswell",
+    "phone": "(470) 947-2471",
+    "website": "https://www.colemanlegalgroup.com",
+    "practiceAreas": "Estates, Trusts, Wills, Probate",
+    "source": "WebSearch - Law Firm Website"
+  },
+  {
+    "name": "Attorney",
+    "firm": "Harden Law Firm",
+    "location": "Roswell, GA",
+    "city": "Roswell",
+    "phone": "(770) 285-8229",
+    "website": "https://www.hardenlawfirm.com",
+    "practiceAreas": "Estate Planning, Wills, Trusts",
+    "source": "WebSearch - Law Firm Website"
+  },
+  {
+    "name": "Attorney",
+    "firm": "The Libby Law Firm (Roswell Office)",
+    "location": "Roswell, GA",
+    "city": "Roswell",
+    "phone": "(404) 445-7771",
+    "practiceAreas": "Trust Preparation, Estate Planning, Probate",
+    "source": "WebSearch - Law Firm Website"
+  },
+  {
+    "name": "Attorney",
+    "firm": "Campolito Law",
+    "location": "Roswell, GA",
+    "city": "Roswell",
+    "website": "https://www.campolitolaw.com",
+    "practiceAreas": "Wills, Trusts, Estate Planning",
+    "source": "WebSearch - Law Firm Website"
+  },
+  {
+    "name": "Attorney",
+    "firm": "Scroggin & Burns, LLC",
+    "location": "Roswell, GA",
+    "city": "Roswell",
+    "phone": "(770) 884-7197",
+    "website": "https://www.scrogginlaw.com",
+    "practiceAreas": "Estate Planning, Probate, Trust Administration",
+    "source": "WebSearch - Law Firm Website"
+  },
+  {
+    "name": "Robert W. Hughes",
+    "firm": "Robert W. Hughes & Associates",
+    "location": "Roswell, GA",
+    "city": "Roswell",
+    "phone": "(770) 727-8038",
+    "practiceAreas": "Estate, Trust Services",
+    "source": "WebSearch - Professional Directory"
+  },
+  {
+    "name": "Frank G. Podesta",
+    "firm": "Solo Practitioner",
+    "location": "Roswell, GA",
+    "city": "Roswell",
+    "address": "555 Sun Valley Drive Suite N-3, Roswell, GA 30076",
+    "phone": "(678) 341-5047",
+    "practiceAreas": "Estate Planning",
+    "source": "WebSearch - Justia"
+  },
+  {
+    "name": "Meredith W. Ditchen-Oakley",
+    "firm": "Solo Practitioner",
+    "location": "Roswell, GA",
+    "city": "Roswell",
+    "phone": "(770) 202-7460",
+    "practiceAreas": "Estate Planning, Probate",
+    "source": "WebSearch - Professional Directory"
+  },
+  {
+    "name": "Susan Floyd",
+    "firm": "Susan Floyd Law LLC",
+    "location": "Roswell, GA",
+    "city": "Roswell",
+    "website": "https://www.susanfloydlaw.com",
+    "practiceAreas": "Estate Planning",
+    "source": "WebSearch - Law Firm Website"
+  },
+  {
+    "name": "Attorney",
+    "firm": "Coleman Legal Group (Sandy Springs Office)",
+    "location": "Sandy Springs, GA",
+    "city": "Sandy Springs",
+    "phone": "(470) 947-2471",
+    "website": "https://www.colemanlegalgroup.com",
+    "practiceAreas": "Trusts, Wills, Estates",
+    "source": "WebSearch - Law Firm Website"
+  },
+  {
+    "name": "Attorney",
+    "firm": "The Libby Law Firm (Sandy Springs)",
+    "location": "Sandy Springs, GA",
+    "city": "Sandy Springs",
+    "phone": "(404) 445-7771",
+    "practiceAreas": "Estate Planning, Probate",
+    "source": "WebSearch - Law Firm Website"
+  },
+  {
+    "name": "Robert W. Hughes",
+    "firm": "Robert W. Hughes & Associates",
+    "location": "Sandy Springs, GA",
+    "city": "Sandy Springs",
+    "phone": "(770) 469-8887",
+    "practiceAreas": "Estate Planning",
+    "source": "WebSearch - Professional Directory"
+  },
+  {
+    "name": "Attorney",
+    "firm": "Morgan & DiSalvo, P.C. (Sandy Springs)",
+    "location": "Sandy Springs, GA",
+    "city": "Sandy Springs",
+    "phone": "(678) 720-0750",
+    "practiceAreas": "Estate Planning, Trusts",
+    "source": "WebSearch - Law Firm Website"
+  },
+  {
+    "name": "Daniel D. Munster",
+    "firm": "The Eldercare & Special Needs Law Practice",
+    "location": "Sandy Springs, GA",
+    "city": "Sandy Springs",
+    "phone": "(404) 920-0521",
+    "practiceAreas": "Elder Law, Estate Planning, Special Needs",
+    "source": "WebSearch - Professional Directory"
+  },
+  {
+    "name": "Attorney",
+    "firm": "Dynamic Estate Planning",
+    "location": "Sandy Springs, GA",
+    "city": "Sandy Springs",
+    "phone": "(404) 991-6511",
+    "website": "https://dynamicestateplanning.com",
+    "practiceAreas": "Estate Planning",
+    "source": "WebSearch - Law Firm Website"
+  },
+  {
+    "name": "Thomas E. Raines",
+    "firm": "Thomas E. Raines, PC",
+    "location": "Sandy Springs, GA",
+    "city": "Sandy Springs",
+    "phone": "(770) 263-0093",
+    "website": "https://www.traineslaw.com",
+    "practiceAreas": "Estate Planning",
+    "source": "WebSearch - Law Firm Website"
+  },
+  {
+    "name": "Attorney",
+    "firm": "Jacobs Law",
+    "location": "Sandy Springs, GA",
+    "city": "Sandy Springs",
+    "phone": "(404) 920-4490",
+    "website": "https://gjacobslaw.com",
+    "practiceAreas": "Estate Planning",
+    "source": "WebSearch - Law Firm Website"
+  },
+  {
+    "name": "Douglas R. Thompson",
+    "firm": "Douglas R. Thompson Law Office",
+    "location": "Sandy Springs, GA",
+    "city": "Sandy Springs",
+    "phone": "(770) 396-3661",
+    "practiceAreas": "Estate Planning, Probate",
+    "source": "WebSearch - Professional Directory"
+  }
+]
