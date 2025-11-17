@@ -125,7 +125,11 @@ class DuvalCountyFloridaScraper extends DeedScraper {
     // Common street types
     const streetTypes = ['AVE', 'AVENUE', 'ST', 'STREET', 'RD', 'ROAD', 'DR', 'DRIVE', 'LN', 'LANE',
                         'CT', 'COURT', 'CIR', 'CIRCLE', 'BLVD', 'BOULEVARD', 'WAY', 'PL', 'PLACE',
-                        'TER', 'TERRACE', 'PKWY', 'PARKWAY', 'HWY', 'HIGHWAY', 'TRAIL', 'TRL'];
+                        'TER', 'TERRACE', 'PKWY', 'PARKWAY', 'HWY', 'HIGHWAY', 'TRAIL', 'TRL',
+                        'FREEWAY', 'FWY', 'CRESCENT', 'LOOP', 'RIDGE', 'TURNPIKE', 'GLEN', 'GREEN',
+                        'HILL', 'HILLS', 'REST', 'PARK', 'MALL', 'LANDING', 'ISLE', 'TRAILER',
+                        'VALLEY', 'WELL', 'WELLS', 'ESTATES', 'DAM', 'CROSSING', 'XING', 'CURVE',
+                        'BYPASS', 'ANNEX', 'MEWS', 'PLAZA', 'ROW', 'SQUARE', 'TURN', 'RUN'];
 
     const words = streetPart.split(/\s+/);
     let direction = '';
