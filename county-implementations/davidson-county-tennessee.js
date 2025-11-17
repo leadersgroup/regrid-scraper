@@ -211,7 +211,7 @@ class DavidsonCountyTennesseeScraper extends DeedScraper {
     // Rest is the street name (without suffix like Dr, St, Ave, etc.)
     // Remove common suffixes
     const streetParts = parts.slice(1);
-    const suffixes = ['DR', 'DRIVE', 'ST', 'STREET', 'AVE', 'AVENUE', 'RD', 'ROAD', 'LN', 'LANE', 'CT', 'COURT', 'WAY', 'PL', 'PLACE', 'BLVD', 'BOULEVARD', 'CIR', 'CIRCLE', 'TRL', 'TRAIL'];
+    const suffixes = ['DR', 'DRIVE', 'ST', 'STREET', 'AVE', 'AVENUE', 'RD', 'ROAD', 'LN', 'LANE', 'CT', 'COURT', 'WAY', 'PL', 'PLACE', 'BLVD', 'BOULEVARD', 'CIR', 'CIRCLE', 'TRL', 'TRAIL', 'TER', 'TERRACE', 'PKWY', 'PARKWAY', 'HWY', 'HIGHWAY', 'FREEWAY', 'FWY', 'CRESCENT', 'LOOP', 'RIDGE', 'TURNPIKE', 'GLEN', 'GREEN', 'HILL', 'HILLS', 'REST', 'PARK', 'MALL', 'LANDING', 'ISLE', 'TRAILER', 'VALLEY', 'WELL', 'WELLS', 'ESTATES', 'DAM', 'CROSSING', 'XING', 'CURVE', 'BYPASS', 'ANNEX', 'MEWS', 'PLAZA', 'ROW', 'SQUARE', 'TURN', 'RUN'];
 
     // Find where suffix starts
     let streetName = '';

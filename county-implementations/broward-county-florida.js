@@ -203,7 +203,7 @@ class BrowardCountyFloridaScraper extends DeedScraper {
 
     // Parse street components
     // Pattern: [house number] [direction?] [street name] [street type]
-    const streetRegex = /^(\d+)\s+([NSEW]{1,2})?\s*(.+?)\s+(STREET|ST|AVENUE|AVE|ROAD|RD|DRIVE|DR|LANE|LN|WAY|BOULEVARD|BLVD|COURT|CT|CIRCLE|CIR|PLACE|PL|TERRACE|TER|TRAIL|TRL)(?:\s|$)/i;
+    const streetRegex = /^(\d+)\s+([NSEW]{1,2})?\s*(.+?)\s+(STREET|ST|AVENUE|AVE|ROAD|RD|DRIVE|DR|LANE|LN|WAY|BOULEVARD|BLVD|COURT|CT|CIRCLE|CIR|PLACE|PL|TERRACE|TER|TRAIL|TRL|FREEWAY|FWY|CRESCENT|LOOP|RIDGE|TURNPIKE|GLEN|GREEN|HILL|HILLS|REST|PARK|MALL|LANDING|ISLE|TRAILER|VALLEY|WELL|WELLS|ESTATES|DAM|CROSSING|XING|CURVE|BYPASS|ANNEX|MEWS|PLAZA|ROW|SQUARE|TURN|RUN)(?:\s|$)/i;
 
     const match = street.match(streetRegex);
 
