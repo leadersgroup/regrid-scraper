@@ -1,0 +1,29 @@
+{
+  "name": "email-verifier",
+  "version": "1.0.0",
+  "description": "Standalone email verification tool with full SMTP verification and bulk processing",
+  "main": "email-verifier.js",
+  "scripts": {
+    "verify": "node cli.js",
+    "test": "node test-verifier.js",
+    "api": "node api-server.js",
+    "api:dev": "node api-server.js --dev",
+    "test:api": "node test-api.js"
+  },
+  "keywords": [
+    "email",
+    "verification",
+    "smtp",
+    "validator",
+    "bulk",
+    "email-verifier"
+  ],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "dns": "^0.2.2",
+    "net": "^1.0.2",
+    "express": "^4.18.2",
+    "cors": "^2.8.5"
+  }
+}
