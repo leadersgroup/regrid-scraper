@@ -1,7 +1,9 @@
 const express = require('express');
 const cors = require('cors');
+const multer = require('multer');
 const EmailVerifier = require('./email-verifier');
 const BulkEmailVerifier = require('./bulk-verifier');
+const { extractEmails } = require('./csv-utils');
 const config = require('./config');
 
 const app = express();
@@ -39,6 +41,25 @@ app.use(express.urlencoded({ extended: true }));
 
 // In-memory storage for bulk verification jobs
 const verificationJobs = new Map();
+
+// Configure multer for file uploads (memory storage)
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: {
+    fileSize: 10 * 1024 * 1024, // 10MB max file size
+  },
+  fileFilter: (req, file, cb) => {
+    // Accept CSV, TXT, and JSON files
+    const allowedTypes = ['.csv', '.txt', '.json'];
+    const ext = file.originalname.toLowerCase().substring(file.originalname.lastIndexOf('.'));
+
+    if (allowedTypes.includes(ext)) {
+      cb(null, true);
+    } else {
+      cb(new Error('Only CSV, TXT, and JSON files are allowed'));
+    }
+  }
+});
 
 // Request logging middleware
 app.use((req, res, next) => {
@@ -334,6 +355,108 @@ app.post('/api/verify/bulk', async (req, res) => {
 
   } catch (error) {
     console.error('Bulk verification error:', error);
+    res.status(500).json({
+      success: false,
+      error: error.message || 'Internal server error'
+    });
+  }
+});
+
+/**
+ * POST /api/verify/upload - Upload and verify emails from file
+ */
+app.post('/api/verify/upload', upload.single('file'), async (req, res) => {
+  try {
+    if (!req.file) {
+      return res.status(400).json({
+        success: false,
+        error: 'No file uploaded. Please upload a CSV, TXT, or JSON file.'
+      });
+    }
+
+    // Parse file content
+    const fileContent = req.file.buffer.toString('utf8');
+    const filename = req.file.originalname;
+    const ext = filename.toLowerCase().substring(filename.lastIndexOf('.'));
+
+    let emails = [];
+
+    // Extract emails based on file type
+    if (ext === '.csv') {
+      const { parseCSV } = require('./csv-utils');
+      // Write buffer to temp location for parsing
+      const fs = require('fs');
+      const os = require('os');
+      const path = require('path');
+
+      const tempFile = path.join(os.tmpdir(), `upload_${Date.now()}.csv`);
+      fs.writeFileSync(tempFile, req.file.buffer);
+      emails = await parseCSV(tempFile);
+      fs.unlinkSync(tempFile); // Clean up
+    } else if (ext === '.txt') {
+      emails = fileContent
+        .split('\n')
+        .map(line => line.trim())
+        .filter(line => line && line.includes('@'));
+    } else if (ext === '.json') {
+      const data = JSON.parse(fileContent);
+      if (Array.isArray(data)) {
+        emails = data.filter(item => typeof item === 'string' && item.includes('@'));
+      } else if (data.emails && Array.isArray(data.emails)) {
+        emails = data.emails;
+      }
+    }
+
+    if (emails.length === 0) {
+      return res.status(400).json({
+        success: false,
+        error: 'No valid email addresses found in file'
+      });
+    }
+
+    if (emails.length > config.bulk.maxEmails) {
+      return res.status(400).json({
+        success: false,
+        error: `Maximum ${config.bulk.maxEmails} emails allowed. File contains ${emails.length} emails.`
+      });
+    }
+
+    // Process emails
+    const bulkVerifier = new BulkEmailVerifier();
+    const { results, stats } = await bulkVerifier.verifyBulk(emails, {
+      outputFile: null
+    });
+
+    // Generate CSV output
+    const headers = [
+      'email', 'valid', 'smtp_status', 'disposable', 'role_based',
+      'catch_all', 'free_provider', 'domain', 'mx_records', 'error'
+    ];
+
+    const rows = results.map(r => [
+      r.email,
+      r.valid ? 'yes' : 'no',
+      r.smtp?.status || 'unknown',
+      r.disposable ? 'yes' : 'no',
+      r.roleBased ? 'yes' : 'no',
+      r.catchAll ? 'yes' : 'no',
+      r.freeProvider ? 'yes' : 'no',
+      r.domain?.name || '',
+      r.mx?.records?.join(';') || '',
+      r.error || ''
+    ]);
+
+    const csv = [headers, ...rows]
+      .map(row => row.map(cell => `"${String(cell).replace(/"/g, '""')}"`).join(','))
+      .join('\n');
+
+    // Return CSV as blob
+    res.setHeader('Content-Type', 'text/csv');
+    res.setHeader('Content-Disposition', 'attachment; filename="verified_emails.csv"');
+    res.send(csv);
+
+  } catch (error) {
+    console.error('File upload error:', error);
     res.status(500).json({
       success: false,
       error: error.message || 'Internal server error'
