@@ -4,6 +4,7 @@
   "description": "Standalone email verification tool with full SMTP verification and bulk processing",
   "main": "email-verifier.js",
   "scripts": {
+    "start": "node api-server.js",
     "verify": "node cli.js",
     "test": "node test-verifier.js",
     "api": "node api-server.js",
