@@ -1,1 +1,1 @@
-web: cd email-verifier && node api-server.js
+web: node api-server.js

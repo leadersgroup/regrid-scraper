@@ -19,8 +19,15 @@ require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
 const bodyParser = require('body-parser');
+const multer = require('multer');
 const fs = require('fs');
 const path = require('path');
+
+// Import email verification modules
+const EmailVerifier = require('./email-verifier/email-verifier');
+const BulkEmailVerifier = require('./email-verifier/bulk-verifier');
+const { extractEmails } = require('./email-verifier/csv-utils');
+const emailConfig = require('./email-verifier/config');
 
 // Import county implementations
 const OrangeCountyFloridaScraper = require('./county-implementations/orange-county-florida');
@@ -52,8 +59,8 @@ const PORT = process.env.PORT || 3000;
 
 // Middleware
 app.use(cors());
-app.use(bodyParser.json());
-app.use(bodyParser.urlencoded({ extended: true }));
+app.use(bodyParser.json({ limit: '10mb' }));
+app.use(bodyParser.urlencoded({ extended: true, limit: '10mb' }));
 
 // Request logging middleware
 app.use((req, res, next) => {
@@ -61,6 +68,26 @@ app.use((req, res, next) => {
   console.log(`[${timestamp}] ${req.method} ${req.path}`);
   next();
 });
+
+// Configure multer for email-verifier file uploads
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: {
+    fileSize: 10 * 1024 * 1024, // 10MB max file size
+  },
+  fileFilter: (req, file, cb) => {
+    const allowedTypes = ['.csv', '.txt', '.json'];
+    const ext = file.originalname.toLowerCase().substring(file.originalname.lastIndexOf('.'));
+    if (allowedTypes.includes(ext)) {
+      cb(null, true);
+    } else {
+      cb(new Error('Only CSV, TXT, and JSON files are allowed'));
+    }
+  }
+});
+
+// In-memory storage for email verification jobs
+const verificationJobs = new Map();
 
 // Railway health check endpoint (required by railway.json)
 app.get('/health', (req, res) => {
@@ -650,6 +677,340 @@ app.post('/api/scrape', async (req, res) => {
   }
 });
 
+// ============================================================================
+// EMAIL VERIFICATION ENDPOINTS
+// ============================================================================
+
+/**
+ * POST /api/verify - Verify a single email address
+ */
+app.post('/api/verify', async (req, res) => {
+  try {
+    const { email } = req.body;
+
+    if (!email) {
+      return res.status(400).json({
+        success: false,
+        error: 'Email address is required'
+      });
+    }
+
+    if (typeof email !== 'string') {
+      return res.status(400).json({
+        success: false,
+        error: 'Email must be a string'
+      });
+    }
+
+    const verifier = new EmailVerifier();
+    const result = await verifier.verify(email);
+
+    res.json({
+      success: true,
+      result
+    });
+
+  } catch (error) {
+    console.error('Verification error:', error);
+    res.status(500).json({
+      success: false,
+      error: error.message || 'Internal server error'
+    });
+  }
+});
+
+/**
+ * POST /api/verify/bulk - Verify multiple emails
+ */
+app.post('/api/verify/bulk', async (req, res) => {
+  try {
+    const { emails, async = true, webhook } = req.body;
+
+    if (!emails || !Array.isArray(emails)) {
+      return res.status(400).json({
+        success: false,
+        error: 'Emails array is required'
+      });
+    }
+
+    if (emails.length === 0) {
+      return res.status(400).json({
+        success: false,
+        error: 'Emails array cannot be empty'
+      });
+    }
+
+    if (emails.length > emailConfig.bulk.maxEmails) {
+      return res.status(400).json({
+        success: false,
+        error: `Maximum ${emailConfig.bulk.maxEmails} emails allowed per request`
+      });
+    }
+
+    const shouldAsync = async && emails.length > 100;
+
+    if (!shouldAsync) {
+      const bulkVerifier = new BulkEmailVerifier();
+      const { results, stats } = await bulkVerifier.verifyBulk(emails, {
+        outputFile: null
+      });
+
+      return res.json({
+        success: true,
+        results,
+        stats,
+        message: `Verified ${stats.processed} email(s)`
+      });
+    }
+
+    const jobId = `job_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
+    const job = {
+      jobId,
+      status: 'pending',
+      emails,
+      webhook,
+      createdAt: new Date().toISOString(),
+      startedAt: null,
+      completedAt: null,
+      progress: null,
+      results: null,
+      stats: null,
+      error: null
+    };
+
+    verificationJobs.set(jobId, job);
+    processJobAsync(jobId);
+
+    res.status(202).json({
+      success: true,
+      jobId,
+      message: 'Bulk verification job started',
+      statusUrl: `/api/verify/bulk/${jobId}`
+    });
+
+  } catch (error) {
+    console.error('Bulk verification error:', error);
+    res.status(500).json({
+      success: false,
+      error: error.message || 'Internal server error'
+    });
+  }
+});
+
+/**
+ * POST /api/verify/upload - Upload and verify emails from file
+ */
+app.post('/api/verify/upload', (req, res, next) => {
+  upload.single('file')(req, res, (err) => {
+    if (err instanceof multer.MulterError) {
+      console.error('❌ Multer error:', err.code, err.message);
+      return res.status(400).json({
+        success: false,
+        error: `File upload error: ${err.message}`
+      });
+    } else if (err) {
+      console.error('❌ Upload error:', err.message);
+      return res.status(400).json({
+        success: false,
+        error: err.message
+      });
+    }
+    next();
+  });
+}, async (req, res) => {
+  try {
+    console.log('📤 Upload request received');
+
+    if (!req.file) {
+      return res.status(400).json({
+        success: false,
+        error: 'No file uploaded. Please upload a CSV, TXT, or JSON file.'
+      });
+    }
+
+    const fileContent = req.file.buffer.toString('utf8');
+    const filename = req.file.originalname;
+    const ext = filename.toLowerCase().substring(filename.lastIndexOf('.'));
+
+    let emails = [];
+
+    if (ext === '.csv') {
+      const { parseCSV } = require('./email-verifier/csv-utils');
+      const os = require('os');
+      const tempFile = path.join(os.tmpdir(), `upload_${Date.now()}.csv`);
+      fs.writeFileSync(tempFile, req.file.buffer);
+      emails = await parseCSV(tempFile);
+      fs.unlinkSync(tempFile);
+    } else if (ext === '.txt') {
+      emails = fileContent
+        .split('\n')
+        .map(line => line.trim())
+        .filter(line => line && line.includes('@'));
+    } else if (ext === '.json') {
+      const data = JSON.parse(fileContent);
+      if (Array.isArray(data)) {
+        emails = data.filter(item => typeof item === 'string' && item.includes('@'));
+      } else if (data.emails && Array.isArray(data.emails)) {
+        emails = data.emails;
+      }
+    }
+
+    if (emails.length === 0) {
+      return res.status(400).json({
+        success: false,
+        error: 'No valid email addresses found in file'
+      });
+    }
+
+    if (emails.length > emailConfig.bulk.maxEmails) {
+      return res.status(400).json({
+        success: false,
+        error: `Maximum ${emailConfig.bulk.maxEmails} emails allowed. File contains ${emails.length} emails.`
+      });
+    }
+
+    const bulkVerifier = new BulkEmailVerifier();
+    const { results, stats } = await bulkVerifier.verifyBulk(emails, {
+      outputFile: null
+    });
+
+    const headers = [
+      'email', 'valid', 'smtp_status', 'disposable', 'role_based',
+      'catch_all', 'free_provider', 'domain', 'mx_records', 'error'
+    ];
+
+    const rows = results.map(r => [
+      r.email,
+      r.valid ? 'yes' : 'no',
+      r.smtp?.status || 'unknown',
+      r.disposable ? 'yes' : 'no',
+      r.roleBased ? 'yes' : 'no',
+      r.catchAll ? 'yes' : 'no',
+      r.freeProvider ? 'yes' : 'no',
+      r.domain?.name || '',
+      r.mx?.records?.join(';') || '',
+      r.error || ''
+    ]);
+
+    const csv = [headers, ...rows]
+      .map(row => row.map(cell => `"${String(cell).replace(/"/g, '""')}"`).join(','))
+      .join('\n');
+
+    res.setHeader('Content-Type', 'text/csv');
+    res.setHeader('Content-Disposition', 'attachment; filename="verified_emails.csv"');
+    res.send(csv);
+
+  } catch (error) {
+    console.error('❌ File upload error:', error);
+    res.status(500).json({
+      success: false,
+      error: error.message || 'Internal server error'
+    });
+  }
+});
+
+/**
+ * GET /api/verify/bulk/:jobId - Get job status
+ */
+app.get('/api/verify/bulk/:jobId', (req, res) => {
+  const { jobId } = req.params;
+  const job = verificationJobs.get(jobId);
+
+  if (!job) {
+    return res.status(404).json({
+      success: false,
+      error: 'Job not found'
+    });
+  }
+
+  const { emails, ...jobData } = job;
+
+  res.json({
+    success: true,
+    job: {
+      ...jobData,
+      totalEmails: emails.length
+    }
+  });
+});
+
+/**
+ * GET /api/jobs - List all verification jobs
+ */
+app.get('/api/jobs', (req, res) => {
+  const jobs = Array.from(verificationJobs.values()).map(job => {
+    const { emails, results, ...jobData } = job;
+    return {
+      ...jobData,
+      totalEmails: emails.length,
+      hasResults: results !== null
+    };
+  });
+
+  res.json({
+    success: true,
+    jobs,
+    total: jobs.length
+  });
+});
+
+/**
+ * DELETE /api/jobs/:jobId - Delete a verification job
+ */
+app.delete('/api/jobs/:jobId', (req, res) => {
+  const { jobId } = req.params;
+
+  if (!verificationJobs.has(jobId)) {
+    return res.status(404).json({
+      success: false,
+      error: 'Job not found'
+    });
+  }
+
+  verificationJobs.delete(jobId);
+
+  res.json({
+    success: true,
+    message: 'Job deleted successfully'
+  });
+});
+
+// Helper function for async job processing
+async function processJobAsync(jobId) {
+  const job = verificationJobs.get(jobId);
+  if (!job) return;
+
+  try {
+    job.status = 'processing';
+    job.startedAt = new Date().toISOString();
+
+    const bulkVerifier = new BulkEmailVerifier();
+    const { results, stats } = await bulkVerifier.verifyBulk(job.emails, {
+      outputFile: null,
+      onProgress: (progress) => {
+        job.progress = progress;
+      }
+    });
+
+    job.status = 'completed';
+    job.completedAt = new Date().toISOString();
+    job.results = results;
+    job.stats = stats;
+
+    console.log(`✅ Job ${jobId} completed: ${stats.processed} emails verified`);
+
+  } catch (error) {
+    console.error(`❌ Job ${jobId} failed:`, error);
+    job.status = 'failed';
+    job.completedAt = new Date().toISOString();
+    job.error = error.message;
+  }
+}
+
+// ============================================================================
+// END EMAIL VERIFICATION ENDPOINTS
+// ============================================================================
+
 // 404 handler
 app.use((req, res) => {
   res.status(404).json({
@@ -659,7 +1020,13 @@ app.use((req, res) => {
       'GET /api/health',
       'GET /api/counties',
       'POST /api/scrape',
-      'POST /api/getPriorDeed'
+      'POST /api/getPriorDeed',
+      'POST /api/verify',
+      'POST /api/verify/bulk',
+      'POST /api/verify/upload',
+      'GET /api/verify/bulk/:jobId',
+      'GET /api/jobs',
+      'DELETE /api/jobs/:jobId'
     ]
   });
 });
@@ -677,20 +1044,31 @@ app.use((err, req, res, next) => {
 // Start server
 app.listen(PORT, () => {
   console.log('\n' + '='.repeat(80));
-  console.log('🚀 DEED SCRAPER API SERVER');
+  console.log('🚀 COMBINED API SERVER - Deed Scraper + Email Verifier');
   console.log('='.repeat(80));
   console.log(`📡 Server running on: http://localhost:${PORT}`);
   console.log(`🔧 2Captcha API: ${process.env.TWOCAPTCHA_TOKEN ? '✅ Configured' : '❌ Not configured'}`);
   console.log(`📁 Download path: ${process.env.DEED_DOWNLOAD_PATH || './downloads'}`);
-  console.log('\n📖 Available endpoints:');
+  console.log('\n📖 Deed Scraper Endpoints:');
   console.log(`   GET  http://localhost:${PORT}/api/health`);
   console.log(`   GET  http://localhost:${PORT}/api/counties`);
   console.log(`   POST http://localhost:${PORT}/api/scrape`);
   console.log(`   POST http://localhost:${PORT}/api/getPriorDeed`);
-  console.log('\n💡 Example request:');
+  console.log('\n📧 Email Verification Endpoints:');
+  console.log(`   POST http://localhost:${PORT}/api/verify`);
+  console.log(`   POST http://localhost:${PORT}/api/verify/bulk`);
+  console.log(`   POST http://localhost:${PORT}/api/verify/upload`);
+  console.log(`   GET  http://localhost:${PORT}/api/verify/bulk/:jobId`);
+  console.log(`   GET  http://localhost:${PORT}/api/jobs`);
+  console.log('\n💡 Example requests:');
+  console.log(`   # Deed download:`);
   console.log(`   curl -X POST http://localhost:${PORT}/api/getPriorDeed \\`);
   console.log(`     -H "Content-Type: application/json" \\`);
   console.log(`     -d '{"address": "6431 Swanson St, Windermere, FL 34786"}'`);
+  console.log(`\n   # Email verification:`);
+  console.log(`   curl -X POST http://localhost:${PORT}/api/verify \\`);
+  console.log(`     -H "Content-Type: application/json" \\`);
+  console.log(`     -d '{"email": "test@example.com"}'`);
   console.log('\n' + '='.repeat(80) + '\n');
 });
 
