@@ -241,6 +241,11 @@ class BulkEmailVerifier {
    * Save results to file
    */
   async saveResults(filename) {
+    // Skip saving if no filename provided (API mode)
+    if (!filename) {
+      return;
+    }
+
     const ext = path.extname(filename).toLowerCase();
 
     if (ext === '.json') {
