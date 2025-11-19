@@ -1,9 +1,9 @@
 module.exports = {
   // SMTP Verification Settings
   smtp: {
-    timeout: 10000,              // 10 seconds timeout for SMTP connections
-    fromEmail: 'verify@yourdomain.com',  // Email to use in MAIL FROM command
-    retries: 2,                  // Number of retries for failed verifications
+    timeout: 30000,              // 30 seconds timeout for SMTP connections (increased for cloud environments)
+    fromEmail: 'verify@example.com',  // Email to use in MAIL FROM command
+    retries: 1,                  // Number of retries for failed verifications (reduced to speed up)
   },
 
   // Rate Limiting Settings

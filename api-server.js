@@ -820,7 +820,7 @@ app.post('/api/verify/upload', (req, res, next) => {
     if (!req.file) {
       return res.status(400).json({
         success: false,
-        error: 'No file uploaded. Please upload a CSV, TXT, JSON, or Excel file.'
+        error: 'No file uploaded. Please upload a CSV file.'
       });
     }
 
@@ -829,66 +829,68 @@ app.post('/api/verify/upload', (req, res, next) => {
 
     console.log(`📁 Processing file: ${filename} (${ext})`);
 
-    let emails = [];
-
-    try {
-      if (ext === '.csv') {
-        const { parseCSV } = require('./email-verifier/csv-utils');
-        const os = require('os');
-        const tempFile = path.join(os.tmpdir(), `upload_${Date.now()}.csv`);
-        fs.writeFileSync(tempFile, req.file.buffer);
-        emails = await parseCSV(tempFile);
-        fs.unlinkSync(tempFile);
-      } else if (ext === '.xlsx' || ext === '.xls') {
-        // Parse Excel file
-        const XLSX = require('xlsx');
-        const workbook = XLSX.read(req.file.buffer, { type: 'buffer' });
-
-        // Extract emails from all sheets
-        workbook.SheetNames.forEach(sheetName => {
-          const sheet = workbook.Sheets[sheetName];
-          const data = XLSX.utils.sheet_to_json(sheet, { header: 1 });
-
-          // Flatten all rows and cells, filter for emails
-          data.forEach(row => {
-            if (Array.isArray(row)) {
-              row.forEach(cell => {
-                if (cell && typeof cell === 'string' && cell.includes('@')) {
-                  emails.push(cell.trim());
-                }
-              });
-            }
-          });
-        });
-      } else if (ext === '.json') {
-        const fileContent = req.file.buffer.toString('utf8');
-        const data = JSON.parse(fileContent);
-        if (Array.isArray(data)) {
-          emails = data.filter(item => typeof item === 'string' && item.includes('@'));
-        } else if (data.emails && Array.isArray(data.emails)) {
-          emails = data.emails;
-        }
-      } else {
-        // For .txt or any other text-based format, parse as plain text
-        // This handles .txt, files with no extension, or unknown extensions
-        const fileContent = req.file.buffer.toString('utf8');
-        emails = fileContent
-          .split('\n')
-          .map(line => line.trim())
-          .filter(line => line && line.includes('@'));
-      }
-    } catch (parseError) {
-      console.error('❌ File parsing error:', parseError);
+    // Only accept CSV files
+    if (ext !== '.csv') {
       return res.status(400).json({
         success: false,
-        error: `Failed to parse file: ${parseError.message}. Supported formats: CSV, Excel (.xlsx/.xls), TXT, or JSON.`
+        error: 'Only CSV files are supported. Please upload a .csv file.'
       });
     }
+
+    // Parse CSV file and preserve original structure
+    const fileContent = req.file.buffer.toString('utf8');
+    const rows = fileContent.split('\n').map(line => line.trim()).filter(line => line);
+
+    if (rows.length === 0) {
+      return res.status(400).json({
+        success: false,
+        error: 'CSV file is empty'
+      });
+    }
+
+    // Parse CSV rows (handle quoted values)
+    const parseCSVRow = (row) => {
+      const result = [];
+      let current = '';
+      let inQuotes = false;
+
+      for (let i = 0; i < row.length; i++) {
+        const char = row[i];
+        if (char === '"') {
+          inQuotes = !inQuotes;
+        } else if (char === ',' && !inQuotes) {
+          result.push(current.trim());
+          current = '';
+        } else {
+          current += char;
+        }
+      }
+      result.push(current.trim());
+      return result.map(cell => cell.replace(/^"|"$/g, ''));
+    };
+
+    const originalHeaders = parseCSVRow(rows[0]);
+    const dataRows = rows.slice(1).map(row => parseCSVRow(row));
+
+    // Find email column
+    const emailColIndex = originalHeaders.findIndex(h =>
+      h.toLowerCase().includes('email') || h.toLowerCase().includes('e-mail')
+    );
+
+    if (emailColIndex === -1) {
+      return res.status(400).json({
+        success: false,
+        error: 'No email column found in CSV. Please ensure there is a column named "email" or "e-mail".'
+      });
+    }
+
+    // Extract emails for verification
+    const emails = dataRows.map(row => row[emailColIndex]).filter(email => email && email.includes('@'));
 
     if (emails.length === 0) {
       return res.status(400).json({
         success: false,
-        error: 'No valid email addresses found in file. Supported formats: CSV, Excel (.xlsx/.xls), TXT (one email per line), or JSON array.'
+        error: 'No valid email addresses found in the email column.'
       });
     }
 
@@ -899,31 +901,69 @@ app.post('/api/verify/upload', (req, res, next) => {
       });
     }
 
+    console.log(`🔍 Verifying ${emails.length} emails...`);
+
+    // Verify emails
     const bulkVerifier = new BulkEmailVerifier();
     const { results, stats } = await bulkVerifier.verifyBulk(emails, {
       outputFile: null
     });
 
-    const headers = [
-      'email', 'valid', 'smtp_status', 'disposable', 'role_based',
-      'catch_all', 'free_provider', 'domain', 'mx_records', 'error'
+    console.log(`✅ Verification complete: ${stats.valid} valid, ${stats.invalid} invalid`);
+
+    // Create verification results map
+    const verificationMap = new Map();
+    results.forEach(r => {
+      verificationMap.set(r.email, r);
+    });
+
+    // Add validation columns to original headers
+    const newHeaders = [
+      ...originalHeaders,
+      'valid',
+      'smtp_status',
+      'disposable',
+      'role_based',
+      'catch_all',
+      'free_provider',
+      'verification_error'
     ];
 
-    const rows = results.map(r => [
-      r.email,
-      r.valid ? 'yes' : 'no',
-      r.smtp?.status || 'unknown',
-      r.disposable ? 'yes' : 'no',
-      r.roleBased ? 'yes' : 'no',
-      r.catchAll ? 'yes' : 'no',
-      r.freeProvider ? 'yes' : 'no',
-      r.domain?.name || '',
-      r.mx?.records?.join(';') || '',
-      r.error || ''
-    ]);
+    // Merge original data with validation results
+    const enhancedRows = dataRows.map(originalRow => {
+      const email = originalRow[emailColIndex];
+      const verification = verificationMap.get(email);
 
-    const csv = [headers, ...rows]
-      .map(row => row.map(cell => `"${String(cell).replace(/"/g, '""')}"`).join(','))
+      if (!verification) {
+        // Email not verified (shouldn't happen, but handle it)
+        return [
+          ...originalRow,
+          'no',
+          'not_verified',
+          'no',
+          'no',
+          'no',
+          'no',
+          'Not verified'
+        ];
+      }
+
+      return [
+        ...originalRow,
+        verification.valid ? 'yes' : 'no',
+        verification.smtp?.status || 'unknown',
+        verification.disposable ? 'yes' : 'no',
+        verification.roleBased ? 'yes' : 'no',
+        verification.catchAll ? 'yes' : 'no',
+        verification.freeProvider ? 'yes' : 'no',
+        verification.error || ''
+      ];
+    });
+
+    // Generate CSV output
+    const csvRows = [newHeaders, ...enhancedRows];
+    const csv = csvRows
+      .map(row => row.map(cell => `"${String(cell || '').replace(/"/g, '""')}"`).join(','))
       .join('\n');
 
     res.setHeader('Content-Type', 'text/csv');
@@ -932,6 +972,7 @@ app.post('/api/verify/upload', (req, res, next) => {
 
   } catch (error) {
     console.error('❌ File upload error:', error);
+    console.error('   Stack:', error.stack);
     res.status(500).json({
       success: false,
       error: error.message || 'Internal server error'
