@@ -144,9 +144,17 @@ class BulkEmailVerifier {
 
           // Check if result has an error (API error)
           if (result.error) {
+            // Check for 429 error (quota exceeded)
+            if (result.error.includes('429') || result.error.toLowerCase().includes('too many requests')) {
+              this.quotaExceeded = true;
+              console.log('\n⚠️  API quota exceeded (429 - Too many requests).');
+              console.log('⚠️  Stopping verification to preserve quota...');
+              break;
+            }
+
             this.consecutiveErrors++;
 
-            // Check for quota exceeded (10 consecutive errors)
+            // Also check for 10 consecutive errors as fallback
             if (this.consecutiveErrors >= 10) {
               this.quotaExceeded = true;
               console.log('\n⚠️  Detected 10 consecutive API errors.');
@@ -160,7 +168,6 @@ class BulkEmailVerifier {
         } catch (error) {
           this.stats.processed++;
           this.stats.errors++;
-          this.consecutiveErrors++;
 
           results.push({
             email,
@@ -169,7 +176,17 @@ class BulkEmailVerifier {
             verifiedAt: new Date().toISOString()
           });
 
-          // Check for quota exceeded
+          // Check for 429 error (quota exceeded)
+          if (error.message.includes('429') || error.message.toLowerCase().includes('too many requests')) {
+            this.quotaExceeded = true;
+            console.log('\n⚠️  API quota exceeded (429 - Too many requests).');
+            console.log('⚠️  Stopping verification to preserve quota...');
+            break;
+          }
+
+          this.consecutiveErrors++;
+
+          // Check for quota exceeded (10 consecutive errors as fallback)
           if (this.consecutiveErrors >= 10) {
             this.quotaExceeded = true;
             console.log('\n⚠️  Detected 10 consecutive errors.');
