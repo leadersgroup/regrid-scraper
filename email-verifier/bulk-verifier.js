@@ -111,34 +111,60 @@ class BulkEmailVerifier {
     const results = [];
     const concurrent = this.config.rateLimit.concurrent;
 
-    // Split batch into concurrent chunks
-    for (let i = 0; i < emails.length; i += concurrent) {
-      const chunk = emails.slice(i, i + concurrent);
+    // For UserCheck API (concurrent=1), process sequentially with delays
+    if (concurrent === 1) {
+      for (let i = 0; i < emails.length; i++) {
+        const email = emails[i];
 
-      // Process chunk concurrently
-      const chunkPromises = chunk.map(async (email) => {
         try {
           const result = await this.verifier.verify(email);
           this.stats.processed++;
-          return result;
+          results.push(result);
         } catch (error) {
           this.stats.processed++;
           this.stats.errors++;
-          return {
+          results.push({
             email,
             valid: false,
             error: error.message,
             verifiedAt: new Date().toISOString()
-          };
+          });
         }
-      });
 
-      const chunkResults = await Promise.all(chunkPromises);
-      results.push(...chunkResults);
+        // Delay between each request (except last one)
+        if (i < emails.length - 1) {
+          await this.delay(this.config.rateLimit.delayBetweenRequests);
+        }
+      }
+    } else {
+      // Original concurrent processing for other scenarios
+      for (let i = 0; i < emails.length; i += concurrent) {
+        const chunk = emails.slice(i, i + concurrent);
 
-      // Small delay between chunks within a batch
-      if (i + concurrent < emails.length) {
-        await this.delay(this.config.rateLimit.delayBetweenRequests);
+        const chunkPromises = chunk.map(async (email) => {
+          try {
+            const result = await this.verifier.verify(email);
+            this.stats.processed++;
+            return result;
+          } catch (error) {
+            this.stats.processed++;
+            this.stats.errors++;
+            return {
+              email,
+              valid: false,
+              error: error.message,
+              verifiedAt: new Date().toISOString()
+            };
+          }
+        });
+
+        const chunkResults = await Promise.all(chunkPromises);
+        results.push(...chunkResults);
+
+        // Small delay between chunks within a batch
+        if (i + concurrent < emails.length) {
+          await this.delay(this.config.rateLimit.delayBetweenRequests);
+        }
       }
     }
 
