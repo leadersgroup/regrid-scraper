@@ -21,6 +21,8 @@ class BulkEmailVerifier {
     };
     this.startTime = null;
     this.progressFile = null;
+    this.consecutiveErrors = 0;
+    this.quotaExceeded = false;
   }
 
   /**
@@ -84,23 +86,36 @@ class BulkEmailVerifier {
       // Display progress
       this.displayProgress();
 
+      // Check if quota exceeded
+      if (this.quotaExceeded) {
+        console.log('\n⚠️  Stopping due to API quota exceeded.');
+        console.log(`📊 Processed ${this.stats.processed} of ${this.stats.total} emails before stopping.`);
+        break;
+      }
+
       // Delay between batches (except for last batch)
       if (i < batches.length - 1) {
         await this.delay(this.config.rateLimit.delayBetweenBatches);
       }
     }
 
-    // Save final results
+    // Save final results (partial if quota exceeded)
     await this.saveResults(outputFile);
     await this.saveProgress();
 
-    console.log('\n✅ Verification complete!\n');
+    if (this.quotaExceeded) {
+      console.log('\n⚠️  Verification stopped due to API quota limit.\n');
+      console.log('📄 Partial results have been saved.');
+    } else {
+      console.log('\n✅ Verification complete!\n');
+    }
     this.displayFinalStats();
 
     return {
       results: this.results,
       stats: this.stats,
-      outputFile
+      outputFile,
+      quotaExceeded: this.quotaExceeded
     };
   }
 
@@ -114,25 +129,57 @@ class BulkEmailVerifier {
     // For UserCheck API (concurrent=1), process sequentially with delays
     if (concurrent === 1) {
       for (let i = 0; i < emails.length; i++) {
+        // Check if quota exceeded
+        if (this.quotaExceeded) {
+          console.log('\n⚠️  API quota exceeded. Stopping verification process...');
+          break;
+        }
+
         const email = emails[i];
 
         try {
           const result = await this.verifier.verify(email);
           this.stats.processed++;
           results.push(result);
+
+          // Check if result has an error (API error)
+          if (result.error) {
+            this.consecutiveErrors++;
+
+            // Check for quota exceeded (10 consecutive errors)
+            if (this.consecutiveErrors >= 10) {
+              this.quotaExceeded = true;
+              console.log('\n⚠️  Detected 10 consecutive API errors.');
+              console.log('⚠️  API quota likely exceeded. Stopping verification...');
+              break;
+            }
+          } else {
+            // Reset consecutive errors on success
+            this.consecutiveErrors = 0;
+          }
         } catch (error) {
           this.stats.processed++;
           this.stats.errors++;
+          this.consecutiveErrors++;
+
           results.push({
             email,
             valid: false,
             error: error.message,
             verifiedAt: new Date().toISOString()
           });
+
+          // Check for quota exceeded
+          if (this.consecutiveErrors >= 10) {
+            this.quotaExceeded = true;
+            console.log('\n⚠️  Detected 10 consecutive errors.');
+            console.log('⚠️  API quota likely exceeded. Stopping verification...');
+            break;
+          }
         }
 
         // Delay between each request (except last one)
-        if (i < emails.length - 1) {
+        if (i < emails.length - 1 && !this.quotaExceeded) {
           await this.delay(this.config.rateLimit.delayBetweenRequests);
         }
       }

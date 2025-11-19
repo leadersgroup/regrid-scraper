@@ -910,11 +910,15 @@ app.post('/api/verify/upload', (req, res, next) => {
 
     // Verify emails
     const bulkVerifier = new BulkEmailVerifier();
-    const { results, stats } = await bulkVerifier.verifyBulk(emails, {
+    const { results, stats, quotaExceeded } = await bulkVerifier.verifyBulk(emails, {
       outputFile: null
     });
 
-    console.log(`✅ Verification complete: ${stats.valid} valid, ${stats.invalid} invalid`);
+    if (quotaExceeded) {
+      console.log(`⚠️  API quota exceeded. Processed ${stats.processed} of ${emails.length} emails.`);
+    } else {
+      console.log(`✅ Verification complete: ${stats.valid} valid, ${stats.invalid} invalid`);
+    }
 
     // Create verification results map
     const verificationMap = new Map();
@@ -973,6 +977,14 @@ app.post('/api/verify/upload', (req, res, next) => {
 
     res.setHeader('Content-Type', 'text/csv');
     res.setHeader('Content-Disposition', 'attachment; filename="verified_emails.csv"');
+
+    // Add warning header if quota exceeded
+    if (quotaExceeded) {
+      res.setHeader('X-Quota-Exceeded', 'true');
+      res.setHeader('X-Processed-Count', stats.processed.toString());
+      res.setHeader('X-Total-Count', emails.length.toString());
+    }
+
     res.send(csv);
 
   } catch (error) {
