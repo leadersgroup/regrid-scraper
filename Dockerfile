@@ -60,13 +60,21 @@ RUN groupadd -r railway && useradd -r -g railway -s /bin/bash -m railway
 
 WORKDIR /app
 
-# Copy package.json first
+# Copy root package.json first
 COPY package.json ./
 
-# Install dependencies
+# Install root dependencies
 RUN npm install --production
 
-# Copy application files
+# Copy email-verifier package.json
+COPY email-verifier/package.json ./email-verifier/
+
+# Install email-verifier dependencies
+WORKDIR /app/email-verifier
+RUN npm install --production
+
+# Copy all application files
+WORKDIR /app
 COPY . .
 
 # Change ownership to non-root user and create necessary directories
@@ -82,4 +90,5 @@ USER railway
 EXPOSE 3000
 
 # Use exec form and add signal handling
+WORKDIR /app/email-verifier
 CMD ["node", "api-server.js"]
