@@ -43,6 +43,7 @@ class EmailVerifier {
 
       // Map UserCheck response to our format
       return {
+        email: email,  // Include email address in result
         valid: data.mx && !data.disposable && !data.spam,
         syntax: {
           valid: true,  // If API accepts it, syntax is valid
@@ -95,6 +96,7 @@ class EmailVerifier {
           : (error.response.data?.message || error.response.data?.error || error.message);
 
         return {
+          email: email,
           valid: false,
           syntax: { valid: false, message: 'API validation failed' },
           domain: { valid: false },
@@ -111,6 +113,7 @@ class EmailVerifier {
       } else {
         // Network or timeout error
         return {
+          email: email,
           valid: false,
           syntax: { valid: false, message: 'API request failed' },
           domain: { valid: false },
