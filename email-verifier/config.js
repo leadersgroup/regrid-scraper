@@ -1,7 +1,7 @@
 module.exports = {
   // UserCheck API Settings
   usercheck: {
-    apiKey: process.env.USERCHECKCOM_API,
+    apiKey: process.env.USERCHECKCOM_API || 'prd_ednh9lAi6gi7HGfPxFeWBlzCLROR',
     apiUrl: 'https://api.usercheck.com',
     timeout: 10000,              // 10 seconds timeout for API calls
   },
