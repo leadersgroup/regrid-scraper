@@ -43,7 +43,7 @@ class EmailVerifier {
 
       // Map UserCheck response to our format
       return {
-        valid: data.mx && !data.disposable && !data.blocklisted,
+        valid: data.mx && !data.disposable && !data.spam,
         syntax: {
           valid: true,  // If API accepts it, syntax is valid
           message: 'Valid syntax'
@@ -55,7 +55,7 @@ class EmailVerifier {
         },
         mx: {
           valid: data.mx || false,
-          records: [],
+          records: data.mx_records || [],
           message: data.mx ? 'MX records found' : 'No MX records'
         },
         smtp: {
@@ -67,10 +67,10 @@ class EmailVerifier {
         roleBased: data.role_account || false,
         catchAll: false,  // UserCheck doesn't provide this in basic response
         freeProvider: data.public_domain || false,
-        blocklisted: data.blocklisted || false,
         spam: data.spam || false,
         didYouMean: data.did_you_mean || null,
         normalizedEmail: data.normalized_email || email,
+        domainAge: data.domain_age_in_days || null,
         error: null,
         verifiedAt: new Date().toISOString(),
         apiProvider: 'usercheck'
