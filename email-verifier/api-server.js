@@ -365,7 +365,25 @@ app.post('/api/verify/bulk', async (req, res) => {
 /**
  * POST /api/verify/upload - Upload and verify emails from file
  */
-app.post('/api/verify/upload', upload.single('file'), async (req, res) => {
+app.post('/api/verify/upload', (req, res, next) => {
+  // Custom multer error handler
+  upload.single('file')(req, res, (err) => {
+    if (err instanceof multer.MulterError) {
+      console.error('❌ Multer error:', err.code, err.message);
+      return res.status(400).json({
+        success: false,
+        error: `File upload error: ${err.message}`
+      });
+    } else if (err) {
+      console.error('❌ Upload error:', err.message);
+      return res.status(400).json({
+        success: false,
+        error: err.message
+      });
+    }
+    next();
+  });
+}, async (req, res) => {
   try {
     console.log('📤 Upload request received');
     console.log('   Headers:', JSON.stringify(req.headers));
