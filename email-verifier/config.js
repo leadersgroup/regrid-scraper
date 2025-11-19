@@ -25,10 +25,10 @@ module.exports = {
     checkSyntax: true,
     checkDomain: true,
     checkMX: true,
-    checkSMTP: true,
+    checkSMTP: false,            // Disabled for Railway (port 25 blocked)
     checkDisposable: true,
     checkRoleBased: true,
-    checkCatchAll: true,
+    checkCatchAll: false,        // Requires SMTP, so disabled
     checkFreeProvider: true,
   },
 

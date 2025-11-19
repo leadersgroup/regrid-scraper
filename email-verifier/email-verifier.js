@@ -79,13 +79,28 @@ class EmailVerifier {
         if (this.config.validation.checkCatchAll && result.smtp.valid) {
           result.catchAll = await this.isCatchAll(domain, result.mx.records[0]);
         }
+      } else if (!this.config.validation.checkSMTP) {
+        // SMTP check disabled - set status to skipped
+        result.smtp = {
+          valid: true,
+          status: 'skipped',
+          message: 'SMTP verification disabled (Railway port 25 blocked)'
+        };
       }
 
       // Determine overall validity
-      result.valid = result.syntax.valid &&
-                     result.domain.valid &&
-                     result.mx.valid &&
-                     (result.smtp.valid || result.smtp.status === 'accept_all');
+      if (this.config.validation.checkSMTP) {
+        // With SMTP enabled, require SMTP validation to pass
+        result.valid = result.syntax.valid &&
+                       result.domain.valid &&
+                       result.mx.valid &&
+                       (result.smtp.valid || result.smtp.status === 'accept_all');
+      } else {
+        // Without SMTP, valid if syntax, domain, and MX are all valid
+        result.valid = result.syntax.valid &&
+                       result.domain.valid &&
+                       result.mx.valid;
+      }
 
       return result;
 
