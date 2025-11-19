@@ -29,8 +29,8 @@ const corsOptions = {
   },
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With'],
-  exposedHeaders: ['Content-Length', 'X-JSON'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Accept'],
+  exposedHeaders: ['Content-Length', 'X-JSON', 'Content-Disposition', 'Content-Type'],
   maxAge: 86400 // 24 hours
 };
 
@@ -367,7 +367,13 @@ app.post('/api/verify/bulk', async (req, res) => {
  */
 app.post('/api/verify/upload', upload.single('file'), async (req, res) => {
   try {
+    console.log('📤 Upload request received');
+    console.log('   Headers:', JSON.stringify(req.headers));
+    console.log('   File:', req.file ? req.file.originalname : 'NO FILE');
+    console.log('   Body keys:', Object.keys(req.body));
+
     if (!req.file) {
+      console.log('❌ No file in request');
       return res.status(400).json({
         success: false,
         error: 'No file uploaded. Please upload a CSV, TXT, or JSON file.'
@@ -456,7 +462,20 @@ app.post('/api/verify/upload', upload.single('file'), async (req, res) => {
     res.send(csv);
 
   } catch (error) {
-    console.error('File upload error:', error);
+    console.error('❌ File upload error:', error);
+    console.error('   Error stack:', error.stack);
+
+    // Check if it's a multer error
+    if (error instanceof multer.MulterError) {
+      console.error('   Multer error code:', error.code);
+      if (error.code === 'LIMIT_FILE_SIZE') {
+        return res.status(400).json({
+          success: false,
+          error: 'File too large. Maximum size is 10MB.'
+        });
+      }
+    }
+
     res.status(500).json({
       success: false,
       error: error.message || 'Internal server error'
