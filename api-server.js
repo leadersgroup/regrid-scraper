@@ -76,13 +76,9 @@ const upload = multer({
     fileSize: 10 * 1024 * 1024, // 10MB max file size
   },
   fileFilter: (req, file, cb) => {
-    const allowedTypes = ['.csv', '.txt', '.json'];
-    const ext = file.originalname.toLowerCase().substring(file.originalname.lastIndexOf('.'));
-    if (allowedTypes.includes(ext)) {
-      cb(null, true);
-    } else {
-      cb(new Error('Only CSV, TXT, and JSON files are allowed'));
-    }
+    // Accept all files - we'll validate content during processing
+    // This handles edge cases like uppercase extensions, no extensions, etc.
+    cb(null, true);
   }
 });
 
@@ -832,33 +828,45 @@ app.post('/api/verify/upload', (req, res, next) => {
     const filename = req.file.originalname;
     const ext = filename.toLowerCase().substring(filename.lastIndexOf('.'));
 
+    console.log(`📁 Processing file: ${filename} (${ext})`);
+
     let emails = [];
 
-    if (ext === '.csv') {
-      const { parseCSV } = require('./email-verifier/csv-utils');
-      const os = require('os');
-      const tempFile = path.join(os.tmpdir(), `upload_${Date.now()}.csv`);
-      fs.writeFileSync(tempFile, req.file.buffer);
-      emails = await parseCSV(tempFile);
-      fs.unlinkSync(tempFile);
-    } else if (ext === '.txt') {
-      emails = fileContent
-        .split('\n')
-        .map(line => line.trim())
-        .filter(line => line && line.includes('@'));
-    } else if (ext === '.json') {
-      const data = JSON.parse(fileContent);
-      if (Array.isArray(data)) {
-        emails = data.filter(item => typeof item === 'string' && item.includes('@'));
-      } else if (data.emails && Array.isArray(data.emails)) {
-        emails = data.emails;
+    try {
+      if (ext === '.csv') {
+        const { parseCSV } = require('./email-verifier/csv-utils');
+        const os = require('os');
+        const tempFile = path.join(os.tmpdir(), `upload_${Date.now()}.csv`);
+        fs.writeFileSync(tempFile, req.file.buffer);
+        emails = await parseCSV(tempFile);
+        fs.unlinkSync(tempFile);
+      } else if (ext === '.json') {
+        const data = JSON.parse(fileContent);
+        if (Array.isArray(data)) {
+          emails = data.filter(item => typeof item === 'string' && item.includes('@'));
+        } else if (data.emails && Array.isArray(data.emails)) {
+          emails = data.emails;
+        }
+      } else {
+        // For .txt or any other text-based format, parse as plain text
+        // This handles .txt, files with no extension, or unknown extensions
+        emails = fileContent
+          .split('\n')
+          .map(line => line.trim())
+          .filter(line => line && line.includes('@'));
       }
+    } catch (parseError) {
+      console.error('❌ File parsing error:', parseError);
+      return res.status(400).json({
+        success: false,
+        error: `Failed to parse file: ${parseError.message}. Please ensure it's a valid CSV, TXT, or JSON file.`
+      });
     }
 
     if (emails.length === 0) {
       return res.status(400).json({
         success: false,
-        error: 'No valid email addresses found in file'
+        error: 'No valid email addresses found in file. Supported formats: CSV, TXT (one email per line), or JSON array.'
       });
     }
 
