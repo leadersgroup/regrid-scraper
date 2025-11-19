@@ -820,11 +820,10 @@ app.post('/api/verify/upload', (req, res, next) => {
     if (!req.file) {
       return res.status(400).json({
         success: false,
-        error: 'No file uploaded. Please upload a CSV, TXT, or JSON file.'
+        error: 'No file uploaded. Please upload a CSV, TXT, JSON, or Excel file.'
       });
     }
 
-    const fileContent = req.file.buffer.toString('utf8');
     const filename = req.file.originalname;
     const ext = filename.toLowerCase().substring(filename.lastIndexOf('.'));
 
@@ -840,7 +839,29 @@ app.post('/api/verify/upload', (req, res, next) => {
         fs.writeFileSync(tempFile, req.file.buffer);
         emails = await parseCSV(tempFile);
         fs.unlinkSync(tempFile);
+      } else if (ext === '.xlsx' || ext === '.xls') {
+        // Parse Excel file
+        const XLSX = require('xlsx');
+        const workbook = XLSX.read(req.file.buffer, { type: 'buffer' });
+
+        // Extract emails from all sheets
+        workbook.SheetNames.forEach(sheetName => {
+          const sheet = workbook.Sheets[sheetName];
+          const data = XLSX.utils.sheet_to_json(sheet, { header: 1 });
+
+          // Flatten all rows and cells, filter for emails
+          data.forEach(row => {
+            if (Array.isArray(row)) {
+              row.forEach(cell => {
+                if (cell && typeof cell === 'string' && cell.includes('@')) {
+                  emails.push(cell.trim());
+                }
+              });
+            }
+          });
+        });
       } else if (ext === '.json') {
+        const fileContent = req.file.buffer.toString('utf8');
         const data = JSON.parse(fileContent);
         if (Array.isArray(data)) {
           emails = data.filter(item => typeof item === 'string' && item.includes('@'));
@@ -850,6 +871,7 @@ app.post('/api/verify/upload', (req, res, next) => {
       } else {
         // For .txt or any other text-based format, parse as plain text
         // This handles .txt, files with no extension, or unknown extensions
+        const fileContent = req.file.buffer.toString('utf8');
         emails = fileContent
           .split('\n')
           .map(line => line.trim())
@@ -859,14 +881,14 @@ app.post('/api/verify/upload', (req, res, next) => {
       console.error('❌ File parsing error:', parseError);
       return res.status(400).json({
         success: false,
-        error: `Failed to parse file: ${parseError.message}. Please ensure it's a valid CSV, TXT, or JSON file.`
+        error: `Failed to parse file: ${parseError.message}. Supported formats: CSV, Excel (.xlsx/.xls), TXT, or JSON.`
       });
     }
 
     if (emails.length === 0) {
       return res.status(400).json({
         success: false,
-        error: 'No valid email addresses found in file. Supported formats: CSV, TXT (one email per line), or JSON array.'
+        error: 'No valid email addresses found in file. Supported formats: CSV, Excel (.xlsx/.xls), TXT (one email per line), or JSON array.'
       });
     }
 
