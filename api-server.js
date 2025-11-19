@@ -870,7 +870,12 @@ app.post('/api/verify/upload', (req, res, next) => {
     };
 
     const originalHeaders = parseCSVRow(rows[0]);
-    const dataRows = rows.slice(1).map(row => parseCSVRow(row));
+    const dataRows = rows.slice(1)
+      .map(row => parseCSVRow(row))
+      .filter(row => {
+        // Skip empty rows (rows with no data or all empty cells)
+        return row.some(cell => cell && cell.trim().length > 0);
+      });
 
     // Find email column
     const emailColIndex = originalHeaders.findIndex(h =>
