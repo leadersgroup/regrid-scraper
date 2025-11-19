@@ -1,5 +1,6 @@
 const dns = require('dns').promises;
 const net = require('net');
+const axios = require('axios');
 const config = require('./config');
 
 class EmailVerifier {
@@ -8,9 +9,135 @@ class EmailVerifier {
   }
 
   /**
+   * Validate email using UserCheck API
+   */
+  async validateWithUserCheck(email) {
+    try {
+      const url = `${this.config.usercheck.apiUrl}/email/${encodeURIComponent(email)}`;
+
+      // Log request for debugging
+      if (process.env.DEBUG_USERCHECK) {
+        console.log('UserCheck API request:', {
+          url,
+          email,
+          encoded: encodeURIComponent(email)
+        });
+      }
+
+      const response = await axios.get(url, {
+        headers: {
+          'Authorization': `Bearer ${this.config.usercheck.apiKey}`
+        },
+        timeout: this.config.usercheck.timeout,
+        validateStatus: function (status) {
+          return status >= 200 && status < 300; // Only accept 2xx responses
+        }
+      });
+
+      const data = response.data;
+
+      // Log API response for debugging
+      if (process.env.DEBUG_USERCHECK) {
+        console.log('UserCheck API response:', JSON.stringify(data, null, 2));
+      }
+
+      // Map UserCheck response to our format
+      return {
+        valid: data.mx && !data.disposable && !data.blocklisted,
+        syntax: {
+          valid: true,  // If API accepts it, syntax is valid
+          message: 'Valid syntax'
+        },
+        domain: {
+          valid: true,
+          name: data.domain,
+          message: 'Domain exists'
+        },
+        mx: {
+          valid: data.mx || false,
+          records: [],
+          message: data.mx ? 'MX records found' : 'No MX records'
+        },
+        smtp: {
+          valid: data.mx || false,
+          status: data.mx ? 'valid' : 'no_mx',
+          message: 'Verified via UserCheck API'
+        },
+        disposable: data.disposable || false,
+        roleBased: data.role_account || false,
+        catchAll: false,  // UserCheck doesn't provide this in basic response
+        freeProvider: data.public_domain || false,
+        blocklisted: data.blocklisted || false,
+        spam: data.spam || false,
+        didYouMean: data.did_you_mean || null,
+        normalizedEmail: data.normalized_email || email,
+        error: null,
+        verifiedAt: new Date().toISOString(),
+        apiProvider: 'usercheck'
+      };
+    } catch (error) {
+      // If API call fails, return error result
+      // Log full error for debugging
+      if (process.env.DEBUG_USERCHECK) {
+        console.error('UserCheck API error:', {
+          message: error.message,
+          status: error.response?.status,
+          statusText: error.response?.statusText,
+          data: error.response?.data,
+          headers: error.response?.headers
+        });
+      }
+
+      if (error.response) {
+        // API responded with error
+        const errorMsg = typeof error.response.data === 'string'
+          ? error.response.data
+          : (error.response.data?.message || error.response.data?.error || error.message);
+
+        return {
+          valid: false,
+          syntax: { valid: false, message: 'API validation failed' },
+          domain: { valid: false },
+          mx: { valid: false, records: [] },
+          smtp: { valid: false, status: 'api_error' },
+          disposable: false,
+          roleBased: false,
+          catchAll: false,
+          freeProvider: false,
+          error: `UserCheck API error: ${error.response.status} - ${errorMsg}`,
+          verifiedAt: new Date().toISOString(),
+          apiProvider: 'usercheck'
+        };
+      } else {
+        // Network or timeout error
+        return {
+          valid: false,
+          syntax: { valid: false, message: 'API request failed' },
+          domain: { valid: false },
+          mx: { valid: false, records: [] },
+          smtp: { valid: false, status: 'api_timeout' },
+          disposable: false,
+          roleBased: false,
+          catchAll: false,
+          freeProvider: false,
+          error: `UserCheck API error: ${error.message}`,
+          verifiedAt: new Date().toISOString(),
+          apiProvider: 'usercheck'
+        };
+      }
+    }
+  }
+
+  /**
    * Main verification function
    */
   async verify(email) {
+    // Use UserCheck API if enabled
+    if (this.config.validation.useUserCheckAPI) {
+      return await this.validateWithUserCheck(email);
+    }
+
+    // Otherwise use local validation
     const result = {
       email: email,
       valid: false,

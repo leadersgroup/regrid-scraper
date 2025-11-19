@@ -1,4 +1,11 @@
 module.exports = {
+  // UserCheck API Settings
+  usercheck: {
+    apiKey: process.env.USERCHECK_API_KEY || 'prd_ednh9lAi6gi7HGfPxFeWBlzCLROR',
+    apiUrl: 'https://api.usercheck.com',
+    timeout: 10000,              // 10 seconds timeout for API calls
+  },
+
   // SMTP Verification Settings
   smtp: {
     timeout: 30000,              // 30 seconds timeout for SMTP connections (increased for cloud environments)
@@ -8,9 +15,9 @@ module.exports = {
 
   // Rate Limiting Settings
   rateLimit: {
-    concurrent: 10,              // Max concurrent verifications
+    concurrent: 1,               // Max concurrent verifications (UserCheck API has strict rate limits)
     delayBetweenBatches: 1000,   // 1 second delay between batches
-    delayBetweenRequests: 100,   // 100ms delay between individual requests
+    delayBetweenRequests: 1100,  // 1.1 second delay between requests (UserCheck API: 1 req/sec)
   },
 
   // Bulk Processing Settings
@@ -22,10 +29,11 @@ module.exports = {
 
   // Validation Settings
   validation: {
+    useUserCheckAPI: true,       // Use UserCheck API for validation (recommended)
     checkSyntax: true,
     checkDomain: true,
     checkMX: true,
-    checkSMTP: false,            // Disabled for Railway (port 25 blocked)
+    checkSMTP: false,            // Disabled - ISP blocks port 25
     checkDisposable: true,
     checkRoleBased: true,
     checkCatchAll: false,        // Requires SMTP, so disabled
