@@ -113,44 +113,65 @@ class RegridScraper {
         try {
             console.log(`Searching for property: ${address}`);
 
-            // Extract just the street address (number + name) to avoid rate limiting
-            // Regrid blocks overly specific queries with full city/state/zip
-            const streetMatch = address.match(/^(\d+\s+[^,]+)/);
-            const searchAddress = streetMatch ? streetMatch[1] : address;
-            console.log(`Using search query: ${searchAddress}`);
+            // Generate multiple search query combinations
+            // Regrid often fails with direction suffixes (NE, NW, SE, SW, N, S, E, W)
+            const searchQueries = this.generateSearchQueries(address);
+            console.log(`Will try ${searchQueries.length} search combinations`);
 
-            const encodedAddress = encodeURIComponent(searchAddress);
-            const searchUrl = `https://app.regrid.com/search.json?query=${encodedAddress}&autocomplete=1&context=false&strict=false`;
+            // Try each query until we get results
+            for (const searchQuery of searchQueries) {
+                console.log(`  Trying: "${searchQuery}"`);
 
-            // Use page.evaluate with fetch() to make the request from the browser context
-            // This keeps us on the main page and maintains the session
-            const searchResults = await this.page.evaluate(async (url, token) => {
-                const headers = {
-                    'Accept': 'application/json',
-                    'X-Requested-With': 'XMLHttpRequest'
-                };
+                const encodedAddress = encodeURIComponent(searchQuery);
+                const searchUrl = `https://app.regrid.com/search.json?query=${encodedAddress}&autocomplete=1&context=false&strict=false`;
 
-                if (token) {
-                    headers['X-CSRF-Token'] = token;
+                try {
+                    const searchResults = await this.page.evaluate(async (url, token) => {
+                        const headers = {
+                            'Accept': 'application/json',
+                            'X-Requested-With': 'XMLHttpRequest'
+                        };
+
+                        if (token) {
+                            headers['X-CSRF-Token'] = token;
+                        }
+
+                        const response = await fetch(url, {
+                            method: 'GET',
+                            headers: headers,
+                            credentials: 'include'
+                        });
+
+                        if (!response.ok) {
+                            const text = await response.text();
+                            throw new Error(`HTTP ${response.status}: ${text.substring(0, 200)}`);
+                        }
+
+                        return await response.json();
+                    }, searchUrl, this.csrfToken);
+
+                    // Check if we got valid results
+                    if (Array.isArray(searchResults) && searchResults.length > 0) {
+                        console.log(`✓ Found ${searchResults.length} results with query: "${searchQuery}"`);
+                        return this.parseSearchResults(searchResults, address);
+                    }
+
+                    // Small delay between retries
+                    await new Promise(resolve => setTimeout(resolve, 500));
+
+                } catch (queryError) {
+                    console.log(`  Query failed: ${queryError.message}`);
+                    // Continue to next query
+                    await new Promise(resolve => setTimeout(resolve, 1000));
                 }
+            }
 
-                const response = await fetch(url, {
-                    method: 'GET',
-                    headers: headers,
-                    credentials: 'include'
-                });
-
-                if (!response.ok) {
-                    const text = await response.text();
-                    throw new Error(`HTTP ${response.status}: ${text.substring(0, 200)}`);
-                }
-
-                return await response.json();
-            }, searchUrl, this.csrfToken);
-
-            console.log('✓ Search results received');
-
-            return this.parseSearchResults(searchResults, address);
+            // All queries failed
+            console.log('✗ No results found with any query combination');
+            return {
+                originalAddress: address,
+                error: 'No results found'
+            };
 
         } catch (error) {
             console.error('Error searching property:', error);
@@ -159,6 +180,71 @@ class RegridScraper {
                 error: error.message
             };
         }
+    }
+
+    generateSearchQueries(address) {
+        const queries = [];
+
+        // Parse address components
+        // Format: "3131 Lanier Dr NE, Atlanta, GA 30319, USA"
+        const parts = address.split(',').map(p => p.trim());
+        const streetPart = parts[0] || '';
+        const cityPart = parts[1] || '';
+        const stateZipPart = parts[2] || '';
+
+        // Extract state from "GA 30319"
+        const stateMatch = stateZipPart.match(/^([A-Z]{2})/);
+        const state = stateMatch ? stateMatch[1] : '';
+
+        // Parse street address: "3131 Lanier Dr NE"
+        // Extract: street number, street name, optional direction
+        const streetMatch = streetPart.match(/^(\d+)\s+(.+?)(?:\s+(N|S|E|W|NE|NW|SE|SW|North|South|East|West|Northeast|Northwest|Southeast|Southwest))?$/i);
+
+        if (streetMatch) {
+            const streetNumber = streetMatch[1];
+            const streetName = streetMatch[2];
+            const direction = streetMatch[3] || '';
+
+            // Priority 1: Street number + street name WITHOUT direction (highest success rate)
+            queries.push(`${streetNumber} ${streetName}`);
+
+            // Priority 2: Street number + street name + city (without direction)
+            if (cityPart) {
+                queries.push(`${streetNumber} ${streetName} ${cityPart}`);
+            }
+
+            // Priority 3: Street number + street name + city + state (without direction)
+            if (cityPart && state) {
+                queries.push(`${streetNumber} ${streetName} ${cityPart} ${state}`);
+            }
+
+            // Priority 4: Include direction (as fallback)
+            if (direction) {
+                queries.push(`${streetNumber} ${streetName} ${direction}`);
+
+                if (cityPart) {
+                    queries.push(`${streetNumber} ${streetName} ${direction} ${cityPart}`);
+                }
+
+                if (cityPart && state) {
+                    queries.push(`${streetNumber} ${streetName} ${direction} ${cityPart} ${state}`);
+                }
+            }
+        } else {
+            // Fallback: just use the original street part
+            queries.push(streetPart);
+
+            if (cityPart) {
+                queries.push(`${streetPart} ${cityPart}`);
+            }
+
+            if (cityPart && state) {
+                queries.push(`${streetPart} ${cityPart} ${state}`);
+            }
+        }
+
+        // Remove duplicates
+        return [...new Set(queries)];
     }
 
     parseSearchResults(results, originalAddress) {
